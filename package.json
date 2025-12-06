@@ -1,0 +1,32 @@
+{
+  "name": "vinagent-backend",
+  "version": "0.1.0",
+  "main": "index.js",
+  "scripts": {
+  "dev": "nodemon src/server.js",
+  "start": "node src/server.js",
+  "test": "jest",
+  "test:unit": "jest --runInBand tests/unit",
+  "test:int": "jest --runInBand tests/integration"
+},
+
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "firebase-admin": "^13.6.0",
+    "joi": "^17.13.3",
+    "mysql2": "^3.15.3",
+    "sequelize": "^6.37.7",
+    "winston": "^3.18.3"
+  },
+  "devDependencies": {
+    "jest": "^30.2.0",
+    "nodemon": "^3.1.11",
+    "supertest": "^7.1.4"
+  }
+}
+
