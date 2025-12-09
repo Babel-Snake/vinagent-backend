@@ -46,8 +46,59 @@ This document maps the implementation of components defined in `COMPONENTS.md` i
 
 ---
 
-## Future Phases (Post-MVP)
+## Phase 5: Operations & Tiers (The "Business Logic" Upgrade)
+**Goal:** Enable product tiering, unified task classification, and manual operations.
 
-*   **Phase 5: Expanded Channels** (Email 3.2, Voice 3.3)
-*   **Phase 6: AI Intelligence** (AI Triage 5.2, Drafting)
-*   **Phase 7: Outbound Messaging** (Confirmation messages 7.2)
+*   [x] **5.1 Winery Settings & Feature Flags**
+    *   *Create `WinerySettings` model (enableWineClub, enableSecureLinks, tier).*
+*   [ ] **5.2 Unified Task Classification**
+    *   *Refactor Task Data Model: Add `category`, `subType`, `customerType`.*
+    *   *Migration: generic `type` -> `category/subType`.*
+*   [ ] **5.3 Manual Task Operations**
+    *   *Update `POST /tasks` for new fields.*
+    *   *Update `PATCH /tasks/:id` for editing payload/notes.*
+    *   *Add actions: `MANUAL_CREATED`, `MANUAL_UPDATE`, `STATUS_CHANGED`.*
+*   [ ] **5.4 Tier-Aware Triage & Execution**
+    *   *Update Triage to derive Category/SubType.*
+    *   *Downgrade Advanced SubTypes to General for Basic Tier.*
+    *   *Update Execution to handle new SubTypes.*
+
+## Phase 6: AI-Powered Intelligence (The "Brain" Upgrade)
+**Goal:** Replace rule-based logic with LLM-based intent detection, designed to be **Model Agnostic**.
+
+*   [ ] **6.1 AI Service Adapter**
+    *   *Create abstract `AIService` interface.*
+    *   *Implement OpenAI Adapter (swappable for Claude/Local/DeepSeek).*
+*   [ ] **6.2 LLM Triage Engine**
+    *   *Replace keyword matching with LLM structured output.*
+*   [ ] **6.3 RAG Knowledge Base**
+    *   *Ingest PDF/Doc files for answering "General Inquiries".*
+
+## Phase 7: Member Dashboard & Frontend (The "Face")
+**Goal:** Give Winery Managers a UI to view and act on tasks.
+
+*   [ ] **7.1 Next.js Application Setup**
+    *   *Setup Shadcn/UI (deferred from initial setup).*
+*   [ ] **7.2 Authentication UI**
+    *   *Firebase Login/Logout pages.*
+*   [ ] **7.3 Task Review Interface**
+    *   *Update Task List/Detail to support Manual Editing fields.*
+
+## Phase 8: Production Hardening (The "Shield")
+**Goal:** Prepare for real-world deployment.
+
+*   [ ] **8.1 Real Authentication**
+    *   *Replace hardcoded `authMiddleware`.*
+*   [ ] **8.2 Security & Rate Limiting**
+    *   *Implement Helmet, CORS strictness.*
+*   [ ] **8.3 Deployment Pipeline**
+    *   *Containerize application (Podman).*
+    *   *CI/CD workflows.*
+
+## Phase 9: Expanded Reach
+**Goal:** Support Email and Voice channels.
+
+*   [ ] **9.1 Postmark/SendGrid Inbound**
+*   [ ] **9.2 Voice AI (Retell)**
+
+

@@ -201,130 +201,75 @@ Authorization: Bearer <firebase-id-token>
 
 ---
 
-### 4.2 GET /tasks/:id
+### 4.2 POST /tasks
+Manually create a task (e.g. by internal staff).
 
+**URL**
+```http
+POST /tasks
+```
+
+**Body**
+```json
+{
+  "category": "ACCOUNT",
+  "subType": "ACCOUNT_ADDRESS_CHANGE",
+  "customerType": "MEMBER",
+  "priority": "normal",
+  "payload": { "note": "Member called to update address" },
+  "memberId": 42
+}
+```
+
+**Response (201)**
+Returns the created task.
+
+---
+
+### 4.3 GET /tasks/:id
 Fetch one task by ID.
 
 **URL**
-
 ```http
 GET /tasks/:id
 ```
 
-**Headers**
-
-```http
-Authorization: Bearer <firebase-id-token>
-```
-
 **Response (200)**
-
 ```json
 {
   "id": 5001,
-  "type": "ADDRESS_CHANGE",
+  "category": "ACCOUNT",
+  "subType": "ACCOUNT_ADDRESS_CHANGE",
+  "customerType": "MEMBER",
   "status": "PENDING_REVIEW",
-  "member": {
-    "id": 42,
-    "firstName": "Emma",
-    "lastName": "Clarke",
-    "phone": "+61412345678"
-  },
-  "message": {
-    "id": 1001,
-    "body": "Hi, I've moved. Please update my address..."
-  },
-  "payload": {
-    "newAddress": {
-      "addressLine1": "12 Oak Street",
-      "suburb": "Stirling",
-      "state": "SA",
-      "postcode": "5152",
-      "country": "Australia"
-    }
-  },
-  "suggestedChannel": "sms",
-  "suggestedReplyBody": "Hi Emma, thanks for your message. We'll send you a secure link...",
-  "requiresApproval": true,
-  "createdAt": "2025-02-03T09:15:02+10:30",
-  "updatedAt": "2025-02-03T09:15:02+10:30"
-}
-```
-
-**Response (404)**
-
-```json
-{
-  "error": {
-    "code": "TASK_NOT_FOUND",
-    "message": "Task not found"
-  }
+  "member": { "id": 42, "firstName": "Emma" },
+  "payload": { "newAddress": { "addressLine1": "..." } },
+  "createdAt": "2025-02-03T09:15:02+10:30"
 }
 ```
 
 ---
 
-### 4.3 PATCH /tasks/:id
-
-Approve or reject a task, optionally editing payload or reply.
-
-This is where a manager moves a task from `PENDING_REVIEW` → `APPROVED`.
+### 4.4 PATCH /tasks/:id
+Update status, payload, priority, or re-classify.
 
 **URL**
-
 ```http
 PATCH /tasks/:id
 ```
 
-**Headers**
-
-```http
-Authorization: Bearer <firebase-id-token>
-Content-Type: application/json
-```
-
-**Request Body (approve, MVP)**
-
+**Body (example)**
 ```json
 {
   "status": "APPROVED",
-  "payload": {
-    "newAddress": {
-      "addressLine1": "12 Oak Street",
-      "suburb": "Stirling",
-      "state": "SA",
-      "postcode": "5152",
-      "country": "Australia"
-    }
-  },
-  "suggestedChannel": "sms",
-  "suggestedReplyBody": "Hi Emma, thanks for your message. We'll send you a secure link to confirm your new address."
+  "priority": "high",
+  "notes": "Spoke to member, confirmed details.",
+  "payload": { ... }
 }
 ```
-
-**Allowed status transitions (MVP)**
-
-* `PENDING_REVIEW` → `APPROVED`
-* `PENDING_REVIEW` → `REJECTED`
-
-Any invalid transition should return `400` with a code like `INVALID_TASK_STATUS_TRANSITION`.
 
 **Response (200)**
-
-Returns the updated task:
-
-```json
-{
-  "id": 5001,
-  "status": "APPROVED",
-  "payload": { "newAddress": { /* ... */ } },
-  "suggestedChannel": "sms",
-  "suggestedReplyBody": "Hi Emma, thanks for your message. We'll send you a secure link to confirm your new address.",
-  "updatedAt": "2025-02-03T09:30:00+10:30"
-}
-```
-
----
+Returns updated task.
 
 ## 5. Execution (Internal)
 

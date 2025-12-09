@@ -18,7 +18,9 @@ module.exports = (sequelize, DataTypes) => {
                     'EXECUTION_TRIGGERED',
                     'EXECUTED',
                     'UPDATED_PAYLOAD',
-                    'NOTE_ADDED'
+                    'NOTE_ADDED',
+                    'MANUAL_CREATED',
+                    'MANUAL_UPDATE'
                 ),
                 allowNull: false
             },

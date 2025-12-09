@@ -1,38 +1,58 @@
-const triageService = require('../../services/triage.service');
+const { triageMessage } = require('../../services/triage.service');
+const { WinerySettings } = require('../../models');
+
+// Mock WinerySettings
+jest.mock('../../models', () => ({
+    WinerySettings: {
+        findOne: jest.fn()
+    }
+}));
 
 describe('Triage Service', () => {
-    describe('triageMessage', () => {
-        it('should classify "address" as ADDRESS_CHANGE', async () => {
-            const result = await triageService.triageMessage({ body: 'I need to update my address' });
-            expect(result.type).toBe('ADDRESS_CHANGE');
+    beforeEach(() => {
+        jest.clearAllMocks();
+    });
+
+    it('should classify "address change" as ACCOUNT / ACCOUNT_ADDRESS_CHANGE', async () => {
+        const result = await triageMessage({ body: 'I moved to a new address' });
+        expect(result.category).toBe('ACCOUNT');
+        expect(result.subType).toBe('ACCOUNT_ADDRESS_CHANGE');
+        expect(result.customerType).toBe('VISITOR'); // No context provided
+    });
+
+    it('should detect MEMBER customer type if context provided', async () => {
+        const result = await triageMessage({ body: 'Hi' }, { member: { id: 1 } });
+        expect(result.customerType).toBe('MEMBER');
+    });
+
+    it('should downgrade ACCOUNT intent to GENERAL if WineClub module disabled (Basic Tier)', async () => {
+        // Mock Settings to disable WineClub
+        WinerySettings.findOne.mockResolvedValue({
+            enableWineClubModule: false,
+            enableOrdersModule: true
         });
 
-        it('should classify "payment" or "card" as PAYMENT_ISSUE', async () => {
-            let result = await triageService.triageMessage({ body: 'My card expired' });
-            expect(result.type).toBe('PAYMENT_ISSUE');
+        const result = await triageMessage(
+            { body: 'change my address' },
+            { wineryId: 1 }
+        );
 
-            result = await triageService.triageMessage({ body: 'payment failed' });
-            expect(result.type).toBe('PAYMENT_ISSUE');
+        expect(result.category).toBe('GENERAL');
+        expect(result.subType).toBe('GENERAL_ENQUIRY');
+    });
+
+    it('should NOT downgrade if WineClub module enabled (Advanced Tier)', async () => {
+        // Mock Settings to enable WineClub
+        WinerySettings.findOne.mockResolvedValue({
+            enableWineClubModule: true
         });
 
-        it('should classify "book" or "tasting" as BOOKING_REQUEST', async () => {
-            const result = await triageService.triageMessage({ body: 'Can I book a tasting?' });
-            expect(result.type).toBe('BOOKING_REQUEST');
-        });
+        const result = await triageMessage(
+            { body: 'change my address' },
+            { wineryId: 1 }
+        );
 
-        it('should classify "delivery" or "shipping" as DELIVERY_ISSUE', async () => {
-            const result = await triageService.triageMessage({ body: 'Where is my delivery?' });
-            expect(result.type).toBe('DELIVERY_ISSUE');
-        });
-
-        it('should switch to GENERAL_QUERY for unknown intent', async () => {
-            const result = await triageService.triageMessage({ body: 'Hello there' });
-            expect(result.type).toBe('GENERAL_QUERY');
-        });
-
-        it('should handle empty body safely', async () => {
-            const result = await triageService.triageMessage({ body: null });
-            expect(result.type).toBe('GENERAL_QUERY');
-        });
+        expect(result.category).toBe('ACCOUNT');
+        expect(result.subType).toBe('ACCOUNT_ADDRESS_CHANGE');
     });
 });

@@ -59,7 +59,7 @@ describe('Webhook Routes', () => {
             // Check DB - Task
             const task = await Task.findOne({ where: { messageId: message.id } });
             expect(task).toBeDefined();
-            expect(task.type).toBe('DELIVERY_ISSUE');
+            expect(task.type).toBe('ORDER_SHIPPING_DELAY');
             expect(task.wineryId).toBe(wineryId);
         });
 

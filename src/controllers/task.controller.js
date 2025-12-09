@@ -50,20 +50,51 @@ async function getTask(req, res, next) {
     }
 }
 
-module.exports = {
-    listTasks,
-    getTask,
-    updateTaskStatus
-};
-
 const executionService = require('../services/execution.service');
+const { TaskAction, WinerySettings } = require('../models');
 
-async function updateTaskStatus(req, res, next) {
+async function createTask(req, res, next) {
+    const t = await Task.sequelize.transaction();
+    try {
+        const { wineryId, userId } = req.user;
+        const { category, subType, customerType, type, memberId, messageId, payload, priority, notes } = req.body;
+
+        const task = await Task.create({
+            wineryId,
+            // Use provided fields or fallback
+            category: category || 'INTERNAL',
+            subType: subType || 'INTERNAL_TASK',
+            customerType: customerType || 'UNKNOWN',
+            type: subType || type || 'INTERNAL_TASK', // Sync legacy type
+            status: 'PENDING_REVIEW',
+            priority: priority || 'normal',
+            payload: payload || {},
+            memberId: memberId || null,
+            messageId: messageId || null,
+            createdBy: userId // Track who created it
+        }, { transaction: t });
+
+        await TaskAction.create({
+            taskId: task.id,
+            userId: userId,
+            actionType: 'MANUAL_CREATED',
+            details: { notes }
+        }, { transaction: t });
+
+        await t.commit();
+        res.status(201).json({ task });
+    } catch (err) {
+        await t.rollback();
+        next(err);
+    }
+}
+
+async function updateTask(req, res, next) {
     const t = await Task.sequelize.transaction();
     try {
         const { wineryId, userId } = req.user;
         const { id } = req.params;
-        const { status } = req.body;
+        const { status, payload, priority, notes, suggestedReplyBody, category, subType } = req.body;
 
         const task = await Task.findOne({ where: { id, wineryId } });
 
@@ -72,23 +103,63 @@ async function updateTaskStatus(req, res, next) {
             return res.status(404).json({ error: 'Task not found' });
         }
 
-        // Update task
-        task.status = status;
+        const changes = {};
+        const oldValues = {};
+
+        // Helper to track changes
+        const updateField = (field, value) => {
+            if (value !== undefined && value !== task[field]) {
+                changes[field] = value;
+                oldValues[field] = task[field];
+                task[field] = value;
+            }
+        };
+
+        updateField('status', status);
+        updateField('priority', priority);
+        updateField('category', category); // Allow re-categorization
+        updateField('subType', subType);
+
+        if (payload) {
+            // Deep compare optional but for now assume change if provided
+            changes.payload = payload;
+            oldValues.payload = task.payload;
+            task.payload = payload;
+        }
+
         task.updatedBy = userId;
         await task.save({ transaction: t });
 
-        // Record Action
-        const { TaskAction } = require('../models');
-        await TaskAction.create({
-            taskId: task.id,
-            userId: userId,
-            actionType: status === 'APPROVED' ? 'APPROVED' : status === 'REJECTED' ? 'REJECTED' : 'UPDATED_PAYLOAD',
-            details: { newStatus: status }
-        }, { transaction: t });
+        // Record Actions
+        if (Object.keys(changes).length > 0) {
+            // Special case for approval/rejection causing specific action types
+            let actionType = 'MANUAL_UPDATE';
+            if (changes.status === 'APPROVED') actionType = 'APPROVED';
+            if (changes.status === 'REJECTED') actionType = 'REJECTED';
 
-        // Trigger Execution if Approved
-        if (status === 'APPROVED') {
-            await executionService.executeTask(task, t);
+            await TaskAction.create({
+                taskId: task.id,
+                userId: userId,
+                actionType,
+                details: { changes, oldValues }
+            }, { transaction: t });
+        }
+
+        if (notes) {
+            await TaskAction.create({
+                taskId: task.id,
+                userId: userId,
+                actionType: 'NOTE_ADDED',
+                details: { note: notes }
+            }, { transaction: t });
+        }
+
+        // Trigger Execution if Approved (and status JUST changed to APPROVED)
+        if (changes.status === 'APPROVED') {
+            // Fetch settings to check if we should execute
+            const settings = await WinerySettings.findOne({ where: { wineryId } });
+            // Pass settings to execution service (or let service fetch it, but optimizing here)
+            await executionService.executeTask(task, t, settings);
         }
 
         await t.commit();
@@ -98,3 +169,10 @@ async function updateTaskStatus(req, res, next) {
         next(err);
     }
 }
+
+module.exports = {
+    listTasks,
+    getTask,
+    createTask,
+    updateTask
+};

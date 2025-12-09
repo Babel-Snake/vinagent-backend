@@ -7,11 +7,23 @@ const logger = require('../config/logger');
  * @param {Object} transaction - Sequelize transaction
  * @returns {Promise<void>}
  */
-async function executeTask(task, transaction) {
-    if (task.type === 'ADDRESS_CHANGE') {
+async function executeTask(task, transaction, settings) {
+    if (!settings) {
+        // Fetch if not provided
+        const { WinerySettings } = require('../models');
+        settings = await WinerySettings.findOne({ where: { wineryId: task.wineryId }, transaction });
+    }
+
+    if (!settings || !settings.enableSecureLinks) {
+        logger.info(`Skipping automated execution for task ${task.id}: Secure Links disabled.`);
+        return;
+    }
+
+    // Check subType OR legacy type for backward compatibility
+    if (task.subType === 'ACCOUNT_ADDRESS_CHANGE' || task.type === 'ADDRESS_CHANGE') {
         await _executeAddressChange(task, transaction);
     } else {
-        logger.info('No automatic execution logic for task type', { type: task.type, taskId: task.id });
+        logger.info('No automatic execution logic for task', { type: task.subType || task.type, taskId: task.id });
     }
 }
 

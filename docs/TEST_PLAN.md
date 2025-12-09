@@ -599,7 +599,45 @@ Each test file should:
 
 ---
 
-## 8. Future Extensions
+### 2.6 Winery Settings & Tier Logic
+
+**Module:** `triageService` / `WinerySettings`
+
+**Purpose:** Ensure features are gated by tier configuration.
+
+**Test cases:**
+
+1. **Basic Tier Downgrade**
+   * Winery has `enableWineClubModule: false`.
+   * Input: "Change my address".
+   * Expected: `category=GENERAL`, `subType=GENERAL_ENQUIRY`.
+
+2. **Advanced Tier Preservation**
+   * Winery has `enableWineClubModule: true`.
+   * Input: "Change my address".
+   * Expected: `category=ACCOUNT`, `subType=ACCOUNT_ADDRESS_CHANGE`.
+
+---
+
+## 3. Integration Tests (HTTP + DB)
+
+### 3.1 Inbound SMS Webhook → Message & Task
+...
+
+### 3.2 Manual Task Operations
+**Scenario:** Staff manually creates a task.
+
+1. `POST /api/tasks` with `category=INTERNAL`, `note="Call back later"`.
+2. Assert `Task` created with `PENDING_REVIEW`.
+3. Assert `TaskAction(MANUAL_CREATED)`.
+
+### 3.3 PATCH Task & Tier Execution
+**Scenario:** Approving a task respects feature flags.
+
+1. Winery has `enableSecureLinks: false`.
+2. `PATCH /tasks/:id` to APPROVED.
+3. Assert Task is APPROVED but `MemberActionToken` is **NOT** created (Execution skipped).
+
 
 Once the MVP slice is stable, extend this test plan to cover:
 

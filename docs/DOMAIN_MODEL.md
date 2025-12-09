@@ -77,6 +77,19 @@ Includes configuration that affects how messages are handled and how replies are
 
 * Mostly business data; lower sensitivity than member data but still not for broad logging.
 
+### 2.5 WinerySettings
+Represents configuration and feature flags for a winery, effectively defining its product tier.
+
+* `id` (INT, primary key)
+* `wineryId` (FK → Winery.id)
+* `tier` (ENUM: `BASIC`, `STANDARD`, `ADVANCED`, `ENTERPRISE`)
+* `enableBookingModule` (BOOLEAN)
+* `enableWineClubModule` (BOOLEAN)
+* `enableOrdersModule` (BOOLEAN)
+* `enableSecureLinks` (BOOLEAN)
+* `createdAt` (DATETIME)
+* `updatedAt` (DATETIME)
+
 ---
 
 ## 3. Member
@@ -405,28 +418,68 @@ Fields (tentative):
 
 ---
 
-## 10. Task Type and Status Reference
+## 10. Task Classification Model
 
-To keep enum usage consistent across the system.
+### 10.1 Category (Domain)
+Represents the high-level operational area.
 
-### 10.1 Task Types (initial set)
+* `BOOKING` (Tastings, tours, events)
+* `ORDER` (Fulfilment, shipping)
+* `ACCOUNT` (Address, payments, login)
+* `GENERAL` (Queries, info)
+* `INTERNAL` (Staff notes)
+* `SYSTEM` (Automation errors)
 
-* `GENERAL_QUERY`
-* `ADDRESS_CHANGE`
-* `PAYMENT_ISSUE`
-* `BOOKING_REQUEST`
-* `DELIVERY_ISSUE`
+### 10.2 SubType (Intent)
+Specific actionable intent within a Category.
 
-These can be expanded as new flows are added.
+**BOOKING**
+* `BOOKING_NEW`
+* `BOOKING_CHANGE`
+* `BOOKING_CANCEL`
+* `BOOKING_ENQUIRY`
 
-### 10.2 Task Statuses
+**ORDER**
+* `ORDER_MISSING_ITEMS`
+* `ORDER_SHIPPING_DELAY`
+* `ORDER_INCORRECT_ADDRESS`
+* `ORDER_DAMAGE`
+* `ORDER_REPLACEMENT_REQUEST`
 
-* `PENDING_REVIEW` – Task created, waiting for human review.
-* `APPROVED` – Approved by a user; ready to trigger member-facing action (e.g. secure link).
-* `AWAITING_MEMBER_ACTION` – Member-facing link/flow sent; waiting for the member to complete the action.
-* `REJECTED` – Rejected; no execution will occur.
-* `EXECUTED` – Action completed successfully (e.g. member confirmed change and data updated).
-* `CANCELLED` – No longer relevant.
+**ACCOUNT**
+* `ACCOUNT_ADDRESS_CHANGE`
+* `ACCOUNT_EMAIL_CHANGE`
+* `ACCOUNT_PAYMENT_ISSUE`
+* `ACCOUNT_LOGIN_ISSUE`
+
+**GENERAL**
+* `GENERAL_ENQUIRY`
+* `GENERAL_WINE_INFO`
+* `GENERAL_PRICING_QUESTION`
+
+**INTERNAL**
+* `INTERNAL_FOLLOW_UP`
+* `INTERNAL_TASK`
+* `INTERNAL_NOTE`
+
+**SYSTEM**
+* `SYSTEM_ERROR`
+* `SYSTEM_ALERT`
+
+### 10.3 CustomerType
+Distinguishes origin.
+
+* `MEMBER` (Known member)
+* `VISITOR` (Unknown/Prospect)
+* `UNKNOWN`
+
+### 10.4 Statuses
+* `PENDING_REVIEW`
+* `APPROVED`
+* `AWAITING_MEMBER_ACTION`
+* `REJECTED`
+* `EXECUTED`
+* `CANCELLED`
 
 ---
 

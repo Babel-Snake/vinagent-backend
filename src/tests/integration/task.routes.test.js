@@ -20,7 +20,7 @@ describe('Task Routes', () => {
             });
             winery = w;
 
-            // Also create the stub User (ID 7) to satisfy foreign key 'updatedBy'
+            // Also create User and Default Settings
             await User.findOrCreate({
                 where: { id: 7 },
                 defaults: {
@@ -29,6 +29,17 @@ describe('Task Routes', () => {
                     displayName: 'Stub User',
                     role: 'manager',
                     wineryId: w.id
+                }
+            });
+
+            // Ensure settings exist for feature flags
+            const { WinerySettings } = require('../../models');
+            await WinerySettings.findOrCreate({
+                where: { wineryId: w.id },
+                defaults: {
+                    tier: 'ADVANCED',
+                    enableWineClubModule: true,
+                    enableSecureLinks: true
                 }
             });
 
@@ -77,7 +88,7 @@ describe('Task Routes', () => {
             });
 
             const res = await request(app)
-                .patch(`/api/tasks/${task.id}/status`)
+                .patch(`/api/tasks/${task.id}`)
                 .set('Authorization', authToken)
                 .send({ status: 'APPROVED' })
                 .expect(200);
@@ -116,7 +127,7 @@ describe('Task Routes', () => {
             });
 
             await request(app)
-                .patch(`/api/tasks/${task.id}/status`)
+                .patch(`/api/tasks/${task.id}`)
                 .set('Authorization', authToken)
                 .send({ status: 'APPROVED' })
                 .expect(200);

@@ -15,13 +15,20 @@ module.exports = (sequelize, DataTypes) => {
   Task.init(
     {
       type: {
-        type: DataTypes.ENUM(
-          'GENERAL_QUERY',
-          'ADDRESS_CHANGE',
-          'PAYMENT_ISSUE',
-          'BOOKING_REQUEST',
-          'DELIVERY_ISSUE'
-        ),
+        type: DataTypes.STRING, // Legacy supported, deprecated
+        allowNull: true
+      },
+      category: {
+        type: DataTypes.ENUM('BOOKING', 'ORDER', 'ACCOUNT', 'GENERAL', 'INTERNAL', 'SYSTEM'),
+        allowNull: true // Should be false in v2
+      },
+      subType: {
+        type: DataTypes.STRING,
+        allowNull: true // Should be false in v2
+      },
+      customerType: {
+        type: DataTypes.ENUM('MEMBER', 'VISITOR', 'UNKNOWN'),
+        defaultValue: 'UNKNOWN',
         allowNull: false
       },
       status: {
