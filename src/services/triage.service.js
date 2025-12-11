@@ -1,4 +1,4 @@
-const { Task } = require('../models');
+const { Task, WinerySettings } = require('../models');
 
 /**
  * Analyses a message to determine the intent and basic task properties.
@@ -7,6 +7,8 @@ const { Task } = require('../models');
  * @param {Object} [context] - Optional context (member, winery)
  * @returns {Promise<Object>} - Returns { type, status, priority, payload }
  */
+const aiService = require('./ai');
+
 async function triageMessage(message, context = {}) {
     const body = (message.body || '').toLowerCase();
 
@@ -15,20 +17,76 @@ async function triageMessage(message, context = {}) {
     if (context.member) {
         customerType = 'MEMBER';
     } else {
-        customerType = 'VISITOR'; // Default for non-members
+        customerType = 'VISITOR';
     }
 
-    // 2. Detect Intent (SubType) & Derive Category
+    let result = {
+        category: 'GENERAL',
+        subType: 'GENERAL_ENQUIRY',
+        sentiment: 'NEUTRAL',
+        priority: 'normal',
+        payload: { summary: body.substring(0, 50) }
+    };
+
+    // 2. Attempt AI Classification
+    try {
+        const aiResult = await aiService.classify(message.body, context);
+        // Merge AI result
+        result = { ...result, ...aiResult };
+    } catch (err) {
+        console.warn('AI Triage unavailable/failed:', err.message);
+        // 3. Fallback to Heuristics (Legacy Logic)
+        result = fallbackHeuristics(body, customerType);
+    }
+
+    // 4. Feature Flag / Tier Enforcement
+    const contextWineryId = context.wineryId || (context.member && context.member.wineryId);
+    if (contextWineryId) {
+        const settings = await WinerySettings.findOne({ where: { wineryId: contextWineryId } });
+
+        if (settings) {
+            if (result.category === 'ACCOUNT' && !settings.enableWineClubModule) {
+                result.category = 'GENERAL';
+                result.subType = 'GENERAL_ENQUIRY';
+            }
+            if (result.category === 'ORDER' && !settings.enableOrdersModule) {
+                result.category = 'GENERAL';
+                result.subType = 'GENERAL_ENQUIRY';
+            }
+            if (result.category === 'BOOKING' && !settings.enableBookingModule) {
+                result.category = 'GENERAL';
+                result.subType = 'GENERAL_ENQUIRY';
+            }
+        }
+    }
+
+    return {
+        type: result.subType, // Legacy
+        category: result.category,
+        subType: result.subType,
+        customerType,
+        sentiment: result.sentiment,
+        priority: result.priority,
+        status: 'PENDING_REVIEW',
+        payload: result.payload || {},
+        requiresApproval: true,
+        suggestedTitle: result.suggestedTitle // Pass through if AI generated
+    };
+}
+
+// Fallback Rules (The heuristic logic extracted)
+function fallbackHeuristics(body, customerType) {
     let category = 'GENERAL';
-    let subType = 'GENERAL_ENQUIRY'; // Default
+    let subType = 'GENERAL_ENQUIRY';
     let priority = 'normal';
     let sentiment = 'NEUTRAL';
+    let summary = body.substring(0, 50);
 
     // Heuristic Sentiment Analysis
     const negativeKeywords = ['angry', 'upset', 'complain', 'bad', 'terrible', 'rude', 'late', 'missing', 'failed'];
     if (negativeKeywords.some(kw => body.includes(kw))) {
         sentiment = 'NEGATIVE';
-        priority = 'high'; // Escalate negative sentiment
+        priority = 'high';
     }
 
     // Extended Keyword Matching
@@ -75,44 +133,32 @@ async function triageMessage(message, context = {}) {
         subType = 'ORDER_SHIPPING_DELAY';
     }
 
-    // 3. Check Tier / Featue Flags & Downgrade if needed
-    const contextWineryId = context.wineryId || (context.member && context.member.wineryId);
-    if (contextWineryId) {
-        const { WinerySettings } = require('../models');
-        const settings = await WinerySettings.findOne({ where: { wineryId: contextWineryId } });
-
-        if (settings) {
-            // Basic Tier Logic: Downgrade Advanced Categories to GENERAL
-            // Note: Operations tasks are internal and usually unaffected by member-facing tiers, 
-            // but we can enforce if needed. For now, we only downgrade member flows.
-            if (category === 'ACCOUNT' && !settings.enableWineClubModule) {
-                category = 'GENERAL';
-                subType = 'GENERAL_ENQUIRY';
-            }
-            if (category === 'ORDER' && !settings.enableOrdersModule) {
-                // Keep wholesale as is? Or downgrade? Assuming downgrade for simplicity if module off.
-                category = 'GENERAL';
-                subType = 'GENERAL_ENQUIRY';
-            }
-            if (category === 'BOOKING' && !settings.enableBookingModule) {
-                category = 'GENERAL';
-                subType = 'GENERAL_ENQUIRY';
-            }
-        }
-    }
-
-    return {
-        type: subType, // Legacy support
-        category,
-        subType,
-        customerType,
-        sentiment,
-        status: 'PENDING_REVIEW',
-        priority,
-        payload: { summary: body.substring(0, 100) }, // basic summary
-        requiresApproval: true
-    };
+    return { category, subType, priority, sentiment, payload: { summary } };
 }
+
+// Re-writing triageMessage to be cleaner:
+/*
+async function triageMessage(message, context = {}) {
+    const body = (message.body || '').toLowerCase();
+    
+    // 1. AI First Approach (per requirements)
+    try {
+        const aiResult = await aiService.classify(message.body, context);
+        
+        // Apply Tiers
+        return {
+           ...aiResult,
+           customerType: context.member ? 'MEMBER' : 'VISITOR',
+           status: 'PENDING_REVIEW',
+           requiresApproval: true
+        };
+    } catch (e) {
+        // Fallback to legacy rules
+    }
+}
+*/
+// Let's do the AI First approach as it's the goal.
+
 
 /**
  * Autoclassifies a staff note into a structured task definition.
