@@ -53,33 +53,69 @@ async function getTask(req, res, next) {
 const executionService = require('../services/execution.service');
 const { TaskAction, WinerySettings } = require('../models');
 
+const triageService = require('../services/triage.service');
+
+async function autoclassify(req, res, next) {
+    try {
+        const { wineryId, userId } = req.user;
+        const { text, memberId } = req.body;
+
+        if (!text) {
+            return res.status(400).json({ error: 'Text input is required' });
+        }
+
+        const result = await triageService.classifyStaffNote({ text, memberId, wineryId, userId });
+        res.json(result);
+    } catch (err) {
+        next(err);
+    }
+}
+
 async function createTask(req, res, next) {
     const t = await Task.sequelize.transaction();
     try {
         const { wineryId, userId } = req.user;
-        const { category, subType, customerType, type, memberId, messageId, payload, priority, notes } = req.body;
+        // extended fields
+        const { category, subType, customerType, type, memberId, messageId, payload, priority, notes,
+            sentiment, assigneeId, parentTaskId } = req.body;
 
         const task = await Task.create({
             wineryId,
-            // Use provided fields or fallback
             category: category || 'INTERNAL',
             subType: subType || 'INTERNAL_TASK',
             customerType: customerType || 'UNKNOWN',
-            type: subType || type || 'INTERNAL_TASK', // Sync legacy type
+            type: subType || type || 'INTERNAL_TASK',
             status: 'PENDING_REVIEW',
             priority: priority || 'normal',
+            sentiment: sentiment || 'NEUTRAL', // New
             payload: payload || {},
             memberId: memberId || null,
             messageId: messageId || null,
-            createdBy: userId // Track who created it
+            createdBy: userId, // Attribution rule: staff created
+            updatedBy: userId, // Initial update
+            assigneeId: assigneeId || null, // Optional assignment
+            parentTaskId: parentTaskId || null // Optional linking
         }, { transaction: t });
 
         await TaskAction.create({
             taskId: task.id,
             userId: userId,
             actionType: 'MANUAL_CREATED',
-            details: { notes }
+            details: {
+                notes,
+                originalText: payload?.originalText // Capture raw input if present
+            }
         }, { transaction: t });
+
+        // Log linking action if parent exists
+        if (parentTaskId) {
+            await TaskAction.create({
+                taskId: task.id,
+                userId: userId,
+                actionType: 'LINKED_TASK',
+                details: { parentTaskId, childTaskId: task.id }
+            }, { transaction: t });
+        }
 
         await t.commit();
         res.status(201).json({ task });
@@ -94,7 +130,8 @@ async function updateTask(req, res, next) {
     try {
         const { wineryId, userId } = req.user;
         const { id } = req.params;
-        const { status, payload, priority, notes, suggestedReplyBody, category, subType } = req.body;
+        const { status, payload, priority, notes, suggestedReplyBody, category, subType,
+            sentiment, assigneeId, parentTaskId } = req.body;
 
         const task = await Task.findOne({ where: { id, wineryId } });
 
@@ -106,7 +143,6 @@ async function updateTask(req, res, next) {
         const changes = {};
         const oldValues = {};
 
-        // Helper to track changes
         const updateField = (field, value) => {
             if (value !== undefined && value !== task[field]) {
                 changes[field] = value;
@@ -117,25 +153,54 @@ async function updateTask(req, res, next) {
 
         updateField('status', status);
         updateField('priority', priority);
-        updateField('category', category); // Allow re-categorization
+        updateField('category', category);
         updateField('subType', subType);
+        updateField('sentiment', sentiment); // New
+
+        // Linking change
+        if (parentTaskId !== undefined && parentTaskId !== task.parentTaskId) {
+            changes.parentTaskId = parentTaskId;
+            oldValues.parentTaskId = task.parentTaskId;
+            task.parentTaskId = parentTaskId;
+
+            await TaskAction.create({
+                taskId: task.id,
+                userId: userId,
+                actionType: 'LINKED_TASK',
+                details: { parentTaskId, childTaskId: task.id }
+            }, { transaction: t });
+        }
+
+        // Assignment change
+        if (assigneeId !== undefined && assigneeId !== task.assigneeId) {
+            changes.assigneeId = assigneeId;
+            oldValues.assigneeId = task.assigneeId;
+            task.assigneeId = assigneeId;
+
+            await TaskAction.create({
+                taskId: task.id,
+                userId: userId,
+                actionType: 'ASSIGNED',
+                details: { from: oldValues.assigneeId, to: assigneeId }
+            }, { transaction: t });
+        }
 
         if (payload) {
-            // Deep compare optional but for now assume change if provided
             changes.payload = payload;
             oldValues.payload = task.payload;
             task.payload = payload;
         }
 
-        task.updatedBy = userId;
+        task.updatedBy = userId; // Attribution rule: always update updatedBy on manual edit
         await task.save({ transaction: t });
 
-        // Record Actions
+        // Record Generic Update Action
         if (Object.keys(changes).length > 0) {
-            // Special case for approval/rejection causing specific action types
             let actionType = 'MANUAL_UPDATE';
             if (changes.status === 'APPROVED') actionType = 'APPROVED';
             if (changes.status === 'REJECTED') actionType = 'REJECTED';
+            // Note: ASSIGNED and LINKED are already logged separately, but we might want a combined log or filter them out here.
+            // For now, logging general updates as well is safe.
 
             await TaskAction.create({
                 taskId: task.id,
@@ -154,11 +219,8 @@ async function updateTask(req, res, next) {
             }, { transaction: t });
         }
 
-        // Trigger Execution if Approved (and status JUST changed to APPROVED)
         if (changes.status === 'APPROVED') {
-            // Fetch settings to check if we should execute
             const settings = await WinerySettings.findOne({ where: { wineryId } });
-            // Pass settings to execution service (or let service fetch it, but optimizing here)
             await executionService.executeTask(task, t, settings);
         }
 
@@ -174,5 +236,6 @@ module.exports = {
     listTasks,
     getTask,
     createTask,
-    updateTask
+    updateTask,
+    autoclassify
 };

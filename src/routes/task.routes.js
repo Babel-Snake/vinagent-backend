@@ -3,6 +3,7 @@ const taskController = require('../controllers/task.controller');
 
 const router = express.Router();
 
+router.post('/autoclassify', taskController.autoclassify);
 router.post('/', taskController.createTask);
 router.get('/', taskController.listTasks);
 router.get('/:id', taskController.getTask);

@@ -201,7 +201,39 @@ Authorization: Bearer <firebase-id-token>
 
 ---
 
-### 4.2 POST /tasks
+---
+
+### 4.2 POST /tasks/autoclassify
+Autoclassify a free-text staff note into a structured task.
+
+**URL**
+```http
+POST /tasks/autoclassify
+```
+
+**Body**
+```json
+{
+  "text": "The printer is out of ink",
+  "memberId": 42
+}
+```
+
+**Response (200)**
+```json
+{
+  "category": "OPERATIONS",
+  "subType": "OPERATIONS_SUPPLY_REQUEST",
+  "priority": "normal",
+  "sentiment": "NEUTRAL",
+  "payload": { "originalText": "..." },
+  "suggestedTitle": "OPERATIONS - OPERATIONS SUPPLY REQUEST"
+}
+```
+
+---
+
+### 4.3 POST /tasks
 Manually create a task (e.g. by internal staff).
 
 **URL**

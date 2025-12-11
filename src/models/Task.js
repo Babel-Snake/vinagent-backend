@@ -8,6 +8,9 @@ module.exports = (sequelize, DataTypes) => {
       Task.belongsTo(models.Message, { foreignKey: 'messageId' });
       Task.belongsTo(models.User, { foreignKey: 'createdBy', as: 'Creator' });
       Task.belongsTo(models.User, { foreignKey: 'updatedBy', as: 'Updater' });
+      Task.belongsTo(models.User, { foreignKey: 'assigneeId', as: 'Assignee' });
+      Task.belongsTo(models.Task, { foreignKey: 'parentTaskId', as: 'ParentTask' });
+      Task.hasMany(models.Task, { foreignKey: 'parentTaskId', as: 'SubTasks' });
       Task.hasMany(models.TaskAction, { foreignKey: 'taskId' });
     }
   }
@@ -19,17 +22,22 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: true
       },
       category: {
-        type: DataTypes.ENUM('BOOKING', 'ORDER', 'ACCOUNT', 'GENERAL', 'INTERNAL', 'SYSTEM'),
-        allowNull: true // Should be false in v2
+        type: DataTypes.ENUM('BOOKING', 'ORDER', 'ACCOUNT', 'GENERAL', 'INTERNAL', 'SYSTEM', 'OPERATIONS'),
+        allowNull: true
       },
       subType: {
         type: DataTypes.STRING,
-        allowNull: true // Should be false in v2
+        allowNull: true
       },
       customerType: {
         type: DataTypes.ENUM('MEMBER', 'VISITOR', 'UNKNOWN'),
         defaultValue: 'UNKNOWN',
         allowNull: false
+      },
+      sentiment: {
+        type: DataTypes.ENUM('NEUTRAL', 'POSITIVE', 'NEGATIVE'),
+        defaultValue: 'NEUTRAL',
+        allowNull: true
       },
       status: {
         type: DataTypes.ENUM(
@@ -79,6 +87,16 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.INTEGER,
         allowNull: true,
         references: { model: 'Users', key: 'id' }
+      },
+      assigneeId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: 'Users', key: 'id' }
+      },
+      parentTaskId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: 'Tasks', key: 'id' }
       }
     },
     {

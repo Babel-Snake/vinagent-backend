@@ -218,6 +218,12 @@ The Task holds both the **intent** and the **proposed action** (e.g. a drafted r
   Whether this task must be approved by a human before execution.
 * `priority` (ENUM or INT, optional)
   E.g. `low`, `normal`, `high`.
+* `sentiment` (ENUM: `NEUTRAL`, `POSITIVE`, `NEGATIVE`, default `NEUTRAL`)
+  Heuristic or manually set sentiment.
+* `assigneeId` (FK → User.id, nullable)
+  Staff member responsible for this task.
+* `parentTaskId` (FK → Task.id, nullable)
+  For grouping related tasks.
 * `createdBy` (FK → User.id, nullable)
   Typically null for auto-created tasks.
 * `updatedBy` (FK → User.id, nullable)
@@ -263,6 +269,8 @@ Examples: task created, approved, rejected, execution initiated, execution compl
   * `EXECUTED`
   * `UPDATED_PAYLOAD`
   * `NOTE_ADDED`
+  * `ASSIGNED`
+  * `LINKED_TASK`
 * `details` (JSON, nullable)
   Additional metadata about the action (e.g. reason for rejection, token id, final outbound message metadata such as provider, channel, outboundMessageId, truncated body).
 * `createdAt` (DATETIME)
@@ -423,12 +431,13 @@ Fields (tentative):
 ### 10.1 Category (Domain)
 Represents the high-level operational area.
 
-* `BOOKING` (Tastings, tours, events)
-* `ORDER` (Fulfilment, shipping)
-* `ACCOUNT` (Address, payments, login)
-* `GENERAL` (Queries, info)
-* `INTERNAL` (Staff notes)
-* `SYSTEM` (Automation errors)
+* `BOOKING`
+* `ORDER`
+* `ACCOUNT`
+* `GENERAL`
+* `OPERATIONS` (New: Internal workflows)
+* `INTERNAL`
+* `SYSTEM`
 
 ### 10.2 SubType (Intent)
 Specific actionable intent within a Category.
@@ -445,17 +454,27 @@ Specific actionable intent within a Category.
 * `ORDER_INCORRECT_ADDRESS`
 * `ORDER_DAMAGE`
 * `ORDER_REPLACEMENT_REQUEST`
+* `ORDER_PRODUCT_AVAILABILITY_CHECK`
+* `ORDER_LARGE_ORDER_REQUEST`
+* `ORDER_WHOLESALE_ENQUIRY`
 
 **ACCOUNT**
 * `ACCOUNT_ADDRESS_CHANGE`
 * `ACCOUNT_EMAIL_CHANGE`
 * `ACCOUNT_PAYMENT_ISSUE`
 * `ACCOUNT_LOGIN_ISSUE`
+* `ACCOUNT_VERIFICATION_HELP`
 
 **GENERAL**
 * `GENERAL_ENQUIRY`
 * `GENERAL_WINE_INFO`
 * `GENERAL_PRICING_QUESTION`
+
+**OPERATIONS**
+* `OPERATIONS_HANDOVER_NOTE`
+* `OPERATIONS_MAINTENANCE_REQUEST`
+* `OPERATIONS_ESCALATION`
+* `OPERATIONS_SUPPLY_REQUEST`
 
 **INTERNAL**
 * `INTERNAL_FOLLOW_UP`
@@ -465,6 +484,8 @@ Specific actionable intent within a Category.
 **SYSTEM**
 * `SYSTEM_ERROR`
 * `SYSTEM_ALERT`
+* `SYSTEM_RETRY_REQUIRED`
+
 
 ### 10.3 CustomerType
 Distinguishes origin.

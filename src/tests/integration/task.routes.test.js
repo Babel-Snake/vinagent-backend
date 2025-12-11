@@ -79,16 +79,92 @@ describe('Task Routes', () => {
         });
     });
 
-    describe('PATCH /api/tasks/:id/status', () => {
+    describe('POST /api/tasks/autoclassify', () => {
+        it('should autoclassify a staff note', async () => {
+            const res = await request(app)
+                .post('/api/tasks/autoclassify')
+                .send({ text: 'The printer is out of ink' })
+                .set('Authorization', authToken) // Stub auth
+                .expect(200);
+
+            expect(res.body.category).toBe('OPERATIONS');
+            expect(res.body.subType).toBe('OPERATIONS_SUPPLY_REQUEST');
+            expect(res.body.suggestedTitle).toBeDefined();
+        });
+    });
+
+    describe('POST /api/tasks (Manual Creation)', () => {
+        it('should create a task with new fields (sentiment, attribution)', async () => {
+            const res = await request(app)
+                .post('/api/tasks')
+                .send({
+                    category: 'OPERATIONS',
+                    subType: 'OPERATIONS_ESCALATION',
+                    sentiment: 'NEGATIVE',
+                    notes: 'Customer is very upset',
+                    priority: 'high'
+                })
+                .set('Authorization', authToken)
+                .expect(201);
+
+            const task = res.body.task;
+            expect(task.category).toBe('OPERATIONS');
+            expect(task.subType).toBe('OPERATIONS_ESCALATION');
+            expect(task.sentiment).toBe('NEGATIVE');
+            expect(task.createdBy).toBe(7); // Stub user ID
+        });
+    });
+
+    describe('PATCH /api/tasks/:id', () => {
+        let task;
+        beforeEach(async () => {
+            task = await Task.create({
+                wineryId: winery.id,
+                status: 'PENDING_REVIEW',
+                category: 'GENERAL'
+            });
+        });
+
+        it('should update task assignment and log action', async () => {
+            const res = await request(app)
+                .patch(`/api/tasks/${task.id}`)
+                .send({ assigneeId: 7 }) // Assign to self
+                .set('Authorization', authToken)
+                .expect(200);
+
+            expect(res.body.task.assigneeId).toBe(7);
+
+            // Verify Logic: Action Log
+            const { TaskAction } = require('../../models');
+            const action = await TaskAction.findOne({
+                where: { taskId: task.id, actionType: 'ASSIGNED' }
+            });
+            expect(action).toBeDefined();
+            expect(action.userId).toBe(7);
+        });
+
+        it('should approve task and trigger execution', async () => {
+            const res = await request(app)
+                .patch(`/api/tasks/${task.id}`) // Use ID
+                .send({
+                    status: 'APPROVED',
+                    payload: { someData: 123 }
+                })
+                .set('Authorization', authToken)
+                .expect(200);
+
+            expect(res.body.task.status).toBe('APPROVED');
+        });
+
         it('should approve a task and record who did it', async () => {
-            const task = await Task.create({
+            const taskToApprove = await Task.create({
                 type: 'ADDRESS_CHANGE',
                 status: 'PENDING_REVIEW',
                 wineryId: 1
             });
 
             const res = await request(app)
-                .patch(`/api/tasks/${task.id}`)
+                .patch(`/api/tasks/${taskToApprove.id}`)
                 .set('Authorization', authToken)
                 .send({ status: 'APPROVED' })
                 .expect(200);
@@ -97,7 +173,7 @@ describe('Task Routes', () => {
             expect(res.body.task.updatedBy).toBe(7); // Stub user ID
 
             // Verify DB
-            const updated = await Task.findByPk(task.id);
+            const updated = await Task.findByPk(taskToApprove.id);
             expect(updated.status).toBe('APPROVED');
         });
 

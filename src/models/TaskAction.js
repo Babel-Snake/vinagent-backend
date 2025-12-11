@@ -20,7 +20,9 @@ module.exports = (sequelize, DataTypes) => {
                     'UPDATED_PAYLOAD',
                     'NOTE_ADDED',
                     'MANUAL_CREATED',
-                    'MANUAL_UPDATE'
+                    'MANUAL_UPDATE',
+                    'ASSIGNED',
+                    'LINKED_TASK'
                 ),
                 allowNull: false
             },
