@@ -21,6 +21,7 @@ Return a JSON object with the following fields:
 - priority: [low, normal, high] (High if angry, urgent, or payment issue)
 - summary: A brief 1-sentence summary of the request.
 - suggestedTitle: A short title for the task.
+- suggestedReply: A polite, professional SMS reply (max 160 chars) to the customer. Ask for more info if needed, or confirm action.
 
 **Context:**
 Member: ${context.member ? 'Yes (Member ID: ' + context.member.id + ')' : 'No (Visitor)'}

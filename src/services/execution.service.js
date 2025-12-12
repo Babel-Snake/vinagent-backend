@@ -22,9 +22,48 @@ async function executeTask(task, transaction, settings) {
     // Check subType OR legacy type for backward compatibility
     if (task.subType === 'ACCOUNT_ADDRESS_CHANGE' || task.type === 'ADDRESS_CHANGE') {
         await _executeAddressChange(task, transaction);
+    } else if (task.subType === 'BOOKING_NEW') {
+        await _executeBooking(task, transaction, settings); // Pass settings if needed, or lookup inside factory
     } else {
         logger.info('No automatic execution logic for task', { type: task.subType || task.type, taskId: task.id });
     }
+
+    // Generic Notification Logic
+    // If task is APPROVED/EXECUTED and has a suggested reply, send it.
+    if (task.suggestedReplyBody && task.suggestedChannel && task.suggestedChannel !== 'none') {
+        const member = await Member.findByPk(task.memberId, { transaction });
+        if (member) {
+            const contact = task.suggestedChannel === 'email' ? member.email : member.phone;
+            if (contact) {
+                try {
+                    // Send notification (outside transaction? or ensure service handles it safely?)
+                    // NotificationService usually makes external calls, so we shouldn't block the DB transaction.
+                    // But we want to log the outbound message in the DB.
+                    // For now, we'll await it here. If it fails, do we rollback the task approval?
+                    // Ideally: No. Notification failure shouldn't stop the business action.
+                    // We catch and log error.
+                    await _sendNotification(task, member, contact, transaction);
+                } catch (notifyErr) {
+                    logger.error('Failed to send notification', notifyErr);
+                }
+            } else {
+                logger.warn(`No contact details for ${task.suggestedChannel} on member ${member.id}`);
+            }
+        }
+    }
+}
+
+async function _sendNotification(task, member, contact, transaction) {
+    const notificationService = require('./notifications/notification.service');
+    await notificationService.send({
+        to: contact,
+        body: task.suggestedReplyBody,
+        channel: task.suggestedChannel
+    }, {
+        wineryId: task.wineryId,
+        memberId: member.id,
+        taskId: task.id
+    });
 }
 
 async function _executeAddressChange(task, transaction) {
@@ -67,6 +106,66 @@ async function _executeAddressChange(task, transaction) {
     }, { transaction });
 
     logger.info('Executed ADDRESS_CHANGE', { taskId: task.id, memberId: member.id });
+}
+
+async function _executeBooking(task, transaction) {
+    if (!task.payload || !task.payload.date || !task.payload.time || !task.payload.pax) {
+        logger.warn('Skipping BOOKING execution: Missing details in payload (date/time/pax)', { taskId: task.id });
+        return;
+    }
+
+    const { Member } = require('../models');
+    const member = await Member.findByPk(task.memberId, { transaction });
+    if (!member) throw new Error('Member not found for booking');
+
+    // Load Provider
+    const bookingFactory = require('./integrations/booking');
+    const provider = await bookingFactory.getProvider(task.wineryId);
+
+    // Make Reservation
+    try {
+        const result = await provider.createReservation({
+            ...task.payload,
+            firstName: member.firstName,
+            lastName: member.lastName,
+            email: member.email,
+            phone: member.phone,
+            memberId: member.id
+        });
+
+        logger.info(`Booking created via ${result.provider}`, { reference: result.referenceCode });
+
+        // Update Task with Success Info
+        task.status = 'EXECUTED';
+        task.payload = { ...task.payload, bookingReference: result.referenceCode, bookingStatus: result.status };
+
+        // Append Reference to Reply if it exists
+        if (task.suggestedReplyBody) {
+            task.suggestedReplyBody += ` (Ref: ${result.referenceCode})`;
+        }
+
+        await task.save({ transaction });
+
+        // Log Action
+        await TaskAction.create({
+            taskId: task.id,
+            userId: task.updatedBy,
+            actionType: 'EXECUTED',
+            details: {
+                action: 'BOOKING_CREATED',
+                provider: result.provider,
+                reference: result.referenceCode
+            }
+        }, { transaction });
+
+    } catch (bookingError) {
+        logger.error('Booking Provider Failed', bookingError);
+        // Note: We do NOT throw here if we want to allow the "Approval" to succeed 
+        // even if the automation fails (maybe manual follow-up needed).
+        // OR we throw and rollback the approval?
+        // Let's throw for now so the user knows it failed.
+        throw new Error(`Booking Failed: ${bookingError.message}`);
+    }
 }
 
 module.exports = {

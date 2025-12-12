@@ -173,14 +173,29 @@ This layer should:
 **Example:**
 `ADDRESS_CHANGE` task → update `Member.address` in DB → send confirmation SMS.
 
-### 4.6 Database Layer
+### 4.6 Integration Layer (New)
+
+The system uses an **Adapter Pattern** to connect with external Winery Systems (CRM, POS, Reservations).
+
+**Structure:**
+* `src/services/integrations/booking/`: Adapters for Tock, SevenRooms, etc.
+* `src/services/integrations/crm/`: Adapters for Commerce7, WineDirect, etc.
+
+Each integration type has a **Factory** that inspects `WinerySettings` and returns the correct **Provider** instance.
+
+**Example:**
+* `booking.adapter.js`: Defines `createReservation()`.
+* `providers/tock.js`: Implements Tock API.
+* `services/execution.service.js`: Calls `factory.getProvider(id).createReservation()`.
+
+### 4.7 Database Layer
 
 * **Technology:** MySQL
 * **Access:** Sequelize ORM
 
 **Key entities** (see `DOMAIN_MODEL.md` for full detail):
 * User
-* Winery
+* Winery & WinerySettings
 * Member
 * Message
 * Task
@@ -191,7 +206,7 @@ This layer should:
 * Avoid raw SQL unless absolutely necessary.
 * Use migrations for schema changes.
 
-### 4.7 Logging & Observability
+### 4.8 Logging & Observability
 
 A single shared logger is used across the app (e.g. Winston or Pino).
 

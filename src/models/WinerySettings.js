@@ -49,6 +49,22 @@ module.exports = (sequelize, DataTypes) => {
         enableVoice: {
             type: DataTypes.BOOLEAN,
             defaultValue: false
+        },
+        bookingProvider: {
+            type: DataTypes.ENUM('mock', 'tock', 'sevenrooms'),
+            defaultValue: 'mock'
+        },
+        bookingConfig: {
+            type: DataTypes.JSON,
+            allowNull: true
+        },
+        crmProvider: {
+            type: DataTypes.ENUM('mock', 'commerce7', 'winedirect'),
+            defaultValue: 'mock'
+        },
+        crmConfig: {
+            type: DataTypes.JSON,
+            allowNull: true
         }
     }, {
         sequelize,

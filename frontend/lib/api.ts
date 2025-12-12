@@ -11,6 +11,8 @@ export interface Task {
     createdAt: string;
     assigneeId?: number;
     parentTaskId?: number;
+    suggestedReplyBody?: string;
+    suggestedChannel?: string;
     Member?: {
         id: number;
         firstName: string;

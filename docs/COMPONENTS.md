@@ -686,7 +686,11 @@ A recommended build order:
 7. **SMS Webhook Ingestion** (3.1)
 8. **Task List & Retrieve API** (6.1)
 9. **Task Update (Approve/Reject)** (6.2)
+9. **Task Update (Approve/Reject)** (6.2)
 10. **Address Update Execution** (7.1)
+11. **Notification Service** (9.1)
+12. **Booking Integration** (10.2)
+13. **CRM Integration** (10.3)
 
 After this thin vertical slice is working end-to-end, expand:
 
@@ -694,6 +698,7 @@ After this thin vertical slice is working end-to-end, expand:
 * AI-based triage
 * Confirmation messaging
 * More task types
+* Real Provider Implementations (Tock, Commerce7)
 
 ---
 

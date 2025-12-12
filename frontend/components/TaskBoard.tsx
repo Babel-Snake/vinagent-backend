@@ -10,12 +10,28 @@ interface TaskBoardProps {
 
 export default function TaskBoard({ tasks, onRefresh }: TaskBoardProps) {
     const [updating, setUpdating] = useState<number | null>(null);
+    const [replyEdits, setReplyEdits] = useState<{ [key: number]: string }>({});
 
-    async function handleStatusChange(id: number, newStatus: string) {
+    async function handleStatusChange(id: number, newStatus: string, currentTask: Task) {
         setUpdating(id);
         try {
-            await updateTask(id, { status: newStatus });
+            const updates: any = { status: newStatus };
+
+            // If approving, include the (possibly edited) reply
+            if (newStatus === 'APPROVED' && (replyEdits[id] !== undefined || currentTask.suggestedReplyBody)) {
+                updates.suggestedReplyBody = replyEdits[id] ?? currentTask.suggestedReplyBody;
+                updates.suggestedChannel = currentTask.suggestedChannel || 'sms';
+            }
+
+            await updateTask(id, updates);
             onRefresh();
+
+            // Clear local edit state for this task
+            setReplyEdits(prev => {
+                const next = { ...prev };
+                delete next[id];
+                return next;
+            });
         } catch (err: any) {
             alert('Failed: ' + err.message);
         } finally {
@@ -47,7 +63,7 @@ export default function TaskBoard({ tasks, onRefresh }: TaskBoardProps) {
         <div className="space-y-4">
             {tasks.map(task => (
                 <div key={task.id} className="bg-white rounded-lg shadow p-6 flex flex-col md:flex-row items-start justify-between gap-4">
-                    <div className="flex-1">
+                    <div className="flex-1 w-full">
                         {/* Header */}
                         <div className="flex items-center gap-3 mb-2 flex-wrap">
                             <span className={`px-2 py-1 rounded text-xs font-bold uppercase tracking-wide
@@ -110,24 +126,43 @@ export default function TaskBoard({ tasks, onRefresh }: TaskBoardProps) {
                         </div>
 
                         {/* Payload Preview */}
-                        <div className="bg-gray-50 rounded p-3 text-sm font-mono text-gray-700 whitespace-pre-wrap max-h-32 overflow-y-auto">
+                        <div className="bg-gray-50 rounded p-3 text-sm font-mono text-gray-700 whitespace-pre-wrap max-h-32 overflow-y-auto mb-4">
                             {JSON.stringify(task.payload, null, 2)}
                         </div>
+
+                        {/* Draft Reply UI */}
+                        {task.status === 'PENDING_REVIEW' && (task.suggestedReplyBody || task.suggestedChannel === 'sms') && (
+                            <div className="bg-blue-50 border border-blue-100 rounded p-4 mb-2">
+                                <h4 className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-2">
+                                    Suggested Reply ({task.suggestedChannel || 'sms'})
+                                </h4>
+                                <textarea
+                                    className="w-full text-sm p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                    rows={3}
+                                    value={replyEdits[task.id] ?? (task.suggestedReplyBody || '')}
+                                    onChange={e => setReplyEdits({ ...replyEdits, [task.id]: e.target.value })}
+                                    placeholder="Draft a reply..."
+                                />
+                            </div>
+                        )}
                     </div>
 
                     {/* Actions */}
-                    <div className="flex flex-col gap-2 min-w-[120px]">
+                    <div className="flex flex-col gap-2 min-w-[140px] ml-4">
                         {task.status === 'PENDING_REVIEW' && (
                             <>
                                 <button
-                                    onClick={() => handleStatusChange(task.id, 'APPROVED')}
+                                    onClick={() => handleStatusChange(task.id, 'APPROVED', task)}
                                     disabled={updating === task.id}
-                                    className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm font-medium transition-colors disabled:opacity-50"
+                                    className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm font-medium transition-colors disabled:opacity-50 flex flex-col items-center"
                                 >
-                                    Approve
+                                    <span>Approve</span>
+                                    {(replyEdits[task.id] || task.suggestedReplyBody) && (
+                                        <span className="text-[10px] opacity-80">& Send Reply</span>
+                                    )}
                                 </button>
                                 <button
-                                    onClick={() => handleStatusChange(task.id, 'REJECTED')}
+                                    onClick={() => handleStatusChange(task.id, 'REJECTED', task)}
                                     disabled={updating === task.id}
                                     className="px-4 py-2 bg-white border border-red-300 text-red-700 rounded hover:bg-red-50 text-sm font-medium transition-colors disabled:opacity-50"
                                 >

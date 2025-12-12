@@ -155,7 +155,10 @@ async function updateTask(req, res, next) {
         updateField('priority', priority);
         updateField('category', category);
         updateField('subType', subType);
-        updateField('sentiment', sentiment); // New
+        updateField('sentiment', sentiment);
+        updateField('suggestedReplyBody', suggestedReplyBody);
+        updateField('suggestedChannel', req.body.suggestedChannel);
+        updateField('suggestedReplySubject', req.body.suggestedReplySubject);
 
         // Linking change
         if (parentTaskId !== undefined && parentTaskId !== task.parentTaskId) {

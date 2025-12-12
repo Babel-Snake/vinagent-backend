@@ -70,7 +70,9 @@ async function triageMessage(message, context = {}) {
         status: 'PENDING_REVIEW',
         payload: result.payload || {},
         requiresApproval: true,
-        suggestedTitle: result.suggestedTitle // Pass through if AI generated
+        suggestedTitle: result.suggestedTitle, // Pass through if AI generated
+        suggestedReplyBody: result.suggestedReply || null,
+        suggestedChannel: 'sms' // Default to SMS for now, could infer from message source
     };
 }
 
