@@ -35,8 +35,14 @@ export interface AutoclassifyResponse {
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000') + '/api';
 
-// Temporary mock token until Phase 7 (Real Auth) / Phase 6.2 (Auth UI)
-const AUTH_TOKEN = 'Bearer mock-token';
+import { auth } from './firebase';
+
+async function getAuthToken(): Promise<string> {
+    if (auth.currentUser) {
+        return `Bearer ${await auth.currentUser.getIdToken()}`;
+    }
+    return '';
+}
 
 export async function fetchTasks(status?: string): Promise<Task[]> {
     const params = new URLSearchParams();
@@ -44,7 +50,7 @@ export async function fetchTasks(status?: string): Promise<Task[]> {
 
     const res = await fetch(`${API_BASE}/tasks?${params.toString()}`, {
         headers: {
-            'Authorization': AUTH_TOKEN
+            'Authorization': await getAuthToken()
         },
         cache: 'no-store'
     });
@@ -62,7 +68,7 @@ export async function updateTask(taskId: number, updates: Partial<Task>): Promis
         method: 'PATCH',
         headers: {
             'Content-Type': 'application/json',
-            'Authorization': AUTH_TOKEN
+            'Authorization': await getAuthToken()
         },
         body: JSON.stringify(updates)
     });
@@ -80,7 +86,7 @@ export async function createTask(taskData: Partial<Task> & { notes?: string }): 
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'Authorization': AUTH_TOKEN
+            'Authorization': await getAuthToken()
         },
         body: JSON.stringify(taskData)
     });
@@ -98,7 +104,7 @@ export async function autoclassifyTask(text: string, memberId?: number): Promise
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'Authorization': AUTH_TOKEN
+            'Authorization': await getAuthToken()
         },
         body: JSON.stringify({ text, memberId })
     });

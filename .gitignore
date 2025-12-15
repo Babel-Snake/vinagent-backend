@@ -31,3 +31,7 @@ build/
 
 # Sequelize / DB
 *.sqlite
+
+# Secrets
+src/config/serviceAccountKey.json
+
