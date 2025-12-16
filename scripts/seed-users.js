@@ -13,10 +13,23 @@ const USERS = [
         wineryId: 1
     },
     {
-        email: 'staff@vinagent.com',
+        // Kiosk-compatible Staff User 1
+        // Username: Sarah
+        email: 'sarah.w1@vinagent.internal',
         role: 'staff',
         firstName: 'Sarah',
-        lastName: 'Staff',
+        lastName: '', // Display Name will be just "Sarah" usually, or "Sarah "
+        displayName: 'Sarah',
+        wineryId: 1
+    },
+    {
+        // Kiosk-compatible Staff User 2
+        // Username: Tom
+        email: 'tom.w1@vinagent.internal',
+        role: 'staff',
+        firstName: 'Tom',
+        lastName: '',
+        displayName: 'Tom',
         wineryId: 1
     },
     {
@@ -56,7 +69,7 @@ async function seed() {
                     const newUser = await admin.auth().createUser({
                         email: u.email,
                         password: SEED_PASSWORD,
-                        displayName: `${u.firstName} ${u.lastName}`,
+                        displayName: u.displayName || `${u.firstName} ${u.lastName}`,
                         emailVerified: true
                     });
                     uid = newUser.uid;
@@ -74,6 +87,7 @@ async function seed() {
                     role: u.role,
                     firstName: u.firstName,
                     lastName: u.lastName,
+                    displayName: u.displayName || `${u.firstName} ${u.lastName}`,
                     wineryId: u.wineryId
                 }
             });

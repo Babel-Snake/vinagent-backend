@@ -115,3 +115,59 @@ export async function autoclassifyTask(text: string, memberId?: number): Promise
 
     return await res.json();
 }
+
+export interface Staff {
+    id: number;
+    displayName: string;
+    email: string;
+    createdAt: string;
+}
+
+export async function createStaff(data: { username: string; password: string; }): Promise<Staff> {
+    const res = await fetch(`${API_BASE}/staff`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': await getAuthToken()
+        },
+        body: JSON.stringify(data)
+    });
+
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to create staff');
+    }
+
+    const json = await res.json();
+    return json.staff;
+}
+
+export async function resolveStaff(username: string): Promise<{ email: string; wineryId: number }> {
+    const res = await fetch(`${API_BASE}/public/resolve-staff?username=${encodeURIComponent(username)}`, {
+        cache: 'no-store'
+    });
+
+    if (!res.ok) {
+        if (res.status === 409) {
+            throw new Error('AMBIGUOUS');
+        }
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to resolve staff user');
+    }
+
+    return await res.json();
+}
+
+export async function getMyProfile(): Promise<any> {
+    const res = await fetch(`${API_BASE}/public/me`, {
+        headers: {
+            'Authorization': await getAuthToken()
+        }
+    });
+
+    if (!res.ok) {
+        throw new Error('Failed to fetch profile');
+    }
+
+    return await res.json();
+}

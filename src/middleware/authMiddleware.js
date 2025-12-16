@@ -23,7 +23,10 @@ async function authMiddleware(req, res, next) {
     // Find Internal User
     // note: In a real app, we might sync users on login. 
     // For now, let's try to match by email, or fallback to a default "Manager" role if not found (for easy testing).
-    let user = await User.findOne({ where: { email } });
+    let user = await User.findOne({
+      where: { email },
+      include: [{ model: Winery, attributes: ['name'] }]
+    });
 
     if (!user) {
       // Option: Auto-create user or Reject.
@@ -54,6 +57,7 @@ async function authMiddleware(req, res, next) {
       email: user.email,
       role: user.role,
       wineryId: user.wineryId,
+      wineryName: user.Winery ? user.Winery.name : 'Unknown Winery',
       firebaseUid: uid
     };
 

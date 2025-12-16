@@ -13,8 +13,12 @@ router.get('/health', (req, res) => {
 // Webhooks (no Firebase auth; secured by provider secret/signature)
 router.use('/webhooks', webhookRoutes);
 
+// Public API (no auth required)
+router.use('/public', require('./public.routes'));
+
 // Dashboard APIs (protected by Firebase auth)
 router.use('/tasks', authMiddleware, taskRoutes);
+router.use('/staff', authMiddleware, require('./staff.routes'));
 
 // Member self-service (secured by MemberActionToken)
 // router.use('/', addressUpdateRoutes);

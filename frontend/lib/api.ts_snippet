@@ -1,0 +1,25 @@
+export interface Staff {
+    id: number;
+    displayName: string;
+    email: string;
+    createdAt: string;
+}
+
+export async function createStaff(data: { firstName: string; lastName: string; password: string; }): Promise<Staff> {
+    const res = await fetch(`${API_BASE}/staff`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': await getAuthToken()
+        },
+        body: JSON.stringify(data)
+    });
+
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to create staff');
+    }
+
+    const json = await res.json();
+    return json.staff;
+}

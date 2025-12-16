@@ -21,6 +21,9 @@ Represents an authenticated person who can use the VinAgent system (e.g. winery 
 
 Authentication is handled by Firebase; the `User` record stores local metadata and role information.
 
+> [!NOTE]
+> **Managed Staff Accounts**: Staff users may have "Internal Accounts" created by Managers. These use a generated email format: `firstname.lastname.w{wineryId}@vinagent.internal` and are authenticated via Firebase just like regular users, but the complexity is hidden from the UI.
+
 ### 1.2 Fields
 
 * `id` (UUID or INT, primary key)
