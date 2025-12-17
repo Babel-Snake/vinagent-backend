@@ -42,6 +42,9 @@ export default function Navbar({ user, fullProfile }: NavbarProps) {
                                     <Link href="/staff" className={navLinkClass(isActive('/staff'))}>
                                         Staff
                                     </Link>
+                                    <Link href="/winery" className={navLinkClass(isActive('/winery'))}>
+                                        Winery
+                                    </Link>
                                     <Link href="/analytics" className={navLinkClass(isActive('/analytics'))}>
                                         Analytics
                                     </Link>

@@ -48,52 +48,82 @@ Authentication is handled by Firebase; the `User` record stores local metadata a
 
 ---
 
-## 2. Winery
-
+## 2. Winery (Core Identity)
 ### 2.1 Purpose
-
-Represents a winery using VinAgent.
-
-Includes configuration that affects how messages are handled and how replies are drafted.
+Represents the core identity of a winery. Granular configuration is now split into sub-profiles (Brand, Bookings, Policies, Integrations).
 
 ### 2.2 Fields
-
-* `id` (UUID or INT, primary key)
+* `id` (INT/UUID, PK)
 * `name` (STRING)
-* `region` (STRING, optional)
-* `contactEmail` (STRING, optional)
-* `contactPhone` (STRING, optional)
-* `brandVoiceConfig` (JSON, optional)
-  E.g. tone, formality, signature lines.
-* `timeZone` (STRING, e.g. `Australia/Adelaide`)
-* `createdAt` (DATETIME)
-* `updatedAt` (DATETIME)
+* `shortName` (STRING) - Chat-friendly name (e.g. "Penfolds")
+* `keyDescriptors` (JSON Array) - Meta tags for AI context
+* `region` (STRING)
+* `contactEmail` (STRING) - Internal ops
+* `contactPhone` (STRING) - Internal ops
+* `publicEmail` (STRING) - Customer facing
+* `publicPhone` (STRING) - Customer facing
+* `website` (STRING)
+* `timezone` (STRING)
+* `openingHours` (JSON)
+* `addressLine1`...`country` (Standard Address Fields)
 
 ### 2.3 Relationships
-
-* One `Winery` has many `Users`.
-* One `Winery` has many `Members`.
-* One `Winery` has many `Messages`.
-* One `Winery` has many `Tasks`.
-
-### 2.4 Privacy/PII
-
-* Mostly business data; lower sensitivity than member data but still not for broad logging.
-
-### 2.5 WinerySettings
-Represents configuration and feature flags for a winery, effectively defining its product tier.
-
-* `id` (INT, primary key)
-* `wineryId` (FK → Winery.id)
-* `tier` (ENUM: `BASIC`, `STANDARD`, `ADVANCED`, `ENTERPRISE`)
-* `enableBookingModule` (BOOLEAN)
-* `enableWineClubModule` (BOOLEAN)
-* `enableOrdersModule` (BOOLEAN)
-* `enableSecureLinks` (BOOLEAN)
-* `createdAt` (DATETIME)
-* `updatedAt` (DATETIME)
+* HasOne `WineryBrandProfile`
+* HasOne `WineryBookingsConfig`
+* HasMany `WineryBookingType`
+* HasOne `WineryPolicyProfile`
+* HasMany `WineryFAQItem`
+* HasOne `WineryIntegrationConfig`
+* HasMany `WineryProduct`
+* HasMany `User`, `Member`, `Task`, `Message`
 
 ---
+
+## 2A. Winery Configuration Modules (Deep Dive)
+
+### 2A.1 WineryBrandProfile
+Defines the "Voice" of the AI.
+* `brandStoryShort` (TEXT)
+* `tonePreset` (ENUM: warm, formal, playful, etc.)
+* `voiceGuidelines` (TEXT)
+* `doSayExamples` (JSON Array)
+* `dontSayExamples` (JSON Array)
+* `formalityLevel` (INT 1-5)
+
+### 2A.2 WineryBookingsConfig
+Global rules for reservations.
+* `walkInsAllowed` (BOOL)
+* `groupBookingThreshold` (INT)
+* `cancellationPolicyText` (TEXT)
+* `kidsPolicy` (TEXT)
+* `petsPolicy` (TEXT)
+
+### 2A.3 WineryBookingType
+Specific experiences on offer.
+* `name` (STRING)
+* `priceCents` (INT)
+* `durationMinutes` (INT)
+* `isActive` (BOOL)
+
+### 2A.4 WineryProduct
+Physical items for sale/tasting.
+* `name` (STRING)
+* `vintage` (STRING)
+* `category` (STRING)
+* `price` (DECIMAL)
+* `stockStatus` (ENUM: IN_STOCK, LOW_STOCK, OUT_OF_STOCK)
+* `keySellingPoints` (JSON Array)
+* `pairingSuggestions` (TEXT)
+
+### 2A.5 WineryPolicyProfile & WineryFAQItem
+* **Profile**: Structured text for 'Shipping', 'Returns', 'Wine Club'.
+* **FAQItem**: Individual Q&A pairs for the AI knowledge base.
+
+### 2A.6 WineryIntegrationConfig
+Channel settings.
+* `smsProvider` (twilio/messagemedia)
+* `smsFromNumber` (STRING)
+* `kioskModeEnabled` (BOOL)
 
 ## 3. Member
 

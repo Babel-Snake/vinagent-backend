@@ -19,6 +19,7 @@ router.use('/public', require('./public.routes'));
 // Dashboard APIs (protected by Firebase auth)
 router.use('/tasks', authMiddleware, taskRoutes);
 router.use('/staff', authMiddleware, require('./staff.routes'));
+router.use('/winery', authMiddleware, require('./winery.routes')); // Phase 12
 
 // Member self-service (secured by MemberActionToken)
 // router.use('/', addressUpdateRoutes);

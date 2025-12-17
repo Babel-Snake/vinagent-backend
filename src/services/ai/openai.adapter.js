@@ -9,9 +9,28 @@ class OpenAIAdapter extends AIAdapter {
     }
 
     async classify(text, context = {}) {
+        let wineryContextString = '';
+
+        // Fetch rich winery context if ID is available
+        if (context.wineryId) {
+            try {
+                const { getAiContext } = require('../winery.service');
+                const wineryData = await getAiContext(context.wineryId);
+
+                if (wineryData) {
+                    wineryContextString = JSON.stringify(wineryData, null, 2);
+                }
+            } catch (err) {
+                console.warn('Failed to load winery AI context:', err.message);
+            }
+        }
+
         const systemPrompt = `
-You are VinAgent, an intelligent cellar door assistant.
+You are VinAgent, an intelligent cellar door assistant for ${context.wineryId ? 'a specific winery' : 'a winery'}.
 Your job is to analyze incoming messages and classify them into a structured task format.
+
+**Winery Context (Source of Truth):**
+${wineryContextString || 'No specific winery context available.'}
 
 **Classification Rules:**
 Return a JSON object with the following fields:
@@ -21,11 +40,11 @@ Return a JSON object with the following fields:
 - priority: [low, normal, high] (High if angry, urgent, or payment issue)
 - summary: A brief 1-sentence summary of the request.
 - suggestedTitle: A short title for the task.
-- suggestedReply: A polite, professional SMS reply (max 160 chars) to the customer. Ask for more info if needed, or confirm action.
-
-**Context:**
-Member: ${context.member ? 'Yes (Member ID: ' + context.member.id + ')' : 'No (Visitor)'}
-Winery ID: ${context.wineryId || 'Unknown'}
+- suggestedReply: A polite, professional SMS reply (max 160 chars) to the customer. 
+    - ADHERE TO THE "BRAND VOICE" SETTINGS IN THE CONTEXT.
+    - USE THE "POLICIES" AND "FAQS" TO ANSWER QUESTIONS ACCURATELY.
+    - IF A PRODUCT IS MENTIONED, CHECK "INVENTORY" FOR PRICE/STOCK.
+    - DO NOT HALLUCINATE. If info is missing, ask the customer.
 
 **Input Text:**
 "${text}"

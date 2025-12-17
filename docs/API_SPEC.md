@@ -136,11 +136,33 @@ The controller will:
 
 ---
 
-## 4. Task APIs (Dashboard)
+## 4. Winery Management APIs
+Endpoints for configuring the winery profile. Protected (Manager/Admin).
+
+### 4.1 GET /api/winery/full
+Returns the complete nested winery object (Profile, Products, Policies, etc.).
+
+### 4.2 PUT /api/winery/*
+Section-based updates.
+* `PUT /api/winery` (Overview)
+* `PUT /api/winery/brand`
+* `PUT /api/winery/bookings/config`
+* `PUT /api/winery/policies/profile`
+* `PUT /api/winery/integrations`
+
+### 4.3 Sub-Resources
+Standard CRUD for lists.
+* `POST /api/winery/products`, `DELETE /api/winery/products/:id`
+* `POST /api/winery/bookings/types`, `DELETETypes/:id`
+* `POST /api/winery/faqs`, `DELETE /api/winery/faqs/:id`
+
+---
+
+## 5. Task APIs (Dashboard)
 
 These endpoints allow winery staff to review and approve tasks.
 
-### 4.1 GET /tasks
+### 5.1 GET /tasks
 
 List tasks for the authenticated user’s winery.
 

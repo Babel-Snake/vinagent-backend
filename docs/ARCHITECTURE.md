@@ -255,13 +255,16 @@ Details will be defined in `API_SPEC.md` and integration-specific docs later.
 ### 5.3 OpenAI (Triage + Drafting)
 
 **Used for:**
-* Intent classification in the Triage Engine (later phase).
+* Intent classification in the Triage Engine.
 * Drafting suggested replies to members.
 
 **Interaction pattern:**
-* A service module will call OpenAI APIs via an internal helper.
+* **Context Injection**: The `WineryService.getAiContext(wineryId)` method aggregates all winery data (Brand, Products, Policies) into a single JSON payload.
+* This payload is injected into the **System Prompt** for every OpenAI call.
+* This ensures the AI knows the specific winery's voice, inventory, and rules *before* it answers.
+
+* A service bridge (`OpenAIAdapter`) handles the API calls.
 * No direct calls to OpenAI from controllers.
-* All prompts and models should be centrally configured.
 
 ## 6. Security & Privacy
 
