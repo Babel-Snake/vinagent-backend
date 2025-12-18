@@ -1,40 +1,187 @@
-// src/services/taskService.js
-// Handles Task creation, updates, and status transitions.
-
+const { Task, TaskAction, WinerySettings } = require('../models');
+const executionService = require('./execution.service');
 const logger = require('../config/logger');
-// TODO: require models when implemented
 
-async function createTaskFromTriage({ messageId, memberId, wineryId, triageResult }) {
-  // TODO: use Sequelize models.Task and TaskAction to persist
-  logger.info('createTaskFromTriage called', {
-    messageId,
-    memberId,
-    wineryId,
-    type: triageResult.type
-  });
+/**
+ * Service to handle Task creation and updates.
+ * Centralizes business logic, logging, and side effects.
+ */
 
-  // Return placeholder shape for now
-  return {
-    id: 5001,
-    ...triageResult,
-    status: 'PENDING_REVIEW'
-  };
+// --- UTILS ---
+function recordAction(t, taskId, userId, type, details) {
+  return TaskAction.create({
+    taskId,
+    userId,
+    actionType: type,
+    details
+  }, { transaction: t });
 }
 
-async function updateTask({ id, wineryId, userId, status, payload, suggestedChannel, suggestedReplyBody }) {
-  // TODO: enforce status transitions and persist changes
-  logger.info('updateTask called', { id, wineryId, userId, status });
+// --- CORE METHODS ---
 
-  return {
-    id,
-    status,
-    payload,
-    suggestedChannel,
-    suggestedReplyBody
-  };
+/**
+ * Creates a new task (manually or via triage).
+ */
+async function createTask({ wineryId, userId, data }) {
+  const t = await Task.sequelize.transaction();
+  try {
+    const {
+      category, subType, customerType, type, memberId, messageId,
+      payload, priority, notes, sentiment, assigneeId, parentTaskId
+    } = data;
+
+    // 1. Create Task
+    const task = await Task.create({
+      wineryId,
+      category: category || 'INTERNAL',
+      subType: subType || 'INTERNAL_TASK',
+      customerType: customerType || 'UNKNOWN',
+      type: subType || type || 'INTERNAL_TASK', // Legacy fallback
+      status: 'PENDING_REVIEW',
+      priority: priority || 'normal',
+      sentiment: sentiment || 'NEUTRAL',
+      payload: payload || {},
+      memberId: memberId || null,
+      messageId: messageId || null,
+      createdBy: userId,
+      updatedBy: userId,
+      assigneeId: assigneeId || null,
+      parentTaskId: parentTaskId || null
+    }, { transaction: t });
+
+    // 2. Log Creation Action
+    await recordAction(t, task.id, userId, 'MANUAL_CREATED', {
+      notes,
+      originalText: payload?.originalText
+    });
+
+    // 3. Log Linking Action (if needed)
+    if (parentTaskId) {
+      await recordAction(t, task.id, userId, 'LINKED_TASK', {
+        parentTaskId,
+        childTaskId: task.id
+      });
+    }
+
+    await t.commit();
+    logger.info('Task created manually', { taskId: task.id, userId, wineryId });
+    return task;
+
+  } catch (err) {
+    await t.rollback();
+    throw err;
+  }
+}
+
+/**
+ * Updates an existing task.
+ * Handles status transitions, assignment, linking, and execution triggers.
+ */
+async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
+  const t = await Task.sequelize.transaction();
+  try {
+    const task = await Task.findOne({ where: { id: taskId, wineryId } });
+    if (!task) throw new Error('Task not found'); // Service-level error, controller maps to 404
+
+    const {
+      status, payload, priority, notes, suggestedReplyBody,
+      category, subType, sentiment, assigneeId, parentTaskId,
+      suggestedChannel, suggestedReplySubject
+    } = updates;
+
+    // --- SAFEGUARDS ---
+    if (status === 'APPROVED' && updates.status !== task.status) {
+      if (userRole === 'staff') {
+        const err = new Error('Staff cannot approve tasks.');
+        err.statusCode = 403;
+        err.code = 'FORBIDDEN';
+        throw err;
+      }
+    }
+
+    const changes = {};
+    const oldValues = {};
+
+    // Helper to track changes
+    const setField = (field, value) => {
+      if (value !== undefined && value !== task[field]) {
+        changes[field] = value;
+        oldValues[field] = task[field];
+        task[field] = value;
+      }
+    };
+
+    // Apply fields
+    setField('status', status);
+    setField('priority', priority);
+    setField('category', category);
+    setField('subType', subType);
+    setField('sentiment', sentiment);
+    setField('suggestedReplyBody', suggestedReplyBody);
+    setField('suggestedChannel', suggestedChannel);
+    setField('suggestedReplySubject', suggestedReplySubject);
+
+    // Special logic: Linking
+    if (parentTaskId !== undefined && parentTaskId !== task.parentTaskId) {
+      setField('parentTaskId', parentTaskId);
+      await recordAction(t, task.id, userId, 'LINKED_TASK', {
+        parentTaskId,
+        childTaskId: task.id
+      });
+    }
+
+    // Special logic: Assignment
+    if (assigneeId !== undefined && assigneeId !== task.assigneeId) {
+      const oldAssignee = task.assigneeId;
+      setField('assigneeId', assigneeId);
+      await recordAction(t, task.id, userId, 'ASSIGNED', {
+        from: oldAssignee,
+        to: assigneeId
+      });
+    }
+
+    // Deep Payload update
+    if (payload) {
+      changes.payload = payload;
+      oldValues.payload = task.payload;
+      task.payload = payload;
+    }
+
+    task.updatedBy = userId;
+    await task.save({ transaction: t });
+
+    // Generic Update Action
+    if (Object.keys(changes).length > 0) {
+      let actionType = 'MANUAL_UPDATE';
+      if (changes.status === 'APPROVED') actionType = 'APPROVED';
+      if (changes.status === 'REJECTED') actionType = 'REJECTED';
+
+      await recordAction(t, task.id, userId, actionType, { changes, oldValues });
+    }
+
+    // Notes
+    if (notes) {
+      await recordAction(t, task.id, userId, 'NOTE_ADDED', { note: notes });
+    }
+
+    // EXECUTION TRIGGER
+    if (changes.status === 'APPROVED') {
+      // Safeguard check could go here later
+      const settings = await WinerySettings.findOne({ where: { wineryId } });
+      await executionService.executeTask(task, t, settings);
+    }
+
+    await t.commit();
+    logger.info('Task updated', { taskId, userId, changes: Object.keys(changes) });
+    return task;
+
+  } catch (err) {
+    await t.rollback();
+    throw err;
+  }
 }
 
 module.exports = {
-  createTaskFromTriage,
+  createTask,
   updateTask
 };

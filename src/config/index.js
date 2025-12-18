@@ -1,7 +1,28 @@
 // src/config/index.js
 // Centralised configuration loader using environment variables.
 
-require('dotenv').config();
+const dotenv = require('dotenv');
+dotenv.config();
+
+const logger = require('./logger'); // Load simple logger for boot errors
+
+// Fail-Fast for Production
+if (process.env.NODE_ENV === 'production') {
+  const requiredVars = [
+    'FIREBASE_PRIVATE_KEY',
+    'FIREBASE_CLIENT_EMAIL',
+    'DB_PASSWORD',
+    'DB_USER'
+  ];
+
+  const missing = requiredVars.filter(key => !process.env[key]);
+
+  if (missing.length > 0) {
+    // Use console.error because logger might depend on invalid config or not be initialized fully
+    console.error(`FATAL: Missing required environment variables: ${missing.join(', ')}`);
+    process.exit(1);
+  }
+}
 
 module.exports = {
   port: process.env.PORT || 3000,

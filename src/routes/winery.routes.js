@@ -1,20 +1,20 @@
 const express = require('express');
 const router = express.Router();
 const wineryController = require('../controllers/winery.controller');
-const { protect, authorize } = require('../middleware/authMiddleware');
+const { authMiddleware: protect, requireRole } = require('../middleware/authMiddleware');
 
 // Base: /api/winery
 
 // Full Profile
-router.get('/full', protect, authorize('manager', 'admin'), wineryController.getWinery);
-router.put('/', protect, authorize('manager', 'admin'), wineryController.updateWinery);
+router.get('/full', protect, requireRole(['manager', 'admin']), wineryController.getWinery);
+router.put('/', protect, requireRole(['manager', 'admin']), wineryController.updateOverview);
 
 // Products
-router.post('/products', protect, authorize('manager', 'admin'), wineryController.createProduct);
-router.delete('/products/:id', protect, authorize('manager', 'admin'), wineryController.deleteProduct);
+router.post('/products', protect, requireRole(['manager', 'admin']), wineryController.createProduct);
+router.delete('/products/:id', protect, requireRole(['manager', 'admin']), wineryController.deleteProduct);
 
-// Policies
-router.post('/policies', protect, authorize('manager', 'admin'), wineryController.createPolicy);
-router.delete('/policies/:id', protect, authorize('manager', 'admin'), wineryController.deletePolicy);
+// FAQs (formerly Policies)
+router.post('/faqs', protect, requireRole(['manager', 'admin']), wineryController.createFAQ);
+router.delete('/faqs/:id', protect, requireRole(['manager', 'admin']), wineryController.deleteFAQ);
 
 module.exports = router;

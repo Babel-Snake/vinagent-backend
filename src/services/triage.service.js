@@ -8,6 +8,7 @@ const { Task, WinerySettings } = require('../models');
  * @returns {Promise<Object>} - Returns { type, status, priority, payload }
  */
 const aiService = require('./ai');
+const logger = require('../config/logger');
 
 async function triageMessage(message, context = {}) {
     const body = (message.body || '').toLowerCase();
@@ -33,8 +34,9 @@ async function triageMessage(message, context = {}) {
         const aiResult = await aiService.classify(message.body, context);
         // Merge AI result
         result = { ...result, ...aiResult };
+        result = { ...result, ...aiResult };
     } catch (err) {
-        console.warn('AI Triage unavailable/failed:', err.message);
+        logger.warn('AI Triage unavailable/failed', { error: err.message, body: body.substring(0, 50) });
         // 3. Fallback to Heuristics (Legacy Logic)
         result = fallbackHeuristics(body, customerType);
     }
