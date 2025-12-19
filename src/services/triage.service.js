@@ -34,7 +34,6 @@ async function triageMessage(message, context = {}) {
         const aiResult = await aiService.classify(message.body, context);
         // Merge AI result
         result = { ...result, ...aiResult };
-        result = { ...result, ...aiResult };
     } catch (err) {
         logger.warn('AI Triage unavailable/failed', { error: err.message, body: body.substring(0, 50) });
         // 3. Fallback to Heuristics (Legacy Logic)

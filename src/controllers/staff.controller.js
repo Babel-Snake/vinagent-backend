@@ -27,6 +27,15 @@ exports.createStaff = async (req, res, next) => {
         if (cleanUsername.length < 3) {
             return res.status(400).json({ error: 'Username must be at least 3 alphanumeric characters.' });
         }
+
+        // Password Validation (min 8 chars, at least 1 number)
+        if (!password || password.length < 8) {
+            return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+        }
+        if (!/\d/.test(password)) {
+            return res.status(400).json({ error: 'Password must contain at least one number.' });
+        }
+
         const email = `${cleanUsername}.w${wineryId}@vinagent.internal`;
 
         // 2. Create in Firebase
