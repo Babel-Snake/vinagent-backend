@@ -1,9 +1,10 @@
 const { Task, Member, Message, User } = require('../models');
+const { Op } = require('sequelize');
 
 async function listTasks(req, res, next) {
     try {
-        const { wineryId } = req.user;
-        const { status, type, priority } = req.query;
+        const { wineryId, role, id: userId } = req.user;
+        const { status, type, priority, assignedToMe } = req.query;
 
         const whereClause = { wineryId };
 
@@ -11,11 +12,21 @@ async function listTasks(req, res, next) {
         if (type) whereClause.type = type;
         if (priority) whereClause.priority = priority;
 
+        // RBAC: Staff can only see their assigned tasks or unassigned tasks
+        if (role === 'staff') {
+            whereClause[Op.or] = [
+                { assigneeId: userId },
+                { assigneeId: null }
+            ];
+        } else if (assignedToMe === 'true') {
+            // Managers/Admins can filter to their own if they want
+            whereClause.assigneeId = userId;
+        }
+
         const tasks = await Task.findAll({
             where: whereClause,
             include: [
                 { model: Member, attributes: ['id', 'firstName', 'lastName'] },
-                // { model: Message, attributes: ['id', 'body', 'receivedAt'] } // Optional: include message
             ],
             order: [['createdAt', 'DESC']]
         });

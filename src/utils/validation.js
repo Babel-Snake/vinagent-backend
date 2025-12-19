@@ -3,7 +3,7 @@ const Joi = require('joi');
 const validate = (schema, data) => {
     const { error, value } = schema.validate(data, {
         abortEarly: false,
-        stripUnknown: true // Clean payload
+        stripUnknown: true
     });
 
     if (error) {
@@ -17,49 +17,108 @@ const validate = (schema, data) => {
     return value;
 };
 
-// --- SCHEMAS ---
+// --- CONSTANTS ---
+const CATEGORIES = ['BOOKING', 'ORDER', 'ACCOUNT', 'GENERAL', 'OPERATIONS', 'INTERNAL', 'SYSTEM'];
+const STATUSES = ['PENDING_REVIEW', 'APPROVED', 'AWAITING_MEMBER_ACTION', 'REJECTED', 'EXECUTED', 'CANCELLED'];
+const PRIORITIES = ['low', 'normal', 'high'];
+const SENTIMENTS = ['POSITIVE', 'NEUTRAL', 'NEGATIVE'];
+const CUSTOMER_TYPES = ['MEMBER', 'VISITOR', 'UNKNOWN'];
+const CHANNELS = ['sms', 'email', 'none'];
+
+// --- PAYLOAD SUB-SCHEMAS (Whitelisted Fields) ---
+const addressPayloadSchema = Joi.object({
+    addressLine1: Joi.string().max(200),
+    addressLine2: Joi.string().max(200).allow(''),
+    suburb: Joi.string().max(100),
+    state: Joi.string().max(50),
+    postcode: Joi.string().max(20),
+    country: Joi.string().max(50).default('Australia'),
+    originalText: Joi.string().max(2000)
+}).unknown(false); // Reject unknown fields in address
+
+const bookingPayloadSchema = Joi.object({
+    date: Joi.string().isoDate(),
+    time: Joi.string().pattern(/^\d{2}:\d{2}$/),
+    pax: Joi.number().integer().min(1).max(100),
+    experienceType: Joi.string().max(100),
+    specialRequests: Joi.string().max(500),
+    originalText: Joi.string().max(2000)
+}).unknown(false);
+
+// Generic payload for other task types - still controlled
+const genericPayloadSchema = Joi.object({
+    summary: Joi.string().max(500),
+    originalText: Joi.string().max(2000),
+    note: Joi.string().max(2000)
+}).unknown(true); // Allow extra fields for flexibility, but at least define expected ones
+
+// --- STATUS TRANSITION RULES ---
+const VALID_STATUS_TRANSITIONS = {
+    'PENDING_REVIEW': ['APPROVED', 'REJECTED', 'CANCELLED'],
+    'APPROVED': ['EXECUTED', 'AWAITING_MEMBER_ACTION', 'CANCELLED'],
+    'AWAITING_MEMBER_ACTION': ['EXECUTED', 'CANCELLED'],
+    'REJECTED': ['PENDING_REVIEW'], // Can be re-opened
+    'EXECUTED': [], // Terminal
+    'CANCELLED': ['PENDING_REVIEW'] // Can be re-opened
+};
+
+function validateStatusTransition(currentStatus, newStatus) {
+    if (!newStatus || newStatus === currentStatus) return true;
+    const allowed = VALID_STATUS_TRANSITIONS[currentStatus] || [];
+    return allowed.includes(newStatus);
+}
+
+// --- MAIN SCHEMAS ---
 
 const createTaskSchema = Joi.object({
-    category: Joi.string().valid(
-        'BOOKING', 'ORDER', 'ACCOUNT', 'GENERAL', 'OPERATIONS', 'INTERNAL', 'SYSTEM'
-    ).required(),
-    subType: Joi.string().required(),
-    customerType: Joi.string().valid('MEMBER', 'VISITOR', 'UNKNOWN').optional(),
-    priority: Joi.string().valid('low', 'normal', 'high').default('normal'),
-    sentiment: Joi.string().valid('POSITIVE', 'NEUTRAL', 'NEGATIVE').default('NEUTRAL'),
-    payload: Joi.object().unknown(),
-    notes: Joi.string().optional(),
-    memberId: Joi.number().integer().allow(null),
-    messageId: Joi.number().integer().allow(null),
-    assigneeId: Joi.number().integer().allow(null),
-    parentTaskId: Joi.number().integer().allow(null)
+    category: Joi.string().valid(...CATEGORIES).required(),
+    subType: Joi.string().required().max(50),
+    customerType: Joi.string().valid(...CUSTOMER_TYPES).default('UNKNOWN'),
+    priority: Joi.string().valid(...PRIORITIES).default('normal'),
+    sentiment: Joi.string().valid(...SENTIMENTS).default('NEUTRAL'),
+    payload: Joi.alternatives().try(
+        addressPayloadSchema,
+        bookingPayloadSchema,
+        genericPayloadSchema
+    ).default({}),
+    notes: Joi.string().max(2000).optional(),
+    memberId: Joi.number().integer().positive().allow(null),
+    messageId: Joi.number().integer().positive().allow(null),
+    assigneeId: Joi.number().integer().positive().allow(null),
+    parentTaskId: Joi.number().integer().positive().allow(null)
 });
 
 const updateTaskSchema = Joi.object({
-    status: Joi.string().valid(
-        'PENDING_REVIEW', 'APPROVED', 'AWAITING_MEMBER_ACTION', 'REJECTED', 'EXECUTED', 'CANCELLED'
+    status: Joi.string().valid(...STATUSES),
+    priority: Joi.string().valid(...PRIORITIES),
+    category: Joi.string().valid(...CATEGORIES),
+    subType: Joi.string().max(50),
+    sentiment: Joi.string().valid(...SENTIMENTS),
+    payload: Joi.alternatives().try(
+        addressPayloadSchema,
+        bookingPayloadSchema,
+        genericPayloadSchema
     ),
-    priority: Joi.string().valid('low', 'normal', 'high'),
-    category: Joi.string(),
-    subType: Joi.string(),
-    sentiment: Joi.string().valid('POSITIVE', 'NEUTRAL', 'NEGATIVE'),
-    payload: Joi.object().unknown(),
-    notes: Joi.string().allow(''),
-    suggestedReplyBody: Joi.string().allow(''),
-    suggestedChannel: Joi.string().valid('sms', 'email', 'none'),
-    suggestedReplySubject: Joi.string().allow(''),
-    assigneeId: Joi.number().integer().allow(null),
-    parentTaskId: Joi.number().integer().allow(null)
-}).min(1); // At least one field to update
+    notes: Joi.string().max(2000).allow(''),
+    suggestedReplyBody: Joi.string().max(2000).allow(''),
+    suggestedChannel: Joi.string().valid(...CHANNELS),
+    suggestedReplySubject: Joi.string().max(200).allow(''),
+    assigneeId: Joi.number().integer().positive().allow(null),
+    parentTaskId: Joi.number().integer().positive().allow(null)
+}).min(1);
 
 const autoclassifySchema = Joi.object({
-    text: Joi.string().required().min(1),
-    memberId: Joi.number().integer().optional()
+    text: Joi.string().required().min(1).max(5000),
+    memberId: Joi.number().integer().positive().optional()
 });
 
 module.exports = {
     validate,
+    validateStatusTransition,
     createTaskSchema,
     updateTaskSchema,
-    autoclassifySchema
+    autoclassifySchema,
+    VALID_STATUS_TRANSITIONS,
+    CATEGORIES,
+    STATUSES
 };

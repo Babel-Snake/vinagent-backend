@@ -1,6 +1,7 @@
 const { Task, TaskAction, WinerySettings } = require('../models');
 const executionService = require('./execution.service');
 const logger = require('../config/logger');
+const { validateStatusTransition } = require('../utils/validation');
 
 /**
  * Service to handle Task creation and updates.
@@ -15,6 +16,28 @@ function recordAction(t, taskId, userId, type, details) {
     actionType: type,
     details
   }, { transaction: t });
+}
+
+// Pre-approval payload validation per task type
+function validatePayloadForApproval(task) {
+  const errors = [];
+
+  if (task.subType === 'ACCOUNT_ADDRESS_CHANGE' || task.type === 'ADDRESS_CHANGE') {
+    const p = task.payload || {};
+    if (!p.addressLine1) errors.push('Address Line 1 is required');
+    if (!p.suburb) errors.push('Suburb is required');
+    if (!p.postcode) errors.push('Postcode is required');
+    if (!task.memberId) errors.push('Member ID is required for address change');
+  }
+
+  if (task.subType === 'BOOKING_NEW') {
+    const p = task.payload || {};
+    if (!p.date) errors.push('Booking date is required');
+    if (!p.time) errors.push('Booking time is required');
+    if (!p.pax) errors.push('Party size (pax) is required');
+  }
+
+  return errors;
 }
 
 // --- CORE METHODS ---
@@ -81,7 +104,7 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
   const t = await Task.sequelize.transaction();
   try {
     const task = await Task.findOne({ where: { id: taskId, wineryId } });
-    if (!task) throw new Error('Task not found'); // Service-level error, controller maps to 404
+    if (!task) throw new Error('Task not found');
 
     const {
       status, payload, priority, notes, suggestedReplyBody,
@@ -89,10 +112,39 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
       suggestedChannel, suggestedReplySubject
     } = updates;
 
-    // --- SAFEGUARDS ---
-    if (status === 'APPROVED' && updates.status !== task.status) {
+    // --- LAYER 2: STATUS TRANSITION GUARD ---
+    if (status && status !== task.status) {
+      if (!validateStatusTransition(task.status, status)) {
+        const err = new Error(`Invalid status transition: ${task.status} → ${status}`);
+        err.statusCode = 400;
+        err.code = 'INVALID_STATUS_TRANSITION';
+        throw err;
+      }
+    }
+
+    // --- LAYER 2: ROLE CHECK FOR APPROVAL ---
+    if (status === 'APPROVED' && status !== task.status) {
       if (userRole === 'staff') {
         const err = new Error('Staff cannot approve tasks.');
+        err.statusCode = 403;
+        err.code = 'FORBIDDEN';
+        throw err;
+      }
+
+      // Validate payload has required fields before approval
+      const payloadErrors = validatePayloadForApproval(task);
+      if (payloadErrors.length > 0) {
+        const err = new Error(`Cannot approve: ${payloadErrors.join(', ')}`);
+        err.statusCode = 400;
+        err.code = 'INCOMPLETE_PAYLOAD';
+        throw err;
+      }
+    }
+
+    // --- LAYER 2: STAFF CANNOT REASSIGN TASKS ---
+    if (updates.assigneeId !== undefined && updates.assigneeId !== task.assigneeId) {
+      if (userRole === 'staff') {
+        const err = new Error('Staff cannot reassign tasks.');
         err.statusCode = 403;
         err.code = 'FORBIDDEN';
         throw err;

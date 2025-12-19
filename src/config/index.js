@@ -11,8 +11,11 @@ if (process.env.NODE_ENV === 'production') {
   const requiredVars = [
     'FIREBASE_PRIVATE_KEY',
     'FIREBASE_CLIENT_EMAIL',
+    'FIREBASE_PROJECT_ID',
+    'DB_HOST',
+    'DB_USER',
     'DB_PASSWORD',
-    'DB_USER'
+    'DB_NAME'
   ];
 
   const missing = requiredVars.filter(key => !process.env[key]);

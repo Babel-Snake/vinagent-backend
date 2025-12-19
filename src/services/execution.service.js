@@ -19,11 +19,14 @@ async function executeTask(task, transaction, settings) {
         return;
     }
 
+    // --- LAYER 3: PRE-FLIGHT VALIDATION ---
     // Check subType OR legacy type for backward compatibility
     if (task.subType === 'ACCOUNT_ADDRESS_CHANGE' || task.type === 'ADDRESS_CHANGE') {
+        _validateAddressPayload(task); // Throws on failure
         await _executeAddressChange(task, transaction);
     } else if (task.subType === 'BOOKING_NEW') {
-        await _executeBooking(task, transaction, settings); // Pass settings if needed, or lookup inside factory
+        _validateBookingPayload(task); // Throws on failure
+        await _executeBooking(task, transaction, settings);
     } else {
         logger.info('No automatic execution logic for task', { type: task.subType || task.type, taskId: task.id });
     }
@@ -50,6 +53,42 @@ async function executeTask(task, transaction, settings) {
                 logger.warn(`No contact details for ${task.suggestedChannel} on member ${member.id}`);
             }
         }
+    }
+}
+
+// --- LAYER 3: PRE-FLIGHT VALIDATION HELPERS ---
+function _validateAddressPayload(task) {
+    const errors = [];
+    if (!task.memberId) errors.push('Member ID is required');
+    if (!task.payload) errors.push('Payload is required');
+
+    const p = task.payload || {};
+    if (!p.addressLine1) errors.push('Address Line 1 is required');
+    if (!p.suburb) errors.push('Suburb is required');
+    if (!p.postcode) errors.push('Postcode is required');
+
+    if (errors.length > 0) {
+        const err = new Error(`ADDRESS_CHANGE validation failed: ${errors.join(', ')}`);
+        err.statusCode = 400;
+        err.code = 'EXECUTION_VALIDATION_FAILED';
+        throw err;
+    }
+}
+
+function _validateBookingPayload(task) {
+    const errors = [];
+    if (!task.payload) errors.push('Payload is required');
+
+    const p = task.payload || {};
+    if (!p.date) errors.push('Booking date is required');
+    if (!p.time) errors.push('Booking time is required');
+    if (!p.pax) errors.push('Party size (pax) is required');
+
+    if (errors.length > 0) {
+        const err = new Error(`BOOKING validation failed: ${errors.join(', ')}`);
+        err.statusCode = 400;
+        err.code = 'EXECUTION_VALIDATION_FAILED';
+        throw err;
     }
 }
 
