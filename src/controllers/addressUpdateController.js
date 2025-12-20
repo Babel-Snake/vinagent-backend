@@ -2,9 +2,13 @@
 // Implements GET /address-update/validate and POST /address-update/confirm.
 
 const logger = require('../config/logger');
-// TODO: const memberActionTokenService = require('../services/memberActionTokenService');
-// TODO: const addressUpdateService = require('../services/addressUpdateService');
+const memberActionTokenService = require('../services/memberActionTokenService');
+const addressUpdateService = require('../services/addressUpdateService');
 
+/**
+ * GET /api/public/address-update/validate
+ * Validates a token and returns member/address info for the confirmation page
+ */
 async function validateToken(req, res, next) {
   try {
     const { token } = req.query;
@@ -18,24 +22,45 @@ async function validateToken(req, res, next) {
       });
     }
 
-    // TODO: call memberActionTokenService.validateToken(token)
-    logger.info('Validate address update token requested');
+    const { tokenRecord, member, task } = await memberActionTokenService.validateToken(token);
 
-    // Placeholder structure
+    logger.info('Address update token validated', { tokenId: tokenRecord.id });
+
     return res.json({
-      member: {
-        id: 42,
-        firstName: 'Emma',
-        lastName: 'Clarke'
-      },
-      currentAddress: null,
-      proposedAddress: null
+      member: member ? {
+        id: member.id,
+        firstName: member.firstName,
+        lastName: member.lastName
+      } : null,
+      currentAddress: member ? {
+        addressLine1: member.addressLine1,
+        addressLine2: member.addressLine2,
+        suburb: member.suburb,
+        state: member.state,
+        postcode: member.postcode,
+        country: member.country
+      } : null,
+      proposedAddress: tokenRecord.payload || null,
+      expiresAt: tokenRecord.expiresAt
     });
   } catch (err) {
+    // Handle known errors with status codes
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({
+        error: {
+          code: err.code || 'ERROR',
+          message: err.message
+        }
+      });
+    }
     next(err);
   }
 }
 
+/**
+ * POST /api/public/address-update/confirm
+ * Confirms the address change using the token
+ */
 async function confirmAddress(req, res, next) {
   try {
     const { token, newAddress } = req.body;
@@ -49,20 +74,26 @@ async function confirmAddress(req, res, next) {
       });
     }
 
-    // TODO: call addressUpdateService.confirmAddress({ token, newAddress })
-    logger.info('Confirm address update requested');
+    const result = await addressUpdateService.confirmAddress({ token, newAddress });
 
-    // Placeholder response
+    logger.info('Address update confirmed', { memberId: result.member.id });
+
     return res.json({
       status: 'ok',
-      member: {
-        id: 42,
-        firstName: 'Emma',
-        lastName: 'Clarke'
-      },
-      newAddress
+      message: 'Address updated successfully',
+      member: result.member,
+      newAddress: result.newAddress
     });
   } catch (err) {
+    // Handle known errors with status codes
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({
+        error: {
+          code: err.code || 'ERROR',
+          message: err.message
+        }
+      });
+    }
     next(err);
   }
 }
