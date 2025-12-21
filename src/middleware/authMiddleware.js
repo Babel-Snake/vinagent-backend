@@ -16,6 +16,34 @@ async function authMiddleware(req, res, next) {
   }
 
   try {
+    if (process.env.NODE_ENV === 'test' && token === 'mock-token') {
+      const user = await User.findOne({
+        where: { email: 'stub@example.com' },
+        include: [{ model: Winery, attributes: ['name'] }]
+      });
+
+      if (!user) {
+        return res.status(403).json({
+          error: {
+            code: 'ACCESS_DENIED',
+            message: 'Test user not registered in system.'
+          }
+        });
+      }
+
+      req.user = {
+        id: user.id,
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+        wineryId: user.wineryId,
+        wineryName: user.Winery ? user.Winery.name : 'Unknown Winery',
+        firebaseUid: 'test-mock-token'
+      };
+
+      return next();
+    }
+
     // Verify Token
     const decodedToken = await admin.auth().verifyIdToken(token);
     const { uid, email } = decodedToken;

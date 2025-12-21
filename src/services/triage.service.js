@@ -29,14 +29,20 @@ async function triageMessage(message, context = {}) {
         payload: { summary: body.substring(0, 50) }
     };
 
+    const skipAI = process.env.AI_SKIP === 'true';
+
     // 2. Attempt AI Classification
-    try {
-        const aiResult = await aiService.classify(message.body, context);
-        // Merge AI result
-        result = { ...result, ...aiResult };
-    } catch (err) {
-        logger.warn('AI Triage unavailable/failed', { error: err.message, body: body.substring(0, 50) });
-        // 3. Fallback to Heuristics (Legacy Logic)
+    if (!skipAI) {
+        try {
+            const aiResult = await aiService.classify(message.body, context);
+            // Merge AI result
+            result = { ...result, ...aiResult };
+        } catch (err) {
+            logger.warn('AI Triage unavailable/failed', { error: err.message, body: body.substring(0, 50) });
+            // 3. Fallback to Heuristics (Legacy Logic)
+            result = fallbackHeuristics(body, customerType);
+        }
+    } else {
         result = fallbackHeuristics(body, customerType);
     }
 

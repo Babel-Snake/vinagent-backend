@@ -23,7 +23,7 @@ function validatePayloadForApproval(task) {
   const errors = [];
 
   if (task.subType === 'ACCOUNT_ADDRESS_CHANGE' || task.type === 'ADDRESS_CHANGE') {
-    const p = task.payload || {};
+    const p = task.payload && task.payload.newAddress ? task.payload.newAddress : (task.payload || {});
     if (!p.addressLine1) errors.push('Address Line 1 is required');
     if (!p.suburb) errors.push('Suburb is required');
     if (!p.postcode) errors.push('Postcode is required');

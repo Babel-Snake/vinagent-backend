@@ -1,4 +1,5 @@
 const { Member, TaskAction } = require('../models');
+const memberActionTokenService = require('./memberActionTokenService');
 const logger = require('../config/logger');
 
 /**
@@ -62,7 +63,7 @@ function _validateAddressPayload(task) {
     if (!task.memberId) errors.push('Member ID is required');
     if (!task.payload) errors.push('Payload is required');
 
-    const p = task.payload || {};
+    const p = _extractAddressPayload(task);
     if (!p.addressLine1) errors.push('Address Line 1 is required');
     if (!p.suburb) errors.push('Suburb is required');
     if (!p.postcode) errors.push('Postcode is required');
@@ -92,6 +93,13 @@ function _validateBookingPayload(task) {
     }
 }
 
+function _extractAddressPayload(task) {
+    if (task.payload && task.payload.newAddress) {
+        return task.payload.newAddress;
+    }
+    return task.payload || {};
+}
+
 async function _sendNotification(task, member, contact, transaction) {
     const notificationService = require('./notifications/notification.service');
     await notificationService.send({
@@ -111,40 +119,53 @@ async function _executeAddressChange(task, transaction) {
         return;
     }
 
-    const { addressLine1, addressLine2, suburb, state, postcode, country } = task.payload;
-
     // Find Member
     const member = await Member.findByPk(task.memberId, { transaction });
     if (!member) {
         throw new Error(`Member not found for task ${task.id}`);
     }
 
-    // Update fields if present in payload
-    if (addressLine1 !== undefined) member.addressLine1 = addressLine1;
-    if (addressLine2 !== undefined) member.addressLine2 = addressLine2;
-    if (suburb !== undefined) member.suburb = suburb;
-    if (state !== undefined) member.state = state;
-    if (postcode !== undefined) member.postcode = postcode;
-    if (country !== undefined) member.country = country;
+    const addressPayload = _extractAddressPayload(task);
 
-    await member.save({ transaction });
+    const channel = task.suggestedChannel || 'sms';
+    const target = channel === 'email' ? member.email : member.phone;
+    if (!target) {
+        throw new Error(`No contact details for ${channel} on member ${member.id}`);
+    }
 
-    // Update Task status to EXECUTED if purely automated? 
-    // Or do we leave it APPROVED? 
-    // Requirement usually is: Approved -> (logic) -> Executed.
-    // Let's update task status too.
-    task.status = 'EXECUTED';
+    const tokenRecord = await memberActionTokenService.createToken({
+        memberId: member.id,
+        wineryId: task.wineryId,
+        taskId: task.id,
+        type: 'ADDRESS_CHANGE',
+        channel,
+        target,
+        payload: { newAddress: addressPayload },
+        transaction
+    });
+
+    const confirmationUrl = memberActionTokenService.getConfirmationUrl(tokenRecord.token);
+    const baseBody = task.suggestedReplyBody || 'Hi, please confirm your address update using this secure link:';
+    const replyBody = baseBody.includes('http')
+        ? baseBody
+        : `${baseBody} ${confirmationUrl}`;
+
+    task.status = 'AWAITING_MEMBER_ACTION';
+    task.suggestedReplyBody = replyBody;
     await task.save({ transaction });
 
-    // Log execution action
     await TaskAction.create({
         taskId: task.id,
         userId: task.updatedBy, // The approver
-        actionType: 'EXECUTED',
-        details: { changes: 'Member address updated' }
+        actionType: 'EXECUTION_TRIGGERED',
+        details: { tokenId: tokenRecord.id, channel }
     }, { transaction });
 
-    logger.info('Executed ADDRESS_CHANGE', { taskId: task.id, memberId: member.id });
+    logger.info('Execution triggered for ADDRESS_CHANGE', {
+        taskId: task.id,
+        memberId: member.id,
+        tokenId: tokenRecord.id
+    });
 }
 
 async function _executeBooking(task, transaction) {

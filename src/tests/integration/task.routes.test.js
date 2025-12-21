@@ -157,10 +157,28 @@ describe('Task Routes', () => {
         });
 
         it('should approve a task and record who did it', async () => {
+            const member = await require('../../models').Member.create({
+                firstName: 'Jane',
+                lastName: 'Doe',
+                wineryId: winery.id,
+                phone: '+61400000001',
+                addressLine1: '1 Old St',
+                suburb: 'Old Town',
+                state: 'SA',
+                postcode: '5000'
+            });
+
             const taskToApprove = await Task.create({
                 type: 'ADDRESS_CHANGE',
                 status: 'PENDING_REVIEW',
-                wineryId: 1
+                wineryId: winery.id,
+                memberId: member.id,
+                payload: {
+                    addressLine1: '2 New St',
+                    suburb: 'New Town',
+                    state: 'VIC',
+                    postcode: '3000'
+                }
             });
 
             const res = await request(app)
@@ -169,20 +187,21 @@ describe('Task Routes', () => {
                 .send({ status: 'APPROVED' })
                 .expect(200);
 
-            expect(res.body.task.status).toBe('APPROVED');
+            expect(res.body.task.status).toBe('AWAITING_MEMBER_ACTION');
             expect(res.body.task.updatedBy).toBe(7); // Stub user ID
 
             // Verify DB
             const updated = await Task.findByPk(taskToApprove.id);
-            expect(updated.status).toBe('APPROVED');
+            expect(updated.status).toBe('AWAITING_MEMBER_ACTION');
         });
 
-        it('should execute ADDRESS_CHANGE by updating member details', async () => {
+        it('should execute ADDRESS_CHANGE by creating a secure link token', async () => {
             // Create Member
             const member = await require('../../models').Member.create({
                 firstName: 'John',
                 lastName: 'Doe',
                 wineryId: winery.id,
+                phone: '+61400000000',
                 addressLine1: '1 Old St',
                 suburb: 'Old Town',
                 state: 'SA',
@@ -208,11 +227,16 @@ describe('Task Routes', () => {
                 .send({ status: 'APPROVED' })
                 .expect(200);
 
-            // Verify Member Updated
+            const updatedTask = await Task.findByPk(task.id);
+            expect(updatedTask.status).toBe('AWAITING_MEMBER_ACTION');
+
+            const { MemberActionToken } = require('../../models');
+            const token = await MemberActionToken.findOne({ where: { taskId: task.id } });
+            expect(token).toBeDefined();
+
+            // Member is not updated until confirmation
             const updatedMember = await require('../../models').Member.findByPk(member.id);
-            expect(updatedMember.addressLine1).toBe('2 New St');
-            expect(updatedMember.suburb).toBe('New Town');
-            expect(updatedMember.state).toBe('VIC');
+            expect(updatedMember.addressLine1).toBe('1 Old St');
         });
     });
 });

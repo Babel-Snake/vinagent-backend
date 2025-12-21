@@ -1,3 +1,5 @@
+process.env.AI_SKIP = 'true';
+
 const request = require('supertest');
 const app = require('../../app');
 const { sequelize, Winery, Message, Task } = require('../../models');
