@@ -13,7 +13,7 @@ const sequelize = new Sequelize(db.name, db.user, db.password, {
   logging: (msg) => logger.debug(msg)
 });
 
-// TODO: Load models in src/models/index.js and call init/associate.
+// Connection factory only. Models are loaded by src/models/index.js
 
 module.exports = {
   sequelize

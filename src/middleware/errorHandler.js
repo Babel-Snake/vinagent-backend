@@ -7,7 +7,7 @@ const logger = require('../config/logger');
 function errorHandler(err, req, res, next) {
   logger.error('Unhandled error', {
     error: err.message,
-    stack: err.stack,
+    stack: process.env.NODE_ENV === 'production' ? undefined : err.stack,
     path: req.path
   });
 
