@@ -1,13 +1,16 @@
 const OpenAIAdapter = require('./openai.adapter');
 
+const logger = require('../../config/logger');
+
 // Factory to get the configured provider
 function getAIService() {
     const provider = process.env.AI_PROVIDER || 'openai';
     const apiKey = process.env.OPENAI_API_KEY; // Extend for other providers later
     const model = process.env.AI_MODEL || 'gpt-4o-mini';
+    const skip = process.env.AI_SKIP === 'true';
 
-    if (!apiKey) {
-        console.warn('⚠️ No API Key found for AI Service. AI features will be disabled or mock-only.');
+    if (skip || !apiKey) {
+        logger.warn(skip ? 'AI Service explicitly skipped via AI_SKIP.' : '⚠️ No API Key found for AI Service. Using Mock Adapter.');
         return new MockAdapter();
     }
 
@@ -15,7 +18,7 @@ function getAIService() {
         case 'openai':
             return new OpenAIAdapter(apiKey, model);
         default:
-            console.warn(`Unknown AI Provider: ${provider}. Defaulting to OpenAI.`);
+            logger.warn(`Unknown AI Provider: ${provider}. Defaulting to OpenAI.`);
             return new OpenAIAdapter(apiKey, model);
     }
 }

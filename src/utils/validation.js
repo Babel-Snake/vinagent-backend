@@ -112,12 +112,20 @@ const autoclassifySchema = Joi.object({
     memberId: Joi.number().integer().positive().optional()
 });
 
+const webhookSchema = Joi.object({
+    From: Joi.string().required(),
+    To: Joi.string().required(),
+    Body: Joi.string().allow('').optional(),
+    MessageSid: Joi.string().required()
+}).unknown(true);
+
 module.exports = {
     validate,
     validateStatusTransition,
     createTaskSchema,
     updateTaskSchema,
     autoclassifySchema,
+    webhookSchema,
     VALID_STATUS_TRANSITIONS,
     CATEGORIES,
     STATUSES

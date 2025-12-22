@@ -10,7 +10,7 @@ const stream = {
 };
 
 // Morgan format string (avoid query params to prevent leaking tokens)
-const format = ':method :path :status :res[content-length] - :response-time ms';
+const format = ':method :url :status :res[content-length] - :response-time ms';
 
 // Export the middleware
 const requestLogger = morgan(format, { stream });
