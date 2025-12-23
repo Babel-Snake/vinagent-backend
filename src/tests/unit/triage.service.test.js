@@ -1,4 +1,4 @@
-const { triageMessage, classifyStaffNote } = require('../../services/triage.service');
+const { triageMessage } = require('../../src/services/triage.service');
 const { WinerySettings } = require('../../models');
 const aiService = require('../../services/ai');
 

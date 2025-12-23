@@ -53,7 +53,7 @@ module.exports = (sequelize, DataTypes) => {
       },
       payload: { type: DataTypes.JSON, allowNull: true },
       suggestedChannel: {
-        type: DataTypes.ENUM('sms', 'email', 'none'),
+        type: DataTypes.ENUM('sms', 'email', 'voice', 'none'),
         allowNull: true
       },
       suggestedReplySubject: { type: DataTypes.STRING, allowNull: true },

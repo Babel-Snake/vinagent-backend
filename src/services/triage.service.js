@@ -67,6 +67,12 @@ async function triageMessage(message, context = {}) {
         }
     }
 
+    const suggestedChannel = message.source === 'email'
+        ? 'email'
+        : message.source === 'voice'
+            ? 'voice'
+            : 'sms';
+
     return {
         type: result.subType, // Legacy
         category: result.category,
@@ -79,7 +85,7 @@ async function triageMessage(message, context = {}) {
         requiresApproval: true,
         suggestedTitle: result.suggestedTitle, // Pass through if AI generated
         suggestedReplyBody: result.suggestedReply || null,
-        suggestedChannel: 'sms' // Default to SMS for now, could infer from message source
+        suggestedChannel
     };
 }
 

@@ -23,7 +23,7 @@ const STATUSES = ['PENDING_REVIEW', 'APPROVED', 'AWAITING_MEMBER_ACTION', 'REJEC
 const PRIORITIES = ['low', 'normal', 'high'];
 const SENTIMENTS = ['POSITIVE', 'NEUTRAL', 'NEGATIVE'];
 const CUSTOMER_TYPES = ['MEMBER', 'VISITOR', 'UNKNOWN'];
-const CHANNELS = ['sms', 'email', 'none'];
+const CHANNELS = ['sms', 'email', 'voice', 'none'];
 
 // --- PAYLOAD SUB-SCHEMAS (Whitelisted Fields) ---
 const addressPayloadSchema = Joi.object({
@@ -112,12 +112,30 @@ const autoclassifySchema = Joi.object({
     memberId: Joi.number().integer().positive().optional()
 });
 
-const webhookSchema = Joi.object({
+const smsWebhookSchema = Joi.object({
     From: Joi.string().required(),
     To: Joi.string().required(),
     Body: Joi.string().allow('').optional(),
     MessageSid: Joi.string().required()
 }).unknown(true);
+
+const emailWebhookSchema = Joi.object({
+    from: Joi.string().email().required(),
+    to: Joi.string().email().required(),
+    subject: Joi.string().allow('').default(''),
+    text: Joi.string().allow('').default(''),
+    html: Joi.string().allow('').optional(),
+    messageId: Joi.string().required()
+}).unknown(true);
+
+const voiceWebhookSchema = Joi.object({
+    From: Joi.string().required(),
+    To: Joi.string().required(),
+    CallSid: Joi.string().required(),
+    RecordingUrl: Joi.string().uri().allow('', null),
+    TranscriptionText: Joi.string().allow('').optional()
+}).unknown(true);
+
 
 module.exports = {
     validate,
@@ -125,7 +143,9 @@ module.exports = {
     createTaskSchema,
     updateTaskSchema,
     autoclassifySchema,
-    webhookSchema,
+    smsWebhookSchema,
+    emailWebhookSchema,
+    voiceWebhookSchema,
     VALID_STATUS_TRANSITIONS,
     CATEGORIES,
     STATUSES

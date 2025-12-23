@@ -9,6 +9,7 @@ describe('Webhook Routes', () => {
 
     // Setup: Create a dummy winery
     beforeAll(async () => {
+        await sequelize.sync({ force: true });
         const winery = await Winery.create({
             name: 'Test Winery Webhook',
             timeZone: 'Australia/Adelaide',

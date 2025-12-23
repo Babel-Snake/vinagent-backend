@@ -9,6 +9,7 @@ describe('Task Routes', () => {
     beforeAll(async () => {
         // Create Winery
         try {
+            await sequelize.sync({ force: true });
             // Try to find or create ID 1 to match the stub auth middleware
             const [w, created] = await Winery.findOrCreate({
                 where: { id: 1 },

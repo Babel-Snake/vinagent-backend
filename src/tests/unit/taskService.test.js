@@ -6,7 +6,16 @@ const validationUtils = require('../../utils/validation');
 jest.mock('../../models', () => ({
     Task: {
         findByPk: jest.fn(),
-        update: jest.fn()
+        update: jest.fn(),
+        sequelize: {
+            transaction: jest.fn(async (cb) => {
+                const t = { commit: jest.fn(), rollback: jest.fn() };
+                if (cb) {
+                    return cb(t);
+                }
+                return t;
+            })
+        }
     },
     TaskAction: {
         create: jest.fn()

@@ -1,8 +1,8 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const webhookController = require('../controllers/webhook.controller');
-const { validateTwilioSignature } = require('../middleware/webhookValidation');
-const { validate, webhookSchema } = require('../utils/validation');
+const { validateTwilioSignature, validateEmailSignature } = require('../middleware/webhookValidation');
+const { validate, smsWebhookSchema, emailWebhookSchema, voiceWebhookSchema } = require('../utils/validation');
 
 const router = express.Router();
 
@@ -13,19 +13,46 @@ const webhookLimiter = rateLimit({
     message: { error: 'Too many requests from this IP' }
 });
 
+const emailWebhookLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 600,
+    message: { error: 'Too many email webhook requests' }
+});
+
+const voiceWebhookLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 500,
+    message: { error: 'Too many voice webhook requests' }
+});
+
+const validateBody = (schema) => (req, res, next) => {
+    try {
+        req.validatedBody = validate(schema, req.body);
+        next();
+    } catch (err) {
+        next(err);
+    }
+};
 // Hardened Endpoint
 router.post('/sms',
     webhookLimiter,
     validateTwilioSignature,
-    (req, res, next) => {
-        try {
-            validate(webhookSchema, req.body);
-            next();
-        } catch (err) {
-            next(err);
-        }
-    },
+    validateBody(smsWebhookSchema),
     webhookController.handleSms
+);
+
+router.post('/email',
+    emailWebhookLimiter,
+    validateEmailSignature,
+    validateBody(emailWebhookSchema),
+    webhookController.handleEmail
+);
+
+router.post('/voice',
+    voiceWebhookLimiter,
+    validateTwilioSignature,
+    validateBody(voiceWebhookSchema),
+    webhookController.handleVoice
 );
 
 module.exports = router;

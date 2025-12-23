@@ -396,7 +396,12 @@ This section is **explicitly for AI coding agents**.
 
 ---
 
-## 11. Updating This Guide
+## 11. Webhook Provider Configuration
+
+* Inbound email webhooks must include the header `x-email-webhook-signature` matching `EMAIL_WEBHOOK_SECRET`. In non-production environments the check can be skipped when the secret is unset, but production environments should always configure the secret.
+* Voice webhooks are validated using the Twilio signature header when `TWILIO_AUTH_TOKEN` is present.
+
+## 12. Updating This Guide
 
 Any time we:
 

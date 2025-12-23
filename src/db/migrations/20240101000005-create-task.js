@@ -62,7 +62,7 @@ module.exports = {
                 defaultValue: 'PENDING_REVIEW'
             },
             payload: { type: Sequelize.JSON, allowNull: true },
-            suggestedChannel: { type: Sequelize.ENUM('sms', 'email', 'none'), allowNull: true },
+            suggestedChannel: { type: Sequelize.ENUM('sms', 'email', 'voice', 'none'), allowNull: true },
             suggestedReplySubject: { type: Sequelize.STRING, allowNull: true },
             suggestedReplyBody: { type: Sequelize.TEXT, allowNull: true },
             requiresApproval: { type: Sequelize.BOOLEAN, defaultValue: true },

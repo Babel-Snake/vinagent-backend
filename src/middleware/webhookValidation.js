@@ -2,6 +2,34 @@ const client = require('twilio');
 const config = require('../config');
 const logger = require('../config/logger');
 
+function validateEmailSignature(req, res, next) {
+    const secret = process.env.EMAIL_WEBHOOK_SECRET;
+
+    if (!secret) {
+        if (process.env.NODE_ENV === 'production') {
+            logger.error('CRITICAL: EMAIL_WEBHOOK_SECRET missing in production.');
+            return res.status(500).json({ error: 'Server configuration error' });
+        }
+
+        logger.warn('Skipping email webhook signature validation (EMAIL_WEBHOOK_SECRET missing)');
+        return next();
+    }
+
+    const signature = req.headers['x-email-webhook-signature'];
+
+    if (!signature) {
+        logger.warn('Missing email webhook signature header');
+        return res.status(403).json({ error: 'Missing signature' });
+    }
+
+    if (signature !== secret) {
+        logger.warn('Invalid email webhook signature');
+        return res.status(403).json({ error: 'Invalid signature' });
+    }
+
+    return next();
+}
+
 /**
  * Validates that the incoming request is from Twilio
  */
@@ -57,5 +85,6 @@ function validateTwilioSignature(req, res, next) {
 }
 
 module.exports = {
-    validateTwilioSignature
+    validateTwilioSignature,
+    validateEmailSignature
 };
