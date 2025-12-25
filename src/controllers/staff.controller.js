@@ -1,5 +1,6 @@
 const admin = require('../config/firebase');
 const { User, Winery } = require('../models');
+const AppError = require('../utils/AppError');
 
 /**
  * Create a new Managed Staff account.
@@ -12,12 +13,12 @@ exports.createStaff = async (req, res, next) => {
 
         // RBAC: Only Manager/Admin can create staff
         if (requester.role !== 'manager' && requester.role !== 'admin') {
-            return res.status(403).json({ error: 'Only Managers or Admins can create staff accounts.' });
+            throw new AppError('Only Managers or Admins can create staff accounts.', 403, 'FORBIDDEN');
         }
 
         const wineryId = requester.wineryId;
         if (!wineryId) {
-            return res.status(400).json({ error: 'Manager must belong to a winery to create staff.' });
+            throw new AppError('Manager must belong to a winery to create staff.', 400, 'WINERY_REQUIRED');
         }
 
         // 1. Generate Internal Email
@@ -25,15 +26,15 @@ exports.createStaff = async (req, res, next) => {
         // Sanitize username (alphanumeric only)
         const cleanUsername = username.toLowerCase().replace(/[^a-z0-9]/g, '');
         if (cleanUsername.length < 3) {
-            return res.status(400).json({ error: 'Username must be at least 3 alphanumeric characters.' });
+            throw new AppError('Username must be at least 3 alphanumeric characters.', 400, 'INVALID_USERNAME');
         }
 
         // Password Validation (min 8 chars, at least 1 number)
         if (!password || password.length < 8) {
-            return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+            throw new AppError('Password must be at least 8 characters.', 400, 'WEAK_PASSWORD');
         }
         if (!/\d/.test(password)) {
-            return res.status(400).json({ error: 'Password must contain at least one number.' });
+            throw new AppError('Password must contain at least one number.', 400, 'WEAK_PASSWORD');
         }
 
         const email = `${cleanUsername}.w${wineryId}@vinagent.internal`;
@@ -50,7 +51,7 @@ exports.createStaff = async (req, res, next) => {
             uid = userRecord.uid;
         } catch (fbError) {
             if (fbError.code === 'auth/email-already-exists') {
-                return res.status(409).json({ error: 'A staff member with this username already exists for this winery.' });
+                throw new AppError('A staff member with this username already exists for this winery.', 409, 'USERNAME_TAKEN');
             }
             throw fbError;
         }
@@ -87,7 +88,7 @@ exports.listStaff = async (req, res, next) => {
         const requester = req.user;
 
         if (!requester.wineryId) {
-            return res.status(400).json({ error: 'User not associated with a winery.' });
+            throw new AppError('User not associated with a winery.', 400, 'WINERY_REQUIRED');
         }
 
         const staffMembers = await User.findAll({

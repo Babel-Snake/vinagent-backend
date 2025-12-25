@@ -5,8 +5,13 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const requestLogger = require('./middleware/requestLogger');
 
+const requestId = require('./middleware/requestId');
+
 const app = express();
 const cors = require('cors');
+
+// Correlation ID (First middleware)
+app.use(requestId);
 
 // Security Headers
 app.use(helmet());

@@ -1,4 +1,5 @@
 const { User } = require('../models');
+const AppError = require('../utils/AppError');
 
 /**
  * Resolve staff email from username.
@@ -19,7 +20,7 @@ exports.resolveStaff = async (req, res, next) => {
         const { username } = req.query;
 
         if (!username) {
-            return res.status(400).json({ error: 'Username is required' });
+            throw new AppError('Username is required', 400, 'MISSING_PARAM');
         }
 
         // Search for 'staff' users with this username (displayName)
@@ -32,14 +33,11 @@ exports.resolveStaff = async (req, res, next) => {
         });
 
         if (matches.length === 0) {
-            return res.status(404).json({ error: 'Staff member not found.' });
+            throw new AppError('Staff member not found.', 404, 'NOT_FOUND');
         }
 
         if (matches.length > 1) {
-            return res.status(409).json({
-                error: 'Multiple staff found with this username. Please use your Winery ID.',
-                ambiguous: true
-            });
+            throw new AppError('Multiple staff found with this username. Please use your Winery ID.', 409, 'AMBIGUOUS_USERNAME', { ambiguous: true });
         }
 
         const user = matches[0];

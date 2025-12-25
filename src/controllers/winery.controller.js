@@ -3,7 +3,7 @@ const {
     WineryBookingType, WineryProduct, WineryPolicyProfile,
     WineryFAQItem, WineryIntegrationConfig
 } = require('../models');
-const { NotFoundError } = require('../utils/errors');
+const AppError = require('../utils/AppError');
 
 // --- GET FULL PROFILE ---
 exports.getWinery = async (req, res, next) => {
@@ -21,7 +21,7 @@ exports.getWinery = async (req, res, next) => {
             ]
         });
 
-        if (!winery) throw new NotFoundError('Winery not found');
+        if (!winery) throw new AppError('Winery not found', 404, 'NOT_FOUND');
 
         res.json({ success: true, data: winery });
     } catch (err) {
@@ -35,7 +35,7 @@ exports.updateOverview = async (req, res, next) => {
     try {
         const wineryId = req.user.wineryId;
         const winery = await Winery.findByPk(wineryId);
-        if (!winery) throw new NotFoundError('Winery not found');
+        if (!winery) throw new AppError('Winery not found', 404, 'NOT_FOUND');
 
         await winery.update(req.body); // Safe-list fields in real app
         res.json({ success: true, data: winery });

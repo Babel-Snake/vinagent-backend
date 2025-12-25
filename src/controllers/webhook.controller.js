@@ -1,6 +1,7 @@
 const { Message, Winery, Task, Member } = require('../models');
 const triageService = require('../services/triage.service');
 const logger = require('../config/logger');
+const AppError = require('../utils/AppError');
 
 async function resolveWineryByContact(contact) {
     return Winery.findOne({ where: contact });
@@ -25,7 +26,7 @@ async function handleSms(req, res, next) {
 
         if (!winery) {
             logger.warn('Winery not found for incoming SMS', { to: To });
-            return res.status(400).json({ error: 'Unknown destination phone number' });
+            throw new AppError('Unknown destination phone number', 400, 'UNKNOWN_DESTINATION');
         }
 
         // 2. Identify Member (optional)
@@ -91,7 +92,7 @@ async function handleEmail(req, res, next) {
 
         if (!winery) {
             logger.warn('Winery not found for incoming email', { to });
-            return res.status(400).json({ error: 'Unknown destination email address' });
+            throw new AppError('Unknown destination email address', 400, 'UNKNOWN_DESTINATION');
         }
 
         const member = await findMemberByContact(winery.id, 'email', from);
@@ -148,7 +149,7 @@ async function handleVoice(req, res, next) {
 
         if (!winery) {
             logger.warn('Winery not found for incoming voice call', { to: To });
-            return res.status(400).json({ error: 'Unknown destination phone number' });
+            throw new AppError('Unknown destination phone number', 400, 'UNKNOWN_DESTINATION');
         }
 
         const member = await findMemberByContact(winery.id, 'phone', From);

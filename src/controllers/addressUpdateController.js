@@ -4,6 +4,7 @@
 const logger = require('../config/logger');
 const memberActionTokenService = require('../services/memberActionTokenService');
 const addressUpdateService = require('../services/addressUpdateService');
+const AppError = require('../utils/AppError');
 
 /**
  * GET /api/public/address-update/validate
@@ -14,12 +15,7 @@ async function validateToken(req, res, next) {
     const { token } = req.query;
 
     if (!token) {
-      return res.status(400).json({
-        error: {
-          code: 'INVALID_TOKEN',
-          message: 'Token is required'
-        }
-      });
+      throw new AppError('Token is required', 400, 'INVALID_TOKEN');
     }
 
     const { tokenRecord, member, task } = await memberActionTokenService.validateToken(token);
@@ -44,15 +40,6 @@ async function validateToken(req, res, next) {
       expiresAt: tokenRecord.expiresAt
     });
   } catch (err) {
-    // Handle known errors with status codes
-    if (err.statusCode) {
-      return res.status(err.statusCode).json({
-        error: {
-          code: err.code || 'ERROR',
-          message: err.message
-        }
-      });
-    }
     next(err);
   }
 }
@@ -66,12 +53,7 @@ async function confirmAddress(req, res, next) {
     const { token, newAddress } = req.body;
 
     if (!token) {
-      return res.status(400).json({
-        error: {
-          code: 'INVALID_TOKEN',
-          message: 'Token is required'
-        }
-      });
+      throw new AppError('Token is required', 400, 'INVALID_TOKEN');
     }
 
     const result = await addressUpdateService.confirmAddress({ token, newAddress });
@@ -85,15 +67,6 @@ async function confirmAddress(req, res, next) {
       newAddress: result.newAddress
     });
   } catch (err) {
-    // Handle known errors with status codes
-    if (err.statusCode) {
-      return res.status(err.statusCode).json({
-        error: {
-          code: err.code || 'ERROR',
-          message: err.message
-        }
-      });
-    }
     next(err);
   }
 }

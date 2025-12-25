@@ -2,29 +2,31 @@ const morgan = require('morgan');
 const logger = require('../config/logger');
 
 // Create a stream object with a 'write' function that will be used by morgan
-const stream = {
+const loggerStream = {
     write: (message) => {
-        // Use the 'info' log level
+        // Use the 'info' log level. 
+        // Morgan adds a newline, so trim it.
         logger.info(message.trim());
-    },
+    }
 };
 
-// Custom token to mask query parameters
+// Define custom token for masked URL (redact query params)
 morgan.token('url-masked', (req) => {
-    if (!req.originalUrl) return '';
     try {
-        const [path, query] = req.originalUrl.split('?');
-        if (!query) return path;
-        return `${path}?***masked***`;
+        const url = new URL(req.originalUrl || req.url, 'http://dummy.com');
+        return url.pathname + (url.search ? '?***masked***' : '');
     } catch (e) {
-        return req.originalUrl || '';
+        return req.originalUrl || req.url;
     }
 });
 
-// Use :url-masked instead of :url
-const format = ':method :url-masked :status :res[content-length] - :response-time ms';
+// Define custom token for request ID to allow correlation
+morgan.token('id', (req) => req.id || '-');
 
-// Export the middleware
-const requestLogger = morgan(format, { stream });
+// Format: TIMESTAMP ID METHOD URL STATUS SIZE - TIME ms
+const requestLogger = morgan(
+    ':date[iso] :id :method :url-masked :status :res[content-length] - :response-time ms',
+    { stream: loggerStream }
+);
 
 module.exports = requestLogger;

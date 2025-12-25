@@ -9,6 +9,7 @@ describe('Webhook Routes', () => {
 
     // Setup: Create a dummy winery
     beforeAll(async () => {
+        process.env.ALLOW_TEST_AUTH_BYPASS = 'true';
         await sequelize.sync({ force: true });
         const winery = await Winery.create({
             name: 'Test Winery Webhook',
@@ -77,6 +78,72 @@ describe('Webhook Routes', () => {
                 .post('/api/webhooks/sms')
                 .send(payload)
                 .expect(400);
+        });
+    });
+
+    describe('POST /api/webhooks/email', () => {
+        beforeAll(() => {
+            process.env.EMAIL_WEBHOOK_SECRET = 'test-secret';
+        });
+
+        it('should receive Email payload and create task', async () => {
+            const payload = {
+                from: 'member@example.com',
+                to: 'test@example.com', // Matches winery contactEmail created in beforeAll
+                subject: 'Booking Enquiry',
+                text: 'I want to book a table for 2',
+                messageId: 'email-123-' + Date.now()
+            };
+
+            const res = await request(app)
+                .post('/api/webhooks/email')
+                .set('x-email-webhook-signature', 'test-secret')
+                .send(payload)
+                .expect(200);
+
+            expect(res.body.success).toBe(true);
+            expect(res.body.taskId).toBeDefined();
+
+            const message = await Message.findOne({ where: { externalId: payload.messageId } });
+            expect(message).toBeDefined();
+            expect(message.source).toBe('email');
+        });
+
+        it('should reject invalid signature', async () => {
+            await request(app)
+                .post('/api/webhooks/email')
+                .set('x-email-webhook-signature', 'wrong-secret')
+                .send({ from: 'a@b.com', to: 'b@c.com', messageId: '1' })
+                .expect(403);
+        });
+    });
+
+    describe('POST /api/webhooks/voice', () => {
+        it('should receive Voice payload and create task', async () => {
+            // Assuming Twilio signature validation skipped in test env (no Auth Token)
+            // We need a unique call Sid
+            const callSid = 'CA' + Math.floor(Math.random() * 100000000).toString();
+            const payload = {
+                From: '+61400000000',
+                To: '+61499999999', // We need to match winery phone
+                CallSid: callSid,
+                TranscriptionText: 'Hello verify this call',
+                RecordingUrl: 'http://example.com/rec.mp3'
+            };
+
+            // Update winery phone to match To
+            await Winery.update({ contactPhone: payload.To }, { where: { id: wineryId } });
+
+            const res = await request(app)
+                .post('/api/webhooks/voice')
+                .send(payload)
+                .expect(200);
+
+            expect(res.body.success).toBe(true);
+
+            const message = await Message.findOne({ where: { externalId: callSid } });
+            expect(message).toBeDefined();
+            expect(message.source).toBe('voice');
         });
     });
 });

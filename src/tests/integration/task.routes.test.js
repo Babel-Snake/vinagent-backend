@@ -7,6 +7,7 @@ describe('Task Routes', () => {
     let authToken = 'Bearer mock-token';
 
     beforeAll(async () => {
+        process.env.ALLOW_TEST_AUTH_BYPASS = 'true';
         // Create Winery
         try {
             await sequelize.sync({ force: true });

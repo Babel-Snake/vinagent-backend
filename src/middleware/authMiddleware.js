@@ -16,7 +16,12 @@ async function authMiddleware(req, res, next) {
   }
 
   try {
-    if (process.env.NODE_ENV === 'test' && token === 'mock-token') {
+    // 1. Test Bypass (Explicit Config Only)
+    // Replaces implicit NODE_ENV check
+    const { auth, firebase } = require('../config');
+
+    if (auth.allowTestBypass && token === 'mock-token') {
+      // ... Valid Mock Logic ...
       const user = await User.findOne({
         where: { email: 'stub@example.com' },
         include: [{ model: Winery, attributes: ['name'] }]
@@ -44,13 +49,26 @@ async function authMiddleware(req, res, next) {
       return next();
     }
 
-    // Verify Token
+    // 2. Verify Token (Firebase)
+    // admin.auth().verifyIdToken automatically checks signature, expiration, and formatting.
+    // It also checks audience (project_id) and issuer.
     const decodedToken = await admin.auth().verifyIdToken(token);
-    const { uid, email } = decodedToken;
+    const { uid, email, iss, aud } = decodedToken;
 
-    // Find Internal User
-    // note: In a real app, we might sync users on login. 
-    // For now, let's try to match by email, or fallback to a default "Manager" role if not found (for easy testing).
+    // 3. Extra Hardening: Explicit Issuer/Audience Check
+    // (Redundant but requested for hardening)
+    const expectedIssuer = `${auth.expectedIssuerPrefix}${firebase.projectId}`;
+    if (iss !== expectedIssuer) {
+      logger.warn('Auth: Invalid token issuer', { iss, expected: expectedIssuer });
+      throw new Error('Invalid token issuer');
+    }
+
+    if (aud !== firebase.projectId) {
+      logger.warn('Auth: Invalid token audience', { aud, expected: firebase.projectId });
+      throw new Error('Invalid token audience');
+    }
+
+    // 4. Find Internal User
     let user = await User.findOne({
       where: { email },
       include: [{ model: Winery, attributes: ['name'] }]

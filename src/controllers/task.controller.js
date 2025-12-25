@@ -1,5 +1,6 @@
 const { Task, Member, Message, User } = require('../models');
 const { Op } = require('sequelize');
+const AppError = require('../utils/AppError');
 
 async function listTasks(req, res, next) {
     try {
@@ -52,7 +53,7 @@ async function getTask(req, res, next) {
         });
 
         if (!task) {
-            return res.status(404).json({ error: 'Task not found' });
+            throw new AppError('Task not found', 404, 'NOT_FOUND');
         }
 
         res.json({ task });
@@ -116,7 +117,7 @@ async function updateTask(req, res, next) {
         res.json({ task });
     } catch (err) {
         if (err.message === 'Task not found') {
-            return res.status(404).json({ error: 'Task not found' });
+            return next(new AppError('Task not found', 404, 'NOT_FOUND'));
         }
         next(err);
     }

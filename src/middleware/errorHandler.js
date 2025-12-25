@@ -5,13 +5,20 @@
 const logger = require('../config/logger');
 
 function errorHandler(err, req, res, next) {
+  // Capture request ID
+  const requestId = req.id;
+
+  // Log the error with correlation ID
   logger.error('Unhandled error', {
     error: err.message,
+    code: err.code,
     stack: process.env.NODE_ENV === 'production' ? undefined : err.stack,
-    path: req.path
+    path: req.path,
+    method: req.method,
+    requestId
   });
 
-  // If the error has a known shape, use it
+  // If the error has a known shape, use it using defaults
   const status = err.statusCode || 500;
   const code = err.code || 'INTERNAL_ERROR';
   const message =
@@ -23,7 +30,8 @@ function errorHandler(err, req, res, next) {
     error: {
       code,
       message,
-      details: err.details || undefined
+      details: err.details || undefined,
+      requestId
     }
   });
 }

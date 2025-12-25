@@ -20,32 +20,30 @@ async function executeTask(task, transaction, settings) {
         return;
     }
 
-    // --- LAYER 3: PRE-FLIGHT VALIDATION ---
-    // Check subType OR legacy type for backward compatibility
+    // --- EXECUTION LOGIC ---
     if (task.subType === 'ACCOUNT_ADDRESS_CHANGE' || task.type === 'ADDRESS_CHANGE') {
         _validateAddressPayload(task); // Throws on failure
         await _executeAddressChange(task, transaction);
     } else if (task.subType === 'BOOKING_NEW') {
         _validateBookingPayload(task); // Throws on failure
         await _executeBooking(task, transaction, settings);
+    } else if (task.type.startsWith('ORDER_') || task.category === 'ORDER') {
+        _validateOrderPayload(task);
+        await _executeOrderUpdate(task, transaction);
     } else {
         logger.info('No automatic execution logic for task', { type: task.subType || task.type, taskId: task.id });
     }
 
-    // Generic Notification Logic
+    // --- GENERIC NOTIFICATION LOGIC ---
     // If task is APPROVED/EXECUTED and has a suggested reply, send it.
     if (task.suggestedReplyBody && task.suggestedChannel && task.suggestedChannel !== 'none') {
+        const { Member } = require('../models');
         const member = await Member.findByPk(task.memberId, { transaction });
+
         if (member) {
             const contact = task.suggestedChannel === 'email' ? member.email : member.phone;
             if (contact) {
                 try {
-                    // Send notification (outside transaction? or ensure service handles it safely?)
-                    // NotificationService usually makes external calls, so we shouldn't block the DB transaction.
-                    // But we want to log the outbound message in the DB.
-                    // For now, we'll await it here. If it fails, do we rollback the task approval?
-                    // Ideally: No. Notification failure shouldn't stop the business action.
-                    // We catch and log error.
                     await _sendNotification(task, member, contact, transaction);
                 } catch (notifyErr) {
                     logger.error('Failed to send notification', notifyErr);
@@ -226,6 +224,32 @@ async function _executeBooking(task, transaction) {
         // Let's throw for now so the user knows it failed.
         throw new Error(`Booking Failed: ${bookingError.message}`);
     }
+}
+
+function _validateOrderPayload(task) {
+    if (!task.payload) return; // Optional payload for some orders
+    // Add logic if specific fields required
+}
+
+async function _executeOrderUpdate(task, transaction) {
+    // Stub for Order Management System integration
+    // E.g. Update order status in Commerce7, or flag for staff follow-up
+
+    // For now, we assume if it's approved, we just mark it EXECUTED 
+    // and potentially send a notification if suggested.
+
+    logger.info('Executing Order Update (Stub)', { taskId: task.id, type: task.type });
+
+    // Mark as Executed
+    task.status = 'EXECUTED';
+    await task.save({ transaction });
+
+    await TaskAction.create({
+        taskId: task.id,
+        userId: task.updatedBy,
+        actionType: 'EXECUTED',
+        details: { action: 'ORDER_UPDATE_STUB', note: 'Simulated execution' }
+    }, { transaction });
 }
 
 module.exports = {
