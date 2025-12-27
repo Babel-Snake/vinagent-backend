@@ -49,21 +49,31 @@ async function triageMessage(message, context = {}) {
     // 4. Feature Flag / Tier Enforcement
     const contextWineryId = context.wineryId || (context.member && context.member.wineryId);
     if (contextWineryId) {
-        const settings = await WinerySettings.findOne({ where: { wineryId: contextWineryId } });
+        try {
+            const settings = await WinerySettings.findOne({ where: { wineryId: contextWineryId } });
 
-        if (settings) {
-            if (result.category === 'ACCOUNT' && !settings.enableWineClubModule) {
-                result.category = 'GENERAL';
-                result.subType = 'GENERAL_ENQUIRY';
+            if (settings) {
+                if (result.category === 'ACCOUNT' && !settings.enableWineClubModule) {
+                    result.category = 'GENERAL';
+                    result.subType = 'GENERAL_ENQUIRY';
+                }
+                if (result.category === 'ORDER' && !settings.enableOrdersModule) {
+                    result.category = 'GENERAL';
+                    result.subType = 'GENERAL_ENQUIRY';
+                }
+                if (result.category === 'BOOKING' && !settings.enableBookingModule) {
+                    result.category = 'GENERAL';
+                    result.subType = 'GENERAL_ENQUIRY';
+                }
+            } else {
+                // Settings absent: Skip feature gating (Default Allow)
+                // or we could log a warning.
             }
-            if (result.category === 'ORDER' && !settings.enableOrdersModule) {
-                result.category = 'GENERAL';
-                result.subType = 'GENERAL_ENQUIRY';
-            }
-            if (result.category === 'BOOKING' && !settings.enableBookingModule) {
-                result.category = 'GENERAL';
-                result.subType = 'GENERAL_ENQUIRY';
-            }
+        } catch (err) {
+            logger.warn('Triage: Failed to check settings, defaulting to GENERAL', { wineryId: contextWineryId, error: err.message });
+            // Fallback to GENERAL on DB error
+            result.category = 'GENERAL';
+            result.subType = 'GENERAL_ENQUIRY';
         }
     }
 

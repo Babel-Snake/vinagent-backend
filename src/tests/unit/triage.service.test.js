@@ -1,4 +1,4 @@
-const { triageMessage } = require('../../src/services/triage.service');
+const { triageMessage, classifyStaffNote } = require('../../services/triage.service');
 const { WinerySettings } = require('../../models');
 const aiService = require('../../services/ai');
 
@@ -114,5 +114,16 @@ describe('Triage Service (with AI)', () => {
 
         const result = await triageMessage({ body: 'update address' }, { wineryId: 1 });
         expect(result.category).toBe('ACCOUNT');
+    });
+
+    test('should degrade to GENERAL if settings fetch fails (Resilience)', async () => {
+        aiService.classify.mockResolvedValue({ category: 'ACCOUNT' });
+        WinerySettings.findOne.mockRejectedValue(new Error('DB Down')); // Simulate failure
+
+        const result = await triageMessage({ body: 'update address' }, { wineryId: 1 });
+
+        // Resilience Check: Should catch error and default to strict/safe (GENERAL) or logic behavior.
+        // My implementation forces GENERAL on catch.
+        expect(result.category).toBe('GENERAL');
     });
 });
