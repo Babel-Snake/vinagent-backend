@@ -21,7 +21,29 @@ async function authMiddleware(req, res, next) {
     const { auth, firebase } = require('../config');
 
     if (auth.allowTestBypass && token === 'mock-token') {
-      // ... Valid Mock Logic ...
+      // CRITICAL: Never allow bypass in production, even if misconfigured
+      if (process.env.NODE_ENV === 'production') {
+        logger.error('SECURITY ALERT: Mock-token bypass attempted in PRODUCTION. Rejecting.', {
+          metric: 'security_event',
+          event: 'mock_token_production_attempt',
+          ip: req.ip,
+          userAgent: req.headers['user-agent']
+        });
+        return res.status(401).json({
+          error: {
+            code: 'UNAUTHENTICATED',
+            message: 'Invalid or expired token'
+          }
+        });
+      }
+
+      // Log bypass usage for monitoring (non-production environments)
+      logger.warn('Auth: Mock-token bypass used', {
+        metric: 'security_event',
+        event: 'mock_token_bypass_used',
+        environment: process.env.NODE_ENV
+      });
+
       const user = await User.findOne({
         where: { email: 'stub@example.com' },
         include: [{ model: Winery, attributes: ['name'] }]

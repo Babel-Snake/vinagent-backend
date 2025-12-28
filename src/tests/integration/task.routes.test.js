@@ -1,3 +1,4 @@
+process.env.ALLOW_TEST_AUTH_BYPASS = 'true';
 const request = require('supertest');
 const app = require('../../app');
 const { sequelize, Winery, Task, User } = require('../../models');
@@ -7,7 +8,6 @@ describe('Task Routes', () => {
     let authToken = 'Bearer mock-token';
 
     beforeAll(async () => {
-        process.env.ALLOW_TEST_AUTH_BYPASS = 'true';
         // Create Winery
         try {
             await sequelize.sync({ force: true });

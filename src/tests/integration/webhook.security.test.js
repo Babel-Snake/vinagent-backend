@@ -18,7 +18,8 @@ describe('Webhook Security Integration', () => {
         process.env = {
             ...OLD_ENV,
             TWILIO_AUTH_TOKEN: 'mock-auth-token',
-            EMAIL_WEBHOOK_SECRET: 'mock-email-secret'
+            EMAIL_WEBHOOK_SECRET: 'mock-email-secret',
+            RETELL_WEBHOOK_SECRET: 'mock-retell-secret'
         };
         // Re-require to pick up env
         // actually app is already required. We might need to handle this carefully.
@@ -37,6 +38,7 @@ describe('Webhook Security Integration', () => {
         jest.resetModules();
         process.env.TWILIO_AUTH_TOKEN = 'mock-auth-token';
         process.env.EMAIL_WEBHOOK_SECRET = 'mock-email-secret';
+        process.env.RETELL_WEBHOOK_SECRET = 'mock-retell-secret';
         process.env.NODE_ENV = 'test';
         return require('../../app');
     }
@@ -88,6 +90,27 @@ describe('Webhook Security Integration', () => {
 
         expect(res.status).toBe(403);
         expect(res.body.error).toBe('Missing signature');
+    });
+
+    it('should reject Retell webhook without proper signature', async () => {
+        const app = await getApp();
+        const res = await request(app)
+            .post('/api/webhooks/retell')
+            .send({ event_type: 'call_analyzed' });
+
+        expect(res.status).toBe(403);
+        expect(res.body.error).toBe('Missing signature');
+    });
+
+    it('should accept Retell webhook with valid signature', async () => {
+        const app = await getApp();
+        const res = await request(app)
+            .post('/api/webhooks/retell')
+            .set('x-retell-signature', 'mock-retell-secret')
+            .send({ event_type: 'call_analyzed' });
+
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
     });
 
 });

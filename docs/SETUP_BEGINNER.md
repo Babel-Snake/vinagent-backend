@@ -176,6 +176,23 @@ If you're just starting out:
 * Leave Twilio and Retell blank
 * Only fill in MySQL and Firebase later when needed
 
+### Security Warning: Test Auth Bypass
+
+> [!CAUTION]
+> **NEVER set `ALLOW_TEST_AUTH_BYPASS=true` in production!**
+>
+> This setting allows bypassing Firebase authentication using a mock token. It exists **only for local testing and CI environments**.
+>
+> **Safeguards in place:**
+> - The application will **refuse to start** in `NODE_ENV=production` if this is enabled.
+> - Even if somehow enabled, the middleware will **reject mock-token requests** in production and log a security alert.
+> - All bypass usage is logged with `security_event` metrics for monitoring.
+>
+> **Correct usage:**
+> - Set `ALLOW_TEST_AUTH_BYPASS=true` only in your local `.env` or CI test environment.
+> - Never commit this value to version control.
+> - Your production `.env` should not contain this variable at all.
+
 ---
 
 ## 4. Set Up the MySQL Database

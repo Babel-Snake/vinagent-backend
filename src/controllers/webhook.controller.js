@@ -261,5 +261,10 @@ async function handleVoice(req, res, next) {
 module.exports = {
     handleSms,
     handleEmail,
-    handleVoice
+    handleVoice,
+    handleRetell: async (req, res, next) => {
+        logger.info('Received Retell webhook', { event: req.body.event_type });
+        // TODO: Implement Retell logic (Message creation -> Triage -> Task)
+        res.json({ success: true, received: true });
+    }
 };

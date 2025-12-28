@@ -25,6 +25,12 @@ if (process.env.NODE_ENV === 'production') {
     console.error(`FATAL: Missing required environment variables: ${missing.join(', ')}`);
     process.exit(1);
   }
+
+  // CRITICAL: Reject any attempt to enable test bypass in production
+  if (process.env.ALLOW_TEST_AUTH_BYPASS === 'true') {
+    console.error('FATAL: ALLOW_TEST_AUTH_BYPASS=true is forbidden in production. Exiting.');
+    process.exit(1);
+  }
 }
 
 module.exports = {

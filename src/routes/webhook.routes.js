@@ -55,4 +55,12 @@ router.post('/voice',
     webhookController.handleVoice
 );
 
+// Retell Webhook (Voice AI)
+router.post('/retell',
+    webhookLimiter, // Use shared or dedicated limiter? Shared is fine for now
+    require('../middleware/webhookValidation').validateRetellSignature,
+    // No schema validation yet, as Retell payload shape is TBD
+    webhookController.handleRetell
+);
+
 module.exports = router;

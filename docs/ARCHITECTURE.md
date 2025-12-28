@@ -241,6 +241,9 @@ The backend will:
 * Validate Twilio signatures (later, for security).
 * Use Twilio SDK or HTTP API for outbound messages.
 
+**Configuration:**
+* `TWILIO_AUTH_TOKEN`: Required for webhook signature validation (enforced in production).
+
 ### 5.2 Retell (Voice AI)
 
 **Used for:**
@@ -251,6 +254,9 @@ Caller → Twilio → Retell (voice agent) → backend webhooks for events and a
 
 Backend may receive callbacks for events like "caller asked to update address".
 Details will be defined in `API_SPEC.md` and integration-specific docs later.
+
+**Configuration:**
+* `RETELL_WEBHOOK_SECRET`: Required for verifying inbound webhook signatures.
 
 ### 5.3 OpenAI (Triage + Drafting)
 

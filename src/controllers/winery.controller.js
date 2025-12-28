@@ -4,6 +4,10 @@ const {
     WineryFAQItem, WineryIntegrationConfig
 } = require('../models');
 const AppError = require('../utils/AppError');
+const {
+    validate, wineryBrandSchema, wineryBookingsSchema,
+    wineryPolicySchema, wineryIntegrationSchema
+} = require('../utils/validation');
 
 // --- GET FULL PROFILE ---
 exports.getWinery = async (req, res, next) => {
@@ -45,8 +49,9 @@ exports.updateOverview = async (req, res, next) => {
 exports.updateBrand = async (req, res, next) => {
     try {
         const wineryId = req.user.wineryId;
+        const payload = validate(wineryBrandSchema, req.body);
         const [profile] = await WineryBrandProfile.findOrCreate({ where: { wineryId } });
-        await profile.update(req.body);
+        await profile.update(payload);
         res.json({ success: true, data: profile });
     } catch (err) { next(err); }
 };
@@ -54,8 +59,9 @@ exports.updateBrand = async (req, res, next) => {
 exports.updateBookingsConfig = async (req, res, next) => {
     try {
         const wineryId = req.user.wineryId;
+        const payload = validate(wineryBookingsSchema, req.body);
         const [config] = await WineryBookingsConfig.findOrCreate({ where: { wineryId } });
-        await config.update(req.body);
+        await config.update(payload);
         res.json({ success: true, data: config });
     } catch (err) { next(err); }
 };
@@ -63,8 +69,9 @@ exports.updateBookingsConfig = async (req, res, next) => {
 exports.updatePolicyProfile = async (req, res, next) => {
     try {
         const wineryId = req.user.wineryId;
+        const payload = validate(wineryPolicySchema, req.body);
         const [profile] = await WineryPolicyProfile.findOrCreate({ where: { wineryId } });
-        await profile.update(req.body);
+        await profile.update(payload);
         res.json({ success: true, data: profile });
     } catch (err) { next(err); }
 };
@@ -72,8 +79,9 @@ exports.updatePolicyProfile = async (req, res, next) => {
 exports.updateIntegrationConfig = async (req, res, next) => {
     try {
         const wineryId = req.user.wineryId;
+        const payload = validate(wineryIntegrationSchema, req.body);
         const [config] = await WineryIntegrationConfig.findOrCreate({ where: { wineryId } });
-        await config.update(req.body);
+        await config.update(payload);
         res.json({ success: true, data: config });
     } catch (err) { next(err); }
 };

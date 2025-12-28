@@ -8,6 +8,10 @@ const { authMiddleware: protect, requireRole } = require('../middleware/authMidd
 // Full Profile
 router.get('/full', protect, requireRole(['manager', 'admin']), wineryController.getWinery);
 router.put('/', protect, requireRole(['manager', 'admin']), wineryController.updateOverview);
+router.put('/brand', protect, requireRole(['manager', 'admin']), wineryController.updateBrand);
+router.put('/bookings-config', protect, requireRole(['manager', 'admin']), wineryController.updateBookingsConfig);
+router.put('/policy-profile', protect, requireRole(['manager', 'admin']), wineryController.updatePolicyProfile);
+router.put('/integration-config', protect, requireRole(['manager', 'admin']), wineryController.updateIntegrationConfig);
 
 // Products
 router.post('/products', protect, requireRole(['manager', 'admin']), wineryController.createProduct);

@@ -136,6 +136,51 @@ const voiceWebhookSchema = Joi.object({
     TranscriptionText: Joi.string().allow('').optional()
 }).unknown(true);
 
+// --- WINERY CONFIG SCHEMAS ---
+
+const wineryBrandSchema = Joi.object({
+    brandStoryShort: Joi.string().max(5000).allow(''),
+    tonePreset: Joi.string().valid('warm', 'premium', 'playful', 'rustic', 'formal'),
+    voiceGuidelines: Joi.string().max(5000).allow(''),
+    doSayExamples: Joi.array().items(Joi.string()).optional(),
+    dontSayExamples: Joi.array().items(Joi.string()).optional(),
+    signOffDefault: Joi.string().max(200).allow(''),
+    spellingLocale: Joi.string().max(10).default('AU'),
+    emojisAllowed: Joi.boolean(),
+    formalityLevel: Joi.number().integer().min(1).max(5),
+    readingLevel: Joi.string().max(50)
+});
+
+const wineryBookingsSchema = Joi.object({
+    walkInsAllowed: Joi.boolean(),
+    walkInNotes: Joi.string().max(1000).allow(''),
+    groupBookingThreshold: Joi.number().integer().min(1),
+    leadTimeHours: Joi.number().min(0),
+    cancellationPolicyText: Joi.string().max(2000).allow(''),
+    kidsPolicy: Joi.string().max(1000).allow(''),
+    petsPolicy: Joi.string().max(1000).allow(''),
+    defaultResponseStrategy: Joi.string().valid('confirm', 'create_task')
+});
+
+const wineryPolicySchema = Joi.object({
+    shippingTimeframesText: Joi.string().max(1000).allow(''),
+    shippingRegions: Joi.array().items(Joi.string()).optional(),
+    returnsRefundsPolicyText: Joi.string().max(2000).allow(''),
+    wineClubSummary: Joi.string().max(2000).allow(''),
+    accessibilityNotes: Joi.string().max(1000).allow(''),
+    eventPolicy: Joi.string().max(2000).allow('')
+});
+
+const wineryIntegrationSchema = Joi.object({
+    smsProvider: Joi.string().valid('twilio', 'other').default('twilio'),
+    smsFromNumber: Joi.string().max(20).allow(''),
+    emailProvider: Joi.string().valid('sendgrid', 'other').default('sendgrid'),
+    emailFromAddress: Joi.string().email().allow(''),
+    channelsEnabled: Joi.array().items(Joi.string()).optional(),
+    kioskModeEnabled: Joi.boolean()
+    // planTier excluded for security (admin only via billing)
+});
+
 
 module.exports = {
     validate,
@@ -146,6 +191,10 @@ module.exports = {
     smsWebhookSchema,
     emailWebhookSchema,
     voiceWebhookSchema,
+    wineryBrandSchema,
+    wineryBookingsSchema,
+    wineryPolicySchema,
+    wineryIntegrationSchema,
     VALID_STATUS_TRANSITIONS,
     CATEGORIES,
     STATUSES

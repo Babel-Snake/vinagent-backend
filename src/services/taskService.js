@@ -1,22 +1,13 @@
-const { Task, TaskAction, WinerySettings } = require('../models');
+const { Task, WinerySettings } = require('../models');
 const executionService = require('./execution.service');
 const logger = require('../config/logger');
 const { validateStatusTransition } = require('../utils/validation');
+const auditService = require('./audit.service');
 
 /**
  * Service to handle Task creation and updates.
  * Centralizes business logic, logging, and side effects.
  */
-
-// --- UTILS ---
-function recordAction(t, taskId, userId, type, details) {
-  return TaskAction.create({
-    taskId,
-    userId,
-    actionType: type,
-    details
-  }, { transaction: t });
-}
 
 // Pre-approval payload validation per task type
 function validatePayloadForApproval(task) {
@@ -73,16 +64,28 @@ async function createTask({ wineryId, userId, data }) {
     }, { transaction: t });
 
     // 2. Log Creation Action
-    await recordAction(t, task.id, userId, 'MANUAL_CREATED', {
-      notes,
-      originalText: payload?.originalText
+    await auditService.logTaskAction({
+      transaction: t,
+      taskId: task.id,
+      userId,
+      actionType: 'MANUAL_CREATED',
+      details: {
+        notes,
+        originalText: payload?.originalText
+      }
     });
 
     // 3. Log Linking Action (if needed)
     if (parentTaskId) {
-      await recordAction(t, task.id, userId, 'LINKED_TASK', {
-        parentTaskId,
-        childTaskId: task.id
+      await auditService.logTaskAction({
+        transaction: t,
+        taskId: task.id,
+        userId,
+        actionType: 'LINKED_TASK',
+        details: {
+          parentTaskId,
+          childTaskId: task.id
+        }
       });
     }
 
@@ -91,7 +94,7 @@ async function createTask({ wineryId, userId, data }) {
     return task;
 
   } catch (err) {
-    await t.rollback();
+    if (!t.finished) await t.rollback();
     throw err;
   }
 }
@@ -176,9 +179,15 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
     // Special logic: Linking
     if (parentTaskId !== undefined && parentTaskId !== task.parentTaskId) {
       setField('parentTaskId', parentTaskId);
-      await recordAction(t, task.id, userId, 'LINKED_TASK', {
-        parentTaskId,
-        childTaskId: task.id
+      await auditService.logTaskAction({
+        transaction: t,
+        taskId: task.id,
+        userId,
+        actionType: 'LINKED_TASK',
+        details: {
+          parentTaskId,
+          childTaskId: task.id
+        }
       });
     }
 
@@ -186,9 +195,15 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
     if (assigneeId !== undefined && assigneeId !== task.assigneeId) {
       const oldAssignee = task.assigneeId;
       setField('assigneeId', assigneeId);
-      await recordAction(t, task.id, userId, 'ASSIGNED', {
-        from: oldAssignee,
-        to: assigneeId
+      await auditService.logTaskAction({
+        transaction: t,
+        taskId: task.id,
+        userId,
+        actionType: 'ASSIGNED',
+        details: {
+          from: oldAssignee,
+          to: assigneeId
+        }
       });
     }
 
@@ -208,17 +223,28 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
       if (changes.status === 'APPROVED') actionType = 'APPROVED';
       if (changes.status === 'REJECTED') actionType = 'REJECTED';
 
-      await recordAction(t, task.id, userId, actionType, { changes, oldValues });
+      await auditService.logTaskAction({
+        transaction: t,
+        taskId: task.id,
+        userId,
+        actionType,
+        details: { changes, oldValues }
+      });
     }
 
     // Notes
     if (notes) {
-      await recordAction(t, task.id, userId, 'NOTE_ADDED', { note: notes });
+      await auditService.logTaskAction({
+        transaction: t,
+        taskId: task.id,
+        userId,
+        actionType: 'NOTE_ADDED',
+        details: { note: notes }
+      });
     }
 
     // EXECUTION TRIGGER
     if (changes.status === 'APPROVED') {
-      // Safeguard check could go here later
       const settings = await WinerySettings.findOne({ where: { wineryId } });
       await executionService.executeTask(task, t, settings);
     }
@@ -228,7 +254,7 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
     return task;
 
   } catch (err) {
-    await t.rollback();
+    if (!t.finished) await t.rollback();
     throw err;
   }
 }
