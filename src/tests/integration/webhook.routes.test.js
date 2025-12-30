@@ -71,7 +71,8 @@ describe('Webhook Routes', () => {
             const payload = {
                 From: '+61400000000',
                 To: '+61999999999', // Unknown
-                Body: 'Hello'
+                Body: 'Hello',
+                MessageSid: 'SM-UNKNOWN-WINERY-TEST'
             };
 
             await request(app)

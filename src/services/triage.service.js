@@ -161,28 +161,7 @@ function fallbackHeuristics(body, customerType) {
     return { category, subType, priority, sentiment, payload: { summary } };
 }
 
-// Re-writing triageMessage to be cleaner:
-/*
-async function triageMessage(message, context = {}) {
-    const body = (message.body || '').toLowerCase();
-    
-    // 1. AI First Approach (per requirements)
-    try {
-        const aiResult = await aiService.classify(message.body, context);
-        
-        // Apply Tiers
-        return {
-           ...aiResult,
-           customerType: context.member ? 'MEMBER' : 'VISITOR',
-           status: 'PENDING_REVIEW',
-           requiresApproval: true
-        };
-    } catch (e) {
-        // Fallback to legacy rules
-    }
-}
-*/
-// Let's do the AI First approach as it's the goal.
+
 
 
 /**

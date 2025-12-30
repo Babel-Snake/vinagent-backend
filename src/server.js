@@ -1,4 +1,5 @@
 require('dotenv').config();
+require('./config/telemetry');
 const app = require('./app');
 // Require models to trigger init/association
 const db = require('./models');

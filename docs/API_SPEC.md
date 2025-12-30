@@ -178,6 +178,7 @@ GET /tasks
 * `type`: filter by type (`ADDRESS_CHANGE`, `GENERAL_QUERY`, ...).
 * `page`: page number (default `1`).
 * `pageSize`: items per page (default `20`, max `100`).
+* `assignedToMe`: boolean (`true`) to filter tasks assigned to the current user (only relevant for managers/admins; staff always limited to their tasks or unassigned).
 
 **Headers**
 
@@ -189,7 +190,7 @@ Authorization: Bearer <firebase-id-token>
 
 ```json
 {
-  "data": [
+  "tasks": [
     {
       "id": 5001,
       "type": "ADDRESS_CHANGE",
@@ -366,7 +367,7 @@ Validate an address update token and return current/proposed address data.
 **URL**
 
 ```http
-GET /address-update/validate
+GET /api/public/address-update/validate
 ```
 
 **Query Parameters**
@@ -430,7 +431,7 @@ Confirm (and optionally edit) the new address using a valid token.
 **URL**
 
 ```http
-POST /address-update/confirm
+POST /api/public/address-update/confirm
 ```
 
 **Body**

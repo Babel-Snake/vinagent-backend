@@ -1,38 +1,25 @@
-const { Task, Member, Message, User } = require('../models');
-const { Op } = require('sequelize');
+const taskService = require('../services/taskService');
+const triageService = require('../services/triage.service');
 const AppError = require('../utils/AppError');
+const { validate, createTaskSchema, updateTaskSchema, autoclassifySchema } = require('../utils/validation');
 
 async function listTasks(req, res, next) {
     try {
         const { wineryId, role, id: userId } = req.user;
-        const { status, type, priority, assignedToMe } = req.query;
+        const { status, type, priority, assignedToMe, page, pageSize } = req.query;
 
-        const whereClause = { wineryId };
-
-        if (status) whereClause.status = status;
-        if (type) whereClause.type = type;
-        if (priority) whereClause.priority = priority;
-
-        // RBAC: Staff can only see their assigned tasks or unassigned tasks
-        if (role === 'staff') {
-            whereClause[Op.or] = [
-                { assigneeId: userId },
-                { assigneeId: null }
-            ];
-        } else if (assignedToMe === 'true') {
-            // Managers/Admins can filter to their own if they want
-            whereClause.assigneeId = userId;
-        }
-
-        const tasks = await Task.findAll({
-            where: whereClause,
-            include: [
-                { model: Member, attributes: ['id', 'firstName', 'lastName'] },
-            ],
-            order: [['createdAt', 'DESC']]
+        const result = await taskService.getTasksForWinery({
+            wineryId,
+            userId,
+            userRole: role,
+            filters: { status, type, priority, assignedToMe },
+            pagination: { page, pageSize }
         });
 
-        res.json({ tasks });
+        res.json({
+            tasks: result.tasks,
+            pagination: result.pagination
+        });
     } catch (err) {
         next(err);
     }
@@ -43,29 +30,14 @@ async function getTask(req, res, next) {
         const { wineryId } = req.user;
         const { id } = req.params;
 
-        const task = await Task.findOne({
-            where: { id, wineryId },
-            include: [
-                { model: Member },
-                { model: Message },
-                { model: User, as: 'Creator', attributes: ['id', 'displayName'] }
-            ]
-        });
-
-        if (!task) {
-            throw new AppError('Task not found', 404, 'NOT_FOUND');
-        }
-
+        const task = await taskService.getTaskById({ taskId: id, wineryId });
         res.json({ task });
     } catch (err) {
+        // Service throws generic Error for 404, we can let global handler catch it 
+        // if it has statusCode attached (which it does in service)
         next(err);
     }
 }
-
-const triageService = require('../services/triage.service');
-
-const { validate, createTaskSchema, updateTaskSchema, autoclassifySchema } = require('../utils/validation');
-const taskService = require('../services/taskService');
 
 async function autoclassify(req, res, next) {
     try {

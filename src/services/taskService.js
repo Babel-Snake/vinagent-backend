@@ -1,4 +1,5 @@
-const { Task, WinerySettings } = require('../models');
+const { Task, WinerySettings, Member, Message, User } = require('../models');
+const { Op } = require('sequelize');
 const executionService = require('./execution.service');
 const logger = require('../config/logger');
 const { validateStatusTransition } = require('../utils/validation');
@@ -259,7 +260,81 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
   }
 }
 
+/**
+ * Get tasks for a winery with filtering and pagination
+ */
+async function getTasksForWinery({ wineryId, userId, userRole, filters = {}, pagination = {} }) {
+  const { status, type, priority, assignedToMe } = filters;
+  const { page = 1, pageSize = 20 } = pagination;
+
+  // Validate pagination parameters
+  const limit = Math.min(Math.max(parseInt(pageSize) || 20, 1), 100);
+  const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
+
+  const whereClause = { wineryId };
+
+  if (status) whereClause.status = status;
+  if (type) whereClause.type = type;
+  if (priority) whereClause.priority = priority;
+
+  // RBAC: Staff can only see their assigned tasks or unassigned tasks
+  if (userRole === 'staff') {
+    whereClause[Op.or] = [
+      { assigneeId: userId },
+      { assigneeId: null }
+    ];
+  } else if (assignedToMe === 'true') {
+    // Managers/Admins can filter to their own if they want
+    whereClause.assigneeId = userId;
+  }
+
+  const { count, rows } = await Task.findAndCountAll({
+    where: whereClause,
+    include: [
+      { model: Member, attributes: ['id', 'firstName', 'lastName'] },
+    ],
+    order: [['createdAt', 'DESC']],
+    limit,
+    offset
+  });
+
+  return {
+    tasks: rows,
+    pagination: {
+      page: parseInt(page) || 1,
+      pageSize: limit,
+      total: count,
+      totalPages: Math.ceil(count / limit)
+    }
+  };
+}
+
+/**
+ * Get a single task by ID
+ */
+async function getTaskById({ taskId, wineryId }) {
+  const task = await Task.findOne({
+    where: { id: taskId, wineryId },
+    include: [
+      { model: Member },
+      { model: Message },
+      { model: User, as: 'Creator', attributes: ['id', 'displayName'] }
+    ]
+  });
+
+  if (!task) {
+    const err = new Error('Task not found');
+    err.statusCode = 404;
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+
+  return task;
+}
+
 module.exports = {
   createTask,
-  updateTask
+  updateTask,
+  getTasksForWinery,
+  getTaskById
 };

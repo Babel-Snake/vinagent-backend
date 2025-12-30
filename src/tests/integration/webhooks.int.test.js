@@ -1,13 +1,20 @@
 const request = require('supertest');
 
-jest.mock('../../src/models', () => ({
-    Message: { create: jest.fn() },
+jest.mock('../../models', () => ({
+    Message: { create: jest.fn(), findOne: jest.fn() },
     Winery: { findOne: jest.fn() },
     Task: { create: jest.fn() },
-    Member: { findOne: jest.fn() }
+    Member: { findOne: jest.fn() },
+    sequelize: {
+        transaction: jest.fn(() => ({
+            commit: jest.fn(),
+            rollback: jest.fn(),
+            finished: false
+        }))
+    }
 }));
 
-jest.mock('../../src/services/triage.service', () => ({
+jest.mock('../../services/triage.service', () => ({
     triageMessage: jest.fn()
 }));
 
@@ -19,9 +26,9 @@ process.env.NODE_ENV = 'test';
 process.env.EMAIL_WEBHOOK_SECRET = 'secret';
 process.env.TWILIO_AUTH_TOKEN = 'token';
 
-const app = require('../../src/app');
-const { Winery, Task, Member, Message } = require('../../src/models');
-const triageService = require('../../src/services/triage.service');
+const app = require('../../app');
+const { Winery, Task, Member, Message } = require('../../models');
+const triageService = require('../../services/triage.service');
 const twilio = require('twilio');
 
 describe('Webhook routes', () => {
@@ -62,12 +69,14 @@ describe('Webhook routes', () => {
             expect(res.status).toBe(200);
             expect(res.body.success).toBe(true);
             expect(res.body.taskId).toBe(20);
-            expect(Task.create).toHaveBeenCalledWith(expect.objectContaining({
+            // Task.create is now called with (data, { transaction })
+            // Check the first argument contains our expected fields
+            expect(Task.create.mock.calls[0][0]).toMatchObject({
                 suggestedChannel: 'email',
                 wineryId: 1,
                 memberId: 2,
                 messageId: 10
-            }));
+            });
         });
 
         it('rejects requests missing the email signature', async () => {
@@ -120,12 +129,13 @@ describe('Webhook routes', () => {
 
             expect(res.status).toBe(200);
             expect(res.body.success).toBe(true);
-            expect(Task.create).toHaveBeenCalledWith(expect.objectContaining({
+            // Check first argument to Task.create contains expected fields
+            expect(Task.create.mock.calls[0][0]).toMatchObject({
                 suggestedChannel: 'voice',
                 wineryId: 3,
                 memberId: 4,
                 messageId: 30
-            }));
+            });
             expect(twilio.validateRequest).toHaveBeenCalled();
         });
 

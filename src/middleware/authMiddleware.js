@@ -17,10 +17,11 @@ async function authMiddleware(req, res, next) {
 
   try {
     // 1. Test Bypass (Explicit Config Only)
-    // Replaces implicit NODE_ENV check
-    const { auth, firebase } = require('../config');
+    // Read directly from env for dynamic test support
+    const allowTestBypass = process.env.ALLOW_TEST_AUTH_BYPASS === 'true';
+    const { firebase } = require('../config');
 
-    if (auth.allowTestBypass && token === 'mock-token') {
+    if (allowTestBypass && token === 'mock-token') {
       // CRITICAL: Never allow bypass in production, even if misconfigured
       if (process.env.NODE_ENV === 'production') {
         logger.error('SECURITY ALERT: Mock-token bypass attempted in PRODUCTION. Rejecting.', {

@@ -1,4 +1,5 @@
 const client = require('twilio');
+const crypto = require('crypto');
 const config = require('../config');
 const logger = require('../config/logger');
 
@@ -61,28 +62,28 @@ function validateRetellSignature(req, res, next) {
         return res.status(403).json({ error: 'Missing signature' });
     }
 
-    // Retell signature verification (Crypto check)
-    // Assuming standard HMAC-SHA256 of body
-    // Since we don't have the SDK, we'll do a simple compare or crypto check.
-    // Ideally we use crypto.createHmac('sha256', secret).update(JSON.stringify(req.body)).digest('hex');
-    // For MVP, we'll assume strict equality if secret is just a token, or unimplemented.
-    // Actually, let's implement the standard HMAC pattern as a placeholder.
+    try {
+        const payload = JSON.stringify(req.body);
+        const computed = crypto
+            .createHmac('sha256', secret)
+            .update(payload)
+            .digest('hex');
 
-    // const crypto = require('crypto');
-    // const computed = crypto.createHmac('sha256', secret).update(JSON.stringify(req.body)).digest('hex');
-    // if (signature !== computed) ...
+        // Timing-safe comparison
+        const signatureBuffer = Buffer.from(signature, 'hex');
+        const computedBuffer = Buffer.from(computed, 'hex');
 
-    // For now, let's assume simple token match for simplicity unless Retell is known.
-    // If Retell uses a signing secret, it's usually HMAC.
+        if (signatureBuffer.length !== computedBuffer.length ||
+            !crypto.timingSafeEqual(signatureBuffer, computedBuffer)) {
+            logger.warn('Invalid Retell webhook signature');
+            return res.status(403).json({ error: 'Invalid signature' });
+        }
 
-    if (signature !== secret) {
-        // Allow simple match for now (MVP). 
-        // TODO: Implement actual crypto verification once Retell spec is confirmed.
-        logger.warn('Invalid Retell webhook signature');
-        return res.status(403).json({ error: 'Invalid signature' });
+        return next();
+    } catch (err) {
+        logger.error('Error validating Retell signature', err);
+        return res.status(500).json({ error: 'Validation error' });
     }
-
-    return next();
 }
 
 /**

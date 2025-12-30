@@ -3,7 +3,6 @@ const router = express.Router();
 
 const webhookRoutes = require('./webhook.routes');
 const taskRoutes = require('./task.routes');
-// const addressUpdateRoutes = require('./addressUpdate'); // Placeholder
 const { authMiddleware } = require('../middleware/authMiddleware');
 
 router.get('/health', (req, res) => {
@@ -20,8 +19,5 @@ router.use('/public', require('./public.routes'));
 router.use('/tasks', authMiddleware, taskRoutes);
 router.use('/staff', authMiddleware, require('./staff.routes'));
 router.use('/winery', authMiddleware, require('./winery.routes')); // Phase 12
-
-// Member self-service (secured by MemberActionToken)
-// router.use('/', addressUpdateRoutes);
 
 module.exports = router;

@@ -1,8 +1,22 @@
+// src/tests/integration/boot.test.js
+// Tests for application bootstrap and model initialization
+
+process.env.NODE_ENV = 'test';
+
 const request = require('supertest');
 const app = require('../../app');
 const db = require('../../models');
 
 describe('Boot Sequence Integration', () => {
+
+    beforeAll(async () => {
+        // Sync the test database
+        await db.sequelize.sync({ force: true });
+    });
+
+    afterAll(async () => {
+        await db.sequelize.close();
+    });
 
     // We want to verify that models are loaded and available
     it('should have initialized Sequelize models', async () => {
@@ -20,15 +34,18 @@ describe('Boot Sequence Integration', () => {
         expect(db.Task.associations.Winery).toBeDefined();
     });
 
-    it('should be able to connect (authentication check)', async () => {
-        try {
-            await db.sequelize.authenticate();
-        } catch (err) {
-            // If DB is down locally, we catch it but fail the test with a clear message
-            // or we might skip. But "Integration Check" implies we want to know if it connects.
-            // Given previous ECONNREFUSED issues, this might fail.
-            // We'll throw to ensure visibility.
-            throw new Error(`Database connection failed: ${err.message}`);
-        }
+    it('should respond to health check', async () => {
+        const res = await request(app)
+            .get('/health')
+            .expect(200);
+
+        expect(res.body.status).toBe('ok');
+    });
+
+    it('should be able to connect to database', async () => {
+        // The sync in beforeAll already verifies connection
+        // Just verify we can still query
+        const result = await db.sequelize.query('SELECT 1+1 as result');
+        expect(result).toBeDefined();
     });
 });

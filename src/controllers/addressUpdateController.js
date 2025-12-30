@@ -36,7 +36,9 @@ async function validateToken(req, res, next) {
         postcode: member.postcode,
         country: member.country
       } : null,
-      proposedAddress: tokenRecord.payload || null,
+      proposedAddress: (tokenRecord.payload && tokenRecord.payload.newAddress)
+        ? tokenRecord.payload.newAddress
+        : (tokenRecord.payload || null),
       expiresAt: tokenRecord.expiresAt
     });
   } catch (err) {

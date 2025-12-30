@@ -23,7 +23,10 @@ async function confirmAddress({ token, newAddress }) {
   }
 
   // 2. Get address from payload or override
-  const addressToApply = newAddress || tokenRecord.payload || {};
+  // 2. Get address from payload or override
+  const payload = tokenRecord.payload || {};
+  const tokenAddress = payload.newAddress || payload;
+  const addressToApply = newAddress || tokenAddress || {};
 
   if (!addressToApply.addressLine1) {
     const err = new Error('No address to apply');
