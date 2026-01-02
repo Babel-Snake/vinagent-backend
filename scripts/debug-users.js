@@ -45,7 +45,7 @@ async function debug() {
         }
 
     } catch (e) {
-        console.error('Debug failed:', e);
+        console.error('Debug failed (Captured):', e);
     }
     process.exit(0);
 }

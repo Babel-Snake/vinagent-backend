@@ -19,7 +19,7 @@ async function authMiddleware(req, res, next) {
     // 1. Test Bypass (Explicit Config Only)
     // Read directly from env for dynamic test support
     const allowTestBypass = process.env.ALLOW_TEST_AUTH_BYPASS === 'true';
-    const { firebase } = require('../config');
+    const { firebase, auth } = require('../config');
 
     if (allowTestBypass && token === 'mock-token') {
       // CRITICAL: Never allow bypass in production, even if misconfigured
@@ -78,6 +78,8 @@ async function authMiddleware(req, res, next) {
     const decodedToken = await admin.auth().verifyIdToken(token);
     const { uid, email, iss, aud } = decodedToken;
 
+    logger.debug('Auth: Token verified successfully', { uid, email, aud });
+
     // 3. Extra Hardening: Explicit Issuer/Audience Check
     // (Redundant but requested for hardening)
     const expectedIssuer = `${auth.expectedIssuerPrefix}${firebase.projectId}`;
@@ -99,8 +101,8 @@ async function authMiddleware(req, res, next) {
 
     if (!user) {
       // Strict: Reject users not in our DB
-      logger.warn(`Auth: User not found in DB for email ${email}`);
-      return res.status(403).json({ error: { code: 'ACCESS_DENIED', message: 'User not registered in system.' } });
+      logger.warn(`Auth: User not found in DB for email: ${email}`, { uid });
+      return res.status(403).json({ error: { code: 'ACCESS_DENIED', message: `User ${email} not registered in system.` } });
     }
 
     req.user = {
@@ -115,7 +117,11 @@ async function authMiddleware(req, res, next) {
 
     next();
   } catch (err) {
-    logger.warn('Auth Token Verification Failed', { error: err.message });
+    logger.warn('Auth Token Verification Failed', {
+      error: err.message,
+      stack: err.stack,
+      token_prefix: token.substring(0, 10) + '...'
+    });
     return res.status(401).json({
       error: {
         code: 'UNAUTHENTICATED',

@@ -2,13 +2,19 @@ import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 
 const firebaseConfig = {
-    apiKey: "AIzaSyA8ntqj81rLMP_QTBH8r7npRpf6MtI2uPY",
-    authDomain: "vinagent-9f2e4.firebaseapp.com",
-    projectId: "vinagent-9f2e4",
-    storageBucket: "vinagent-9f2e4.firebasestorage.app",
-    messagingSenderId: "972788381246",
-    appId: "1:972788381246:web:0b7cc5e277b671045d036f"
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
 };
+
+console.log('Firebase Config Loaded:', {
+    apiKey: firebaseConfig.apiKey ? '***' + firebaseConfig.apiKey.slice(-4) : 'UNDEFINED',
+    projectId: firebaseConfig.projectId,
+    authDomain: firebaseConfig.authDomain
+});
 
 // Initialize Firebase (Singleton pattern)
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
