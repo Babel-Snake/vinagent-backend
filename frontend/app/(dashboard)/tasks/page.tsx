@@ -18,7 +18,8 @@ export default function TasksPage() {
         priority: 'all',
         status: 'PENDING_REVIEW',
         sentiment: 'all',
-        assigneeId: 'all'
+        assigneeId: 'all',
+        search: ''
     });
 
     async function loadTasks() {
@@ -52,6 +53,8 @@ export default function TasksPage() {
         loadTasks();
     }, []);
 
+    const normalizePhone = (value: string) => value.replace(/[^\d]/g, '');
+
     // Filter Logic
     const filteredTasks = tasks.filter(task => {
         if (filters.category !== 'all' && task.category !== filters.category) return false;
@@ -66,6 +69,22 @@ export default function TasksPage() {
                 if (task.assigneeId !== Number(filters.assigneeId)) return false;
             }
         }
+        if (filters.search.trim()) {
+            const term = filters.search.trim().toLowerCase();
+            const member = task.Member;
+            const fullName = member ? `${member.firstName} ${member.lastName}`.toLowerCase() : '';
+            const email = (member?.email || '').toLowerCase();
+            const phone = member?.phone || '';
+            const normalizedPhone = normalizePhone(phone);
+            const normalizedTerm = normalizePhone(term);
+
+            const matchesName = fullName.includes(term);
+            const matchesEmail = email.includes(term);
+            const matchesPhone = normalizedTerm ? normalizedPhone.includes(normalizedTerm) : false;
+
+            if (!matchesName && !matchesEmail && !matchesPhone) return false;
+        }
+
         return true;
     });
 

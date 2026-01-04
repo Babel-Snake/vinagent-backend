@@ -315,7 +315,7 @@ async function getTasksForWinery({ wineryId, userId, userRole, filters = {}, pag
   const { count, rows } = await Task.findAndCountAll({
     where: whereClause,
     include: [
-      { model: Member, attributes: ['id', 'firstName', 'lastName'] },
+      { model: Member, attributes: ['id', 'firstName', 'lastName', 'email', 'phone'] },
       { model: User, as: 'Creator', attributes: ['id', 'displayName', 'role'] },
     ],
     order: [['createdAt', 'DESC']],

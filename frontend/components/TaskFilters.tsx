@@ -7,6 +7,7 @@ interface TaskFiltersProps {
         assigneeId: string; // 'all' or number
         status: string;
         sentiment: string;
+        search: string;
     };
     onFilterChange: (newFilters: any) => void;
     tasks: Task[]; // Passed to extract unique options dynamically (e.g. Assignees)
@@ -25,7 +26,19 @@ export default function TaskFilters({ filters, onFilterChange, tasks }: TaskFilt
     };
 
     return (
-        <div className="bg-white p-4 rounded-lg shadow mb-6 grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="bg-white p-4 rounded-lg shadow mb-6 grid grid-cols-2 md:grid-cols-6 gap-4">
+
+            {/* Search */}
+            <div className="md:col-span-2">
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Search</label>
+                <input
+                    type="text"
+                    className="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                    value={filters.search}
+                    onChange={(e) => handleChange('search', e.target.value)}
+                    placeholder="Name, phone, or email"
+                />
+            </div>
 
             {/* Category Filter */}
             <div>
