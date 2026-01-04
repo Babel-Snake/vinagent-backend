@@ -172,6 +172,21 @@ export async function getMyProfile(): Promise<any> {
     return await res.json();
 }
 
+export async function getUsers(): Promise<Staff[]> {
+    const res = await fetch(`${API_BASE}/users`, {
+        headers: {
+            'Authorization': await getAuthToken()
+        }
+    });
+
+    if (!res.ok) {
+        throw new Error('Failed to fetch users');
+    }
+
+    const data = await res.json();
+    return data.users;
+}
+
 // --- Winery Module ---
 
 export async function getWineryFull(): Promise<any> {

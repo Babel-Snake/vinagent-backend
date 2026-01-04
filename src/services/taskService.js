@@ -34,6 +34,30 @@ function validatePayloadForApproval(task) {
 
 // --- CORE METHODS ---
 
+// --- HELPERS ---
+
+async function determineAutoAssignee(wineryId, data) {
+  // 1. Negative Sentiment -> escalate to Manager
+  if (data.sentiment === 'NEGATIVE') {
+    const manager = await User.findOne({ where: { wineryId, role: 'manager' } });
+    if (manager) return manager.id;
+  }
+
+  // 2. Operations / Internal -> Manager
+  if (data.category === 'OPERATIONS' || data.category === 'INTERNAL') {
+    const manager = await User.findOne({ where: { wineryId, role: 'manager' } });
+    if (manager) return manager.id;
+  }
+
+  // 3. Orders -> Staff
+  if (data.category === 'ORDER') {
+    const staff = await User.findOne({ where: { wineryId, role: 'staff' } });
+    if (staff) return staff.id;
+  }
+
+  return null;
+}
+
 /**
  * Creates a new task (manually or via triage).
  */
@@ -60,7 +84,7 @@ async function createTask({ wineryId, userId, data }) {
       messageId: messageId || null,
       createdBy: userId,
       updatedBy: userId,
-      assigneeId: assigneeId || null,
+      assigneeId: assigneeId || await determineAutoAssignee(wineryId, data),
       parentTaskId: parentTaskId || null
     }, { transaction: t });
 

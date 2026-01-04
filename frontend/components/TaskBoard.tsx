@@ -1,14 +1,15 @@
 'use client';
 
-import { Task, updateTask } from '../lib/api';
+import { Task, updateTask, Staff } from '../lib/api';
 import { useState } from 'react';
 
 interface TaskBoardProps {
     tasks: Task[];
+    users: Staff[];
     onRefresh: () => void;
 }
 
-export default function TaskBoard({ tasks, onRefresh }: TaskBoardProps) {
+export default function TaskBoard({ tasks, users, onRefresh }: TaskBoardProps) {
     const [updating, setUpdating] = useState<number | null>(null);
     const [replyEdits, setReplyEdits] = useState<{ [key: number]: string }>({});
 
@@ -39,10 +40,14 @@ export default function TaskBoard({ tasks, onRefresh }: TaskBoardProps) {
         }
     }
 
-    async function handleAssignment(id: number, assigneeId: number) {
+    async function handleAssignment(id: number, assigneeId: string) {
         setUpdating(id);
         try {
-            await updateTask(id, { assigneeId });
+            // Handle unassignment if value is empty string (if we add that option)
+            // But for now assuming we assign to a valid ID.
+            if (!assigneeId) return;
+
+            await updateTask(id, { assigneeId: parseInt(assigneeId) });
             onRefresh();
         } catch (err: any) {
             alert('Failed to assign: ' + err.message);
@@ -110,19 +115,22 @@ export default function TaskBoard({ tasks, onRefresh }: TaskBoardProps) {
                             )}
                         </div>
 
-                        <div className="flex items-center gap-4 text-sm text-gray-500 mb-3">
-                            {task.Assignee ? (
-                                <span className="flex items-center gap-1">
-                                    👤 Assigned to: <b className="text-gray-700">{task.Assignee.displayName}</b>
-                                </span>
-                            ) : (
-                                <button
-                                    onClick={() => handleAssignment(task.id, 7)} // Mock assign to self (ID 7)
-                                    className="text-blue-500 hover:underline text-xs"
-                                >
-                                    + Assign to me
-                                </button>
-                            )}
+                        <div className="flex items-center gap-4 text-sm text-gray-500 mb-3 bg-gray-50 rounded px-3 py-2 w-fit">
+                            <span className="text-gray-500">👤 </span>
+                            <select
+                                className="bg-transparent border-none text-sm font-medium text-gray-700 focus:ring-0 cursor-pointer hover:text-blue-600 p-0"
+                                value={task.assigneeId || ''}
+                                onChange={(e) => handleAssignment(task.id, e.target.value)}
+                                disabled={updating === task.id}
+                            >
+                                <option value="" className="text-gray-400">Unassigned</option>
+                                {users.map(u => (
+                                    <option key={u.id} value={u.id}>
+                                        {u.displayName}
+                                    </option>
+                                ))}
+                            </select>
+                            {updating === task.id && <span className="text-xs text-blue-500 animate-pulse">Saving...</span>}
                         </div>
 
                         {/* Payload Preview */}

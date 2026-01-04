@@ -1,13 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { fetchTasks, Task } from '../../../lib/api';
+import { fetchTasks, Task, getUsers, Staff } from '../../../lib/api';
 import TaskBoard from '../../../components/TaskBoard';
 import CreateTaskModal from '../../../components/CreateTaskModal';
 import TaskFilters from '../../../components/TaskFilters';
 
 export default function TasksPage() {
     const [tasks, setTasks] = useState<Task[]>([]);
+    const [users, setUsers] = useState<Staff[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [showCreateModal, setShowCreateModal] = useState(false);
@@ -22,8 +23,12 @@ export default function TasksPage() {
     async function loadTasks() {
         try {
             setLoading(true);
-            const data = await fetchTasks();
-            setTasks(data);
+            const [tasksData, usersData] = await Promise.all([
+                fetchTasks(),
+                getUsers()
+            ]);
+            setTasks(tasksData);
+            setUsers(usersData);
             setError('');
         } catch (err: any) {
             setError(err.message);
@@ -89,7 +94,7 @@ export default function TasksPage() {
                     <p className="mt-2 text-gray-500">Loading tasks...</p>
                 </div>
             ) : (
-                <TaskBoard tasks={sortedTasks} onRefresh={loadTasks} />
+                <TaskBoard tasks={sortedTasks} users={users} onRefresh={loadTasks} />
             )}
 
             {showCreateModal && (

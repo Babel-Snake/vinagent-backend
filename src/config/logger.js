@@ -2,7 +2,7 @@
 // Thin wrapper around winston so we can swap or adjust later.
 
 const { createLogger, format, transports } = require('winston');
-const { logLevel } = require('./index');
+const logLevel = process.env.LOG_LEVEL || 'info';
 
 const logger = createLogger({
   level: logLevel,
