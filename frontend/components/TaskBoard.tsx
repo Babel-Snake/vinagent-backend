@@ -7,9 +7,10 @@ interface TaskBoardProps {
     tasks: Task[];
     users: Staff[];
     onRefresh: () => void;
+    canAssign?: boolean;
 }
 
-export default function TaskBoard({ tasks, users, onRefresh }: TaskBoardProps) {
+export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }: TaskBoardProps) {
     const [updating, setUpdating] = useState<number | null>(null);
     const [replyEdits, setReplyEdits] = useState<{ [key: number]: string }>({});
 
@@ -118,6 +119,7 @@ export default function TaskBoard({ tasks, users, onRefresh }: TaskBoardProps) {
                             )}
                         </div>
 
+                        {canAssign && (
                         <div className="flex items-center gap-4 text-sm text-gray-500 mb-3 bg-gray-50 rounded px-3 py-2 w-fit">
                             <span className="text-gray-500">👤 </span>
                             <select
@@ -135,6 +137,8 @@ export default function TaskBoard({ tasks, users, onRefresh }: TaskBoardProps) {
                             </select>
                             {updating === task.id && <span className="text-xs text-blue-500 animate-pulse">Saving...</span>}
                         </div>
+
+                        )}
 
                         {/* Payload Preview */}
                         <div className="bg-gray-50 rounded p-3 text-sm font-mono text-gray-700 whitespace-pre-wrap max-h-32 overflow-y-auto mb-4">

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { fetchTasks, Task, getUsers, Staff } from '../../../lib/api';
+import { fetchTasks, Task, getUsers, Staff, getMyProfile } from '../../../lib/api';
 import TaskBoard from '../../../components/TaskBoard';
 import CreateTaskModal from '../../../components/CreateTaskModal';
 import TaskFilters from '../../../components/TaskFilters';
@@ -12,6 +12,7 @@ export default function TasksPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [showCreateModal, setShowCreateModal] = useState(false);
+    const [userRole, setUserRole] = useState<string | null>(null);
     const [filters, setFilters] = useState({
         category: 'all',
         priority: 'all',
@@ -23,12 +24,22 @@ export default function TasksPage() {
     async function loadTasks() {
         try {
             setLoading(true);
-            const [tasksData, usersData] = await Promise.all([
-                fetchTasks(),
-                getUsers()
-            ]);
+            let role = userRole;
+            if (!role) {
+                const profileData = await getMyProfile();
+                role = profileData?.user?.role || null;
+                setUserRole(role);
+            }
+
+            const tasksData = await fetchTasks();
             setTasks(tasksData);
-            setUsers(usersData);
+
+            if (role !== 'staff') {
+                const usersData = await getUsers();
+                setUsers(usersData);
+            } else {
+                setUsers([]);
+            }
             setError('');
         } catch (err: any) {
             setError(err.message);
@@ -94,7 +105,12 @@ export default function TasksPage() {
                     <p className="mt-2 text-gray-500">Loading tasks...</p>
                 </div>
             ) : (
-                <TaskBoard tasks={sortedTasks} users={users} onRefresh={loadTasks} />
+                <TaskBoard
+                    tasks={sortedTasks}
+                    users={users}
+                    onRefresh={loadTasks}
+                    canAssign={userRole !== 'staff'}
+                />
             )}
 
             {showCreateModal && (
