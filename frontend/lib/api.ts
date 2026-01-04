@@ -22,6 +22,11 @@ export interface Task {
         id: number;
         displayName: string;
     };
+    Creator?: {
+        id: number;
+        displayName: string;
+        role?: string;
+    };
 }
 
 export interface AutoclassifyResponse {

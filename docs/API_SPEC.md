@@ -195,6 +195,11 @@ Authorization: Bearer <firebase-id-token>
       "id": 5001,
       "type": "ADDRESS_CHANGE",
       "status": "PENDING_REVIEW",
+      "Creator": {
+        "id": 7,
+        "displayName": "Mike Manager",
+        "role": "manager"
+      },
       "member": {
         "id": 42,
         "firstName": "Emma",
@@ -221,6 +226,9 @@ Authorization: Bearer <firebase-id-token>
   }
 }
 ```
+
+Notes:
+* `Creator` may be null for system-generated tasks; clients should display a fallback label like "System".
 
 ---
 
@@ -297,6 +305,11 @@ GET /tasks/:id
   "subType": "ACCOUNT_ADDRESS_CHANGE",
   "customerType": "MEMBER",
   "status": "PENDING_REVIEW",
+  "Creator": {
+    "id": 7,
+    "displayName": "Mike Manager",
+    "role": "manager"
+  },
   "member": { "id": 42, "firstName": "Emma" },
   "payload": { "newAddress": { "addressLine1": "..." } },
   "createdAt": "2025-02-03T09:15:02+10:30"

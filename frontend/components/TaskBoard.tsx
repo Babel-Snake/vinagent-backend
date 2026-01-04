@@ -98,6 +98,9 @@ export default function TaskBoard({ tasks, users, onRefresh }: TaskBoardProps) {
 
                             <span className="text-sm text-gray-400">#{task.id}</span>
                             <span className="text-sm text-gray-400">{new Date(task.createdAt).toLocaleString()}</span>
+                            <span className="text-sm text-gray-400">
+                                Created by: {task.Creator?.displayName || 'System'}
+                            </span>
                         </div>
 
                         {/* Body */}
