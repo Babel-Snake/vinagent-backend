@@ -316,6 +316,7 @@ async function getTasksForWinery({ wineryId, userId, userRole, filters = {}, pag
     where: whereClause,
     include: [
       { model: Member, attributes: ['id', 'firstName', 'lastName'] },
+      { model: User, as: 'Creator', attributes: ['id', 'displayName', 'role'] },
     ],
     order: [['createdAt', 'DESC']],
     limit,
