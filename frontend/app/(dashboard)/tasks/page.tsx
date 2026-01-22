@@ -19,6 +19,7 @@ export default function TasksPage() {
         status: 'PENDING_REVIEW',
         sentiment: 'all',
         assigneeId: 'all',
+        createdById: 'all',
         search: ''
     });
 
@@ -69,6 +70,15 @@ export default function TasksPage() {
                 if (task.assigneeId !== Number(filters.assigneeId)) return false;
             }
         }
+
+        if (filters.createdById !== 'all') {
+            if (filters.createdById === 'system') {
+                if (task.Creator) return false;
+            } else {
+                if (task.Creator?.id !== Number(filters.createdById)) return false;
+            }
+        }
+
         if (filters.search.trim()) {
             const term = filters.search.trim().toLowerCase();
             const member = task.Member;

@@ -5,6 +5,7 @@ interface TaskFiltersProps {
         category: string;
         priority: string;
         assigneeId: string; // 'all' or number
+        createdById: string; // 'all' or number or 'system'
         status: string;
         sentiment: string;
         search: string;
@@ -16,6 +17,10 @@ interface TaskFiltersProps {
 export default function TaskFilters({ filters, onFilterChange, tasks }: TaskFiltersProps) {
     // Extract Unique Assignees for Dropdown
     const uniqueAssignees = Array.from(new Set(tasks.map(t => t.Assignee ? JSON.stringify(t.Assignee) : '').filter(Boolean)))
+        .map(s => JSON.parse(s));
+
+    // Extract Unique Creators for Dropdown
+    const uniqueCreators = Array.from(new Set(tasks.map(t => t.Creator ? JSON.stringify(t.Creator) : '').filter(Boolean)))
         .map(s => JSON.parse(s));
 
     // Extract Unique Categories
@@ -113,6 +118,22 @@ export default function TaskFilters({ filters, onFilterChange, tasks }: TaskFilt
                     <option value="unassigned">Unassigned</option>
                     {uniqueAssignees.map((a: any) => (
                         <option key={a.id} value={a.id}>{a.displayName}</option>
+                    ))}
+                </select>
+            </div>
+
+            {/* Created By Filter */}
+            <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Created By</label>
+                <select
+                    className="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                    value={filters.createdById}
+                    onChange={(e) => handleChange('createdById', e.target.value)}
+                >
+                    <option value="all">All Creators</option>
+                    <option value="system">System</option>
+                    {uniqueCreators.map((c: any) => (
+                        <option key={c.id} value={c.id}>{c.displayName}</option>
                     ))}
                 </select>
             </div>
