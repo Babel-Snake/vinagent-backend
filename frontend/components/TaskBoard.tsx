@@ -82,7 +82,7 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
                                 {task.category || 'GENERAL'}
                             </span>
 
-                            <span className={`px-2 py-1 rounded text-xs font-medium 
+                            <span className={`px-2 py-1 rounded text-xs font-medium
                                 ${task.status === 'PENDING_REVIEW' ? 'bg-yellow-100 text-yellow-800' : ''}
                                 ${task.status === 'APPROVED' ? 'bg-green-100 text-green-800' : ''}
                                 ${task.status === 'REJECTED' ? 'bg-red-100 text-red-800' : ''}
@@ -94,6 +94,16 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
                             {task.sentiment === 'NEGATIVE' && (
                                 <span className="px-2 py-1 rounded text-xs font-bold bg-red-600 text-white animate-pulse">
                                     NEGATIVE
+                                </span>
+                            )}
+                            {task.sentiment === 'POSITIVE' && (
+                                <span className="px-2 py-1 rounded text-xs font-bold bg-green-600 text-white">
+                                    POSITIVE
+                                </span>
+                            )}
+                            {task.sentiment === 'NEUTRAL' && (
+                                <span className="px-2 py-1 rounded text-xs font-bold bg-gray-500 text-white">
+                                    NEUTRAL
                                 </span>
                             )}
 
@@ -120,23 +130,23 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
                         </div>
 
                         {canAssign && (
-                        <div className="flex items-center gap-4 text-sm text-gray-500 mb-3 bg-gray-50 rounded px-3 py-2 w-fit">
-                            <span className="text-gray-500">👤 </span>
-                            <select
-                                className="bg-transparent border-none text-sm font-medium text-gray-700 focus:ring-0 cursor-pointer hover:text-blue-600 p-0"
-                                value={task.assigneeId || ''}
-                                onChange={(e) => handleAssignment(task.id, e.target.value)}
-                                disabled={updating === task.id}
-                            >
-                                <option value="" className="text-gray-400">Unassigned</option>
-                                {users.map(u => (
-                                    <option key={u.id} value={u.id}>
-                                        {u.displayName}
-                                    </option>
-                                ))}
-                            </select>
-                            {updating === task.id && <span className="text-xs text-blue-500 animate-pulse">Saving...</span>}
-                        </div>
+                            <div className="flex items-center gap-4 text-sm text-gray-500 mb-3 bg-gray-50 rounded px-3 py-2 w-fit">
+                                <span className="text-gray-500">👤 </span>
+                                <select
+                                    className="bg-transparent border-none text-sm font-medium text-gray-700 focus:ring-0 cursor-pointer hover:text-blue-600 p-0"
+                                    value={task.assigneeId || ''}
+                                    onChange={(e) => handleAssignment(task.id, e.target.value)}
+                                    disabled={updating === task.id}
+                                >
+                                    <option value="" className="text-gray-400">Unassigned</option>
+                                    {users.map(u => (
+                                        <option key={u.id} value={u.id}>
+                                            {u.displayName}
+                                        </option>
+                                    ))}
+                                </select>
+                                {updating === task.id && <span className="text-xs text-blue-500 animate-pulse">Saving...</span>}
+                            </div>
 
                         )}
 
@@ -163,36 +173,41 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
                     </div>
 
                     {/* Actions */}
-                    <div className="flex flex-col gap-2 min-w-[140px] ml-4">
-                        {task.status === 'PENDING_REVIEW' && (
-                            <>
-                                <button
-                                    onClick={() => handleStatusChange(task.id, 'APPROVED', task)}
-                                    disabled={updating === task.id}
-                                    className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm font-medium transition-colors disabled:opacity-50 flex flex-col items-center"
-                                >
-                                    <span>Approve</span>
-                                    {(replyEdits[task.id] || task.suggestedReplyBody) && (
-                                        <span className="text-[10px] opacity-80">& Send Reply</span>
-                                    )}
-                                </button>
-                                <button
-                                    onClick={() => handleStatusChange(task.id, 'REJECTED', task)}
-                                    disabled={updating === task.id}
-                                    className="px-4 py-2 bg-white border border-red-300 text-red-700 rounded hover:bg-red-50 text-sm font-medium transition-colors disabled:opacity-50"
-                                >
-                                    Reject
-                                </button>
-                            </>
-                        )}
-                        {task.status !== 'PENDING_REVIEW' && (
-                            <div className="text-sm text-gray-400 font-medium text-center border border-gray-100 rounded py-2">
-                                {task.status === 'APPROVED' ? '✅ Approved' : 'Actioned'}
-                            </div>
-                        )}
+                    < div className="flex flex-col gap-2 min-w-[140px] ml-4" >
+                        {
+                            task.status === 'PENDING_REVIEW' && (
+                                <>
+                                    <button
+                                        onClick={() => handleStatusChange(task.id, 'APPROVED', task)}
+                                        disabled={updating === task.id}
+                                        className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm font-medium transition-colors disabled:opacity-50 flex flex-col items-center"
+                                    >
+                                        <span>Approve</span>
+                                        {(replyEdits[task.id] || task.suggestedReplyBody) && (
+                                            <span className="text-[10px] opacity-80">& Send Reply</span>
+                                        )}
+                                    </button>
+                                    <button
+                                        onClick={() => handleStatusChange(task.id, 'REJECTED', task)}
+                                        disabled={updating === task.id}
+                                        className="px-4 py-2 bg-white border border-red-300 text-red-700 rounded hover:bg-red-50 text-sm font-medium transition-colors disabled:opacity-50"
+                                    >
+                                        Reject
+                                    </button>
+                                </>
+                            )
+                        }
+                        {
+                            task.status !== 'PENDING_REVIEW' && (
+                                <div className="text-sm text-gray-400 font-medium text-center border border-gray-100 rounded py-2">
+                                    {task.status === 'APPROVED' ? '✅ Approved' : 'Actioned'}
+                                </div>
+                            )
+                        }
                     </div>
-                </div>
-            ))}
-        </div>
+                </div >
+            ))
+            }
+        </div >
     );
 }
