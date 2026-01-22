@@ -10,6 +10,7 @@ class OpenAIAdapter extends AIAdapter {
 
     async classify(text, context = {}) {
         let wineryContextString = '';
+        let memberContextString = '';
 
         // Fetch rich winery context if ID is available
         if (context.wineryId) {
@@ -25,12 +26,30 @@ class OpenAIAdapter extends AIAdapter {
             }
         }
 
+        // Format Member Context if available
+        if (context.member) {
+            memberContextString = JSON.stringify({
+                firstName: context.member.firstName,
+                lastName: context.member.lastName,
+                email: context.member.email,
+                phone: context.member.phone,
+                notes: context.member.notes || 'No specific notes.',
+                tier: context.member.tier || 'Standard'
+            }, null, 2);
+        }
+
+        const channel = context.suggestedChannel || 'sms'; // Default to SMS style if unknown
+        const maxChars = channel === 'sms' ? 160 : 1000;
+
         const systemPrompt = `
 You are VinAgent, an intelligent cellar door assistant for ${context.wineryId ? 'a specific winery' : 'a winery'}.
 Your job is to analyze incoming messages and classify them into a structured task format.
 
 **Winery Context (Source of Truth):**
 ${wineryContextString || 'No specific winery context available.'}
+
+**Member Context (Who you are talking to):**
+${memberContextString || 'Unknown Visitor'}
 
 **Classification Rules:**
 Return a JSON object with the following fields:
@@ -40,11 +59,15 @@ Return a JSON object with the following fields:
 - priority: [low, normal, high] (High if angry, urgent, or payment issue)
 - summary: A brief 1-sentence summary of the request.
 - suggestedTitle: A short title for the task.
-- suggestedReply: A polite, professional SMS reply (max 160 chars) to the customer. 
-    - ADHERE TO THE "BRAND VOICE" SETTINGS IN THE CONTEXT.
-    - USE THE "POLICIES" AND "FAQS" TO ANSWER QUESTIONS ACCURATELY.
-    - IF A PRODUCT IS MENTIONED, CHECK "INVENTORY" FOR PRICE/STOCK.
-    - DO NOT HALLUCINATE. If info is missing, ask the customer.
+- suggestedReply: A FULL, READY-TO-SEND reply to the customer via ${channel.toUpperCase()}.
+    - **Context Aware**: Address the member by name if known (${context.member ? context.member.firstName : 'Visitor'}).
+    - **Brand Voice**: STRICTLY follow the 'tone', 'doSay', and 'dontSay' guidelines in the Winery Context.
+    - **Channel Constraints**: Max ${maxChars} characters.
+    - **Content**: 
+        - If they ask a question -> Answer it using the FAQs/Policies.
+        - If they want a booking -> Check 'experiences' and propose a next step (or confirm if simple).
+        - If they have a problem -> Empathize and propose a solution (e.g. "I'll look into that immediately").
+    - **Sign-off**: Use the brand sign-off if defined.
 
 **Input Text:**
 "${text}"

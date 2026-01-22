@@ -29,12 +29,18 @@ async function triageMessage(message, context = {}) {
         payload: { summary: body.substring(0, 50) }
     };
 
+    const suggestedChannel = message.source === 'email'
+        ? 'email'
+        : message.source === 'voice'
+            ? 'voice'
+            : 'sms';
+
     const skipAI = process.env.AI_SKIP === 'true';
 
     // 2. Attempt AI Classification
     if (!skipAI) {
         try {
-            const aiResult = await aiService.classify(message.body, context);
+            const aiResult = await aiService.classify(message.body, { ...context, suggestedChannel });
             // Merge AI result
             result = { ...result, ...aiResult };
         } catch (err) {
@@ -77,11 +83,7 @@ async function triageMessage(message, context = {}) {
         }
     }
 
-    const suggestedChannel = message.source === 'email'
-        ? 'email'
-        : message.source === 'voice'
-            ? 'voice'
-            : 'sms';
+
 
     return {
         type: result.subType, // Legacy
@@ -91,7 +93,12 @@ async function triageMessage(message, context = {}) {
         sentiment: result.sentiment,
         priority: result.priority,
         status: 'PENDING_REVIEW',
-        payload: result.payload || {},
+        payload: {
+            ...result.payload, // Default or existing payload
+            // User wants a "brief title which encapsulates the entire thing".
+            // We prioritize the suggestedTitle, then the summary, then the fallback.
+            summary: result.suggestedTitle || result.summary || result.payload?.summary
+        },
         requiresApproval: true,
         suggestedTitle: result.suggestedTitle, // Pass through if AI generated
         suggestedReplyBody: result.suggestedReply || null,
@@ -158,7 +165,8 @@ function fallbackHeuristics(body, customerType) {
         subType = 'ORDER_SHIPPING_DELAY';
     }
 
-    return { category, subType, priority, sentiment, payload: { summary } };
+    const suggestedTitle = `${category} - ${subType.replace(/_/g, ' ')}`;
+    return { category, subType, priority, sentiment, payload: { summary }, suggestedTitle };
 }
 
 
@@ -193,7 +201,7 @@ async function classifyStaffNote(input) {
             ...classification.payload,
             originalText: text // Keep original text
         },
-        suggestedTitle: `${classification.category} - ${classification.subType.replace(/_/g, ' ')}`,
+        suggestedTitle: classification.suggestedTitle || `${classification.category} - ${classification.subType.replace(/_/g, ' ')}`,
         suggestedAssigneeRole: 'manager' // Logic could be smarter here
     };
 }
