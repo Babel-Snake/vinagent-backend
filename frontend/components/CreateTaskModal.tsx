@@ -14,12 +14,27 @@ export default function CreateTaskModal({ onClose, onCreated }: CreateTaskModalP
     const [loading, setLoading] = useState(false);
     const [preview, setPreview] = useState<AutoclassifyResponse | null>(null);
 
+    // Editable State
+    const [title, setTitle] = useState('');
+    const [category, setCategory] = useState('');
+    const [subType, setSubType] = useState('');
+    const [priority, setPriority] = useState('');
+    const [sentiment, setSentiment] = useState('');
+
     async function handleAnalyze() {
         if (!text.trim()) return;
         setLoading(true);
         try {
             const result = await autoclassifyTask(text);
             setPreview(result);
+
+            // Initialize editable state
+            setTitle(result.suggestedTitle);
+            setCategory(result.category);
+            setSubType(result.subType);
+            setPriority(result.priority);
+            setSentiment(result.sentiment);
+
             setStep('PREVIEW');
         } catch (err: any) {
             alert('Analysis failed: ' + err.message);
@@ -33,11 +48,11 @@ export default function CreateTaskModal({ onClose, onCreated }: CreateTaskModalP
         setLoading(true);
         try {
             await createTask({
-                category: preview.category,
-                subType: preview.subType,
-                priority: preview.priority,
-                sentiment: preview.sentiment,
-                payload: preview.payload,
+                category,
+                subType,
+                priority,
+                sentiment,
+                payload: preview.payload, // Keep original payload for now as it's complex to edit
                 notes: text // Save original text as note
             });
             onCreated();
@@ -82,17 +97,73 @@ export default function CreateTaskModal({ onClose, onCreated }: CreateTaskModalP
                     </>
                 ) : (
                     <>
-                        {preview && (
-                            <div className="bg-blue-50 p-4 rounded mb-4">
-                                <h3 className="font-bold text-blue-900 mb-2">{preview.suggestedTitle}</h3>
-                                <div className="grid grid-cols-2 gap-2 text-sm">
-                                    <div><span className="font-semibold">Category:</span> {preview.category}</div>
-                                    <div><span className="font-semibold">Type:</span> {preview.subType}</div>
-                                    <div><span className="font-semibold">Priority:</span> {preview.priority}</div>
-                                    <div><span className="font-semibold">Sentiment:</span> {preview.sentiment}</div>
+                        <div className="bg-blue-50 p-4 rounded mb-4">
+                            <div className="mb-3">
+                                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Title</label>
+                                <input
+                                    type="text"
+                                    className="w-full text-sm border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                    value={title}
+                                    onChange={e => setTitle(e.target.value)}
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Category</label>
+                                    <select
+                                        className="w-full text-sm border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                        value={category}
+                                        onChange={e => setCategory(e.target.value)}
+                                    >
+                                        <option value="BOOKING">Booking</option>
+                                        <option value="ORDER">Order</option>
+                                        <option value="ACCOUNT">Account</option>
+                                        <option value="GENERAL">General</option>
+                                        <option value="INTERNAL">Internal</option>
+                                        <option value="SYSTEM">System</option>
+                                        <option value="OPERATIONS">Operations</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Type</label>
+                                    <input
+                                        type="text"
+                                        className="w-full text-sm border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                        value={subType}
+                                        onChange={e => setSubType(e.target.value)}
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Priority</label>
+                                    <select
+                                        className="w-full text-sm border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                        value={priority}
+                                        onChange={e => setPriority(e.target.value)}
+                                    >
+                                        <option value="low">Low</option>
+                                        <option value="normal">Normal</option>
+                                        <option value="high">High</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Sentiment</label>
+                                    <select
+                                        className="w-full text-sm border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                        value={sentiment}
+                                        onChange={e => setSentiment(e.target.value)}
+                                    >
+                                        <option value="NEUTRAL">Neutral</option>
+                                        <option value="POSITIVE">Positive</option>
+                                        <option value="NEGATIVE">Negative</option>
+                                    </select>
                                 </div>
                             </div>
-                        )}
+                        </div>
+
                         <div className="flex justify-end gap-2">
                             <button
                                 onClick={() => setStep('INPUT')}
