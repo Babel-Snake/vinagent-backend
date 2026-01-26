@@ -13,6 +13,7 @@ export interface Task {
     parentTaskId?: number;
     suggestedReplyBody?: string;
     suggestedChannel?: string;
+    suggestedReplySubject?: string;
     Member?: {
         id: number;
         firstName: string;
@@ -88,7 +89,12 @@ export async function updateTask(taskId: number, updates: Partial<Task>): Promis
     return data.task;
 }
 
-export async function createTask(taskData: Partial<Task> & { notes?: string }): Promise<Task> {
+export async function createTask(taskData: Partial<Task> & {
+    notes?: string;
+    memberId?: number;
+    suggestedReplyBody?: string;
+    suggestedChannel?: string;
+}): Promise<Task> {
     const res = await fetch(`${API_BASE}/tasks`, {
         method: 'POST',
         headers: {
@@ -195,6 +201,23 @@ export async function getUsers(): Promise<Staff[]> {
 }
 
 // --- Winery Module ---
+
+// --- Winery Module ---
+
+export async function searchMembers(query: string): Promise<any[]> {
+    const res = await fetch(`${API_BASE}/members/search?q=${encodeURIComponent(query)}`, {
+        headers: {
+            'Authorization': await getAuthToken()
+        }
+    });
+
+    if (!res.ok) {
+        throw new Error('Failed to search members');
+    }
+
+    const data = await res.json();
+    return data.members;
+}
 
 export async function getWineryFull(): Promise<any> {
     const res = await fetch(`${API_BASE}/winery/full`, {

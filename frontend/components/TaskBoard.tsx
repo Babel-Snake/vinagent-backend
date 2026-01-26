@@ -13,6 +13,7 @@ interface TaskBoardProps {
 export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }: TaskBoardProps) {
     const [updating, setUpdating] = useState<number | null>(null);
     const [replyEdits, setReplyEdits] = useState<{ [key: number]: string }>({});
+    const [expandedActions, setExpandedActions] = useState<{ [key: number]: boolean }>({});
 
     async function handleStatusChange(id: number, newStatus: string, currentTask: Task) {
         setUpdating(id);
@@ -155,19 +156,56 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
                             {JSON.stringify(task.payload, null, 2)}
                         </div>
 
-                        {/* Draft Reply UI */}
-                        {task.status === 'PENDING_REVIEW' && (task.suggestedReplyBody || task.suggestedChannel === 'sms') && (
-                            <div className="bg-blue-50 border border-blue-100 rounded p-4 mb-2">
-                                <h4 className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-2">
-                                    Suggested Reply ({task.suggestedChannel || 'sms'})
-                                </h4>
-                                <textarea
-                                    className="w-full text-sm p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                                    rows={3}
-                                    value={replyEdits[task.id] ?? (task.suggestedReplyBody || '')}
-                                    onChange={e => setReplyEdits({ ...replyEdits, [task.id]: e.target.value })}
-                                    placeholder="Draft a reply..."
-                                />
+                        {/* Recommended Action Section */}
+                        {task.status === 'PENDING_REVIEW' && (
+                            <div className="border border-blue-200 rounded overflow-hidden mb-2">
+                                {/* Header - Always visible */}
+                                <button
+                                    onClick={() => setExpandedActions({ ...expandedActions, [task.id]: !expandedActions[task.id] })}
+                                    className="w-full flex items-center justify-between p-3 bg-blue-50 hover:bg-blue-100 transition-colors text-left"
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-blue-600 font-bold text-sm">📋 Recommended Action</span>
+                                        {task.suggestedReplyBody ? (
+                                            <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">Ready</span>
+                                        ) : (
+                                            <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded animate-pulse">Analysing...</span>
+                                        )}
+                                    </div>
+                                    <span className="text-gray-400">{expandedActions[task.id] ? '▲' : '▼'}</span>
+                                </button>
+
+                                {/* Expanded Content */}
+                                {expandedActions[task.id] && (
+                                    <div className="p-4 bg-white border-t border-blue-100">
+                                        {task.suggestedReplyBody ? (
+                                            <>
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <span className="text-xs font-medium text-gray-500">Channel:</span>
+                                                    <span className="text-xs font-bold text-blue-600 uppercase">{task.suggestedChannel || 'Email'}</span>
+                                                    {task.Member && (
+                                                        <>
+                                                            <span className="text-xs text-gray-400">|</span>
+                                                            <span className="text-xs font-medium text-gray-500">To: {task.Member.firstName} {task.Member.lastName}</span>
+                                                        </>
+                                                    )}
+                                                </div>
+                                                <textarea
+                                                    className="w-full text-sm p-3 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono"
+                                                    rows={4}
+                                                    value={replyEdits[task.id] ?? task.suggestedReplyBody}
+                                                    onChange={e => setReplyEdits({ ...replyEdits, [task.id]: e.target.value })}
+                                                    placeholder="Edit the suggested response..."
+                                                />
+                                                <p className="text-xs text-gray-400 mt-1">Edit the response above, then click Approve to send.</p>
+                                            </>
+                                        ) : (
+                                            <div className="text-sm text-gray-500 italic py-4 text-center">
+                                                AI is generating a recommended response... Refresh to see update.
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>

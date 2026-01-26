@@ -19,6 +19,7 @@ router.use('/public', require('./public.routes'));
 router.use('/tasks', authMiddleware, taskRoutes);
 router.use('/staff', authMiddleware, require('./staff.routes'));
 router.use('/users', authMiddleware, require('./user.routes'));
+router.use('/members', authMiddleware, require('./member.routes'));
 router.use('/winery', authMiddleware, require('./winery.routes')); // Phase 12
 
 module.exports = router;

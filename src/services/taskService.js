@@ -4,6 +4,7 @@ const executionService = require('./execution.service');
 const logger = require('../config/logger');
 const { validateStatusTransition } = require('../utils/validation');
 const auditService = require('./audit.service');
+const aiSuggestionService = require('./aiSuggestion.service');
 
 /**
  * Service to handle Task creation and updates.
@@ -116,6 +117,12 @@ async function createTask({ wineryId, userId, data }) {
 
     await t.commit();
     logger.info('Task created manually', { taskId: task.id, userId, wineryId });
+
+    // Async AI Trigger (non-blocking)
+    if (!data.suggestedReplyBody) {
+      aiSuggestionService.generateAiSuggestion(task.id, wineryId);
+    }
+
     return task;
 
   } catch (err) {

@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { autoclassifyTask, createTask, AutoclassifyResponse } from '../lib/api';
+import { useState, useEffect } from 'react';
+import { autoclassifyTask, createTask, searchMembers, AutoclassifyResponse } from '../lib/api';
 
 interface CreateTaskModalProps {
     onClose: () => void;
@@ -20,12 +20,20 @@ export default function CreateTaskModal({ onClose, onCreated }: CreateTaskModalP
     const [subType, setSubType] = useState('');
     const [priority, setPriority] = useState('');
     const [sentiment, setSentiment] = useState('');
+    const [suggestedReply, setSuggestedReply] = useState('');
+    const [suggestedChannel, setSuggestedChannel] = useState('');
+
+    // Member Search State
+    const [memberQuery, setMemberQuery] = useState('');
+    const [members, setMembers] = useState<any[]>([]);
+    const [selectedMember, setSelectedMember] = useState<any>(null);
+    const [searchingMember, setSearchingMember] = useState(false);
 
     async function handleAnalyze() {
         if (!text.trim()) return;
         setLoading(true);
         try {
-            const result = await autoclassifyTask(text);
+            const result = await autoclassifyTask(text, selectedMember?.id);
             setPreview(result);
 
             // Initialize editable state
@@ -34,6 +42,8 @@ export default function CreateTaskModal({ onClose, onCreated }: CreateTaskModalP
             setSubType(result.subType);
             setPriority(result.priority);
             setSentiment(result.sentiment);
+            setSuggestedReply(result.payload?.suggestedReplyBody || '');
+            setSuggestedChannel('email');
 
             setStep('PREVIEW');
         } catch (err: any) {
@@ -42,6 +52,26 @@ export default function CreateTaskModal({ onClose, onCreated }: CreateTaskModalP
             setLoading(false);
         }
     }
+
+    // Search Effect
+    useEffect(() => {
+        if (memberQuery.length > 2) {
+            const delay = setTimeout(async () => {
+                setSearchingMember(true);
+                try {
+                    const results = await searchMembers(memberQuery);
+                    setMembers(results);
+                } catch (e) {
+                    console.error(e);
+                } finally {
+                    setSearchingMember(false);
+                }
+            }, 300);
+            return () => clearTimeout(delay);
+        } else {
+            setMembers([]);
+        }
+    }, [memberQuery]);
 
     async function handleConfirm() {
         if (!preview) return;
@@ -52,8 +82,11 @@ export default function CreateTaskModal({ onClose, onCreated }: CreateTaskModalP
                 subType,
                 priority,
                 sentiment,
-                payload: preview.payload, // Keep original payload for now as it's complex to edit
-                notes: text // Save original text as note
+                payload: preview.payload,
+                notes: text,
+                memberId: selectedMember?.id,
+                suggestedReplyBody: suggestedReply,
+                suggestedChannel: suggestedChannel || 'none'
             });
             onCreated();
         } catch (err: any) {

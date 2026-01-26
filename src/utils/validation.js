@@ -85,7 +85,11 @@ const createTaskSchema = Joi.object({
     memberId: Joi.number().integer().positive().allow(null),
     messageId: Joi.number().integer().positive().allow(null),
     assigneeId: Joi.number().integer().positive().allow(null),
-    parentTaskId: Joi.number().integer().positive().allow(null)
+    parentTaskId: Joi.number().integer().positive().allow(null),
+    // Suggested Reply Fields
+    suggestedReplyBody: Joi.string().max(2000).allow(''),
+    suggestedChannel: Joi.string().valid(...CHANNELS),
+    suggestedReplySubject: Joi.string().max(200).allow('')
 });
 
 const updateTaskSchema = Joi.object({
