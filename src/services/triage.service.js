@@ -180,16 +180,28 @@ function fallbackHeuristics(body, customerType) {
  */
 async function classifyStaffNote(input) {
     const { text, memberId, wineryId } = input;
+    const { Member } = require('../models');
+    const { Op } = require('sequelize');
 
     // Simulate message object for triage
     const message = { body: text };
 
     // Fetch member if ID provided to help context
     let context = { wineryId };
+    let foundMember = null;
+
     if (memberId) {
-        const { Member } = require('../models');
         const member = await Member.findByPk(memberId);
-        if (member) context.member = member;
+        if (member) {
+            context.member = member;
+            foundMember = member;
+        }
+    } else {
+        // Try to extract and find member from text
+        foundMember = await extractMemberFromText(text, wineryId);
+        if (foundMember) {
+            context.member = foundMember;
+        }
     }
 
     const classification = await triageMessage(message, context);
@@ -202,8 +214,72 @@ async function classifyStaffNote(input) {
             originalText: text // Keep original text
         },
         suggestedTitle: classification.suggestedTitle || `${classification.category} - ${classification.subType.replace(/_/g, ' ')}`,
-        suggestedAssigneeRole: 'manager' // Logic could be smarter here
+        suggestedAssigneeRole: 'manager', // Logic could be smarter here
+        suggestedMember: foundMember ? {
+            id: foundMember.id,
+            firstName: foundMember.firstName,
+            lastName: foundMember.lastName,
+            email: foundMember.email,
+            phone: foundMember.phone
+        } : null
     };
+}
+
+/**
+ * Attempts to extract a member name from text and find a matching member.
+ * Common patterns: "John Smith", "Customer John Smith", "Member: John Smith"
+ * 
+ * @param {string} text - The staff note text
+ * @param {number} wineryId - The winery ID to scope the search
+ * @returns {Promise<Object|null>} - The matching member or null
+ */
+async function extractMemberFromText(text, wineryId) {
+    const { Member } = require('../models');
+    const { Op } = require('sequelize');
+
+    // Common patterns for member mentions
+    const patterns = [
+        /(?:customer|member|client|for)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/gi,  // "Customer John Smith"
+        /([A-Z][a-z]+\s+[A-Z][a-z]+)(?:\s+(?:is|has|wants|needs|called|emailed))/gi, // "John Smith is asking..."
+        /(?:from|with|about)\s+([A-Z][a-z]+\s+[A-Z][a-z]+)/gi // "call from John Smith"
+    ];
+
+    const potentialNames = new Set();
+
+    for (const pattern of patterns) {
+        let match;
+        while ((match = pattern.exec(text)) !== null) {
+            potentialNames.add(match[1].trim());
+        }
+    }
+
+    // Try to find a member for each potential name
+    for (const name of potentialNames) {
+        const parts = name.split(/\s+/);
+        if (parts.length >= 2) {
+            const firstName = parts[0];
+            const lastName = parts.slice(1).join(' ');
+
+            const member = await Member.findOne({
+                where: {
+                    wineryId,
+                    firstName: { [Op.iLike]: firstName },
+                    lastName: { [Op.iLike]: lastName }
+                }
+            });
+
+            if (member) {
+                logger.info('Extracted member from staff note', {
+                    name,
+                    memberId: member.id,
+                    wineryId
+                });
+                return member;
+            }
+        }
+    }
+
+    return null;
 }
 
 module.exports = {

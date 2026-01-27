@@ -14,6 +14,7 @@ export interface Task {
     suggestedReplyBody?: string;
     suggestedChannel?: string;
     suggestedReplySubject?: string;
+    memberId?: number;
     Member?: {
         id: number;
         firstName: string;
@@ -39,6 +40,14 @@ export interface AutoclassifyResponse {
     sentiment: string;
     payload: any;
     suggestedTitle: string;
+    suggestedChannel?: string;
+    suggestedMember?: {
+        id: number;
+        firstName: string;
+        lastName: string;
+        email?: string;
+        phone?: string;
+    };
 }
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000') + '/api';

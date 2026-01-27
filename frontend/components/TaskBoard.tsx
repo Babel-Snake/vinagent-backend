@@ -13,6 +13,8 @@ interface TaskBoardProps {
 export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }: TaskBoardProps) {
     const [updating, setUpdating] = useState<number | null>(null);
     const [replyEdits, setReplyEdits] = useState<{ [key: number]: string }>({});
+    const [subjectEdits, setSubjectEdits] = useState<{ [key: number]: string }>({});
+    const [channelEdits, setChannelEdits] = useState<{ [key: number]: string }>({});
     const [expandedActions, setExpandedActions] = useState<{ [key: number]: boolean }>({});
 
     async function handleStatusChange(id: number, newStatus: string, currentTask: Task) {
@@ -20,10 +22,11 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
         try {
             const updates: any = { status: newStatus };
 
-            // If approving, include the (possibly edited) reply
-            if (newStatus === 'APPROVED' && (replyEdits[id] !== undefined || currentTask.suggestedReplyBody)) {
+            // If approving, include all editable fields
+            if (newStatus === 'APPROVED') {
                 updates.suggestedReplyBody = replyEdits[id] ?? currentTask.suggestedReplyBody;
-                updates.suggestedChannel = currentTask.suggestedChannel || 'sms';
+                updates.suggestedChannel = channelEdits[id] ?? currentTask.suggestedChannel ?? 'email';
+                updates.suggestedReplySubject = subjectEdits[id] ?? currentTask.suggestedReplySubject;
             }
 
             await updateTask(id, updates);
@@ -177,27 +180,70 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
 
                                 {/* Expanded Content */}
                                 {expandedActions[task.id] && (
-                                    <div className="p-4 bg-white border-t border-blue-100">
+                                    <div className="p-4 bg-white border-t border-blue-100 space-y-3">
                                         {task.suggestedReplyBody ? (
                                             <>
-                                                <div className="flex items-center gap-2 mb-2">
-                                                    <span className="text-xs font-medium text-gray-500">Channel:</span>
-                                                    <span className="text-xs font-bold text-blue-600 uppercase">{task.suggestedChannel || 'Email'}</span>
-                                                    {task.Member && (
-                                                        <>
-                                                            <span className="text-xs text-gray-400">|</span>
-                                                            <span className="text-xs font-medium text-gray-500">To: {task.Member.firstName} {task.Member.lastName}</span>
-                                                        </>
-                                                    )}
+                                                {/* Response Channel & Contact */}
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div>
+                                                        <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Channel</label>
+                                                        <select
+                                                            className="w-full text-sm border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                                            value={channelEdits[task.id] ?? task.suggestedChannel ?? 'email'}
+                                                            onChange={e => setChannelEdits({ ...channelEdits, [task.id]: e.target.value })}
+                                                        >
+                                                            <option value="email">Email</option>
+                                                            <option value="sms">SMS</option>
+                                                            <option value="voice">Voice</option>
+                                                            <option value="none">None (Internal)</option>
+                                                        </select>
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Recipient</label>
+                                                        {task.Member ? (
+                                                            <div className="text-sm py-2 px-3 bg-gray-50 rounded border border-gray-200">
+                                                                <div className="font-medium">{task.Member.firstName} {task.Member.lastName}</div>
+                                                                <div className="text-xs text-gray-500">
+                                                                    {(channelEdits[task.id] ?? task.suggestedChannel) === 'email'
+                                                                        ? task.Member.email
+                                                                        : task.Member.phone || task.Member.email}
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="text-sm py-2 px-3 bg-yellow-50 rounded border border-yellow-200 text-yellow-700">
+                                                                No member linked
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                                <textarea
-                                                    className="w-full text-sm p-3 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono"
-                                                    rows={4}
-                                                    value={replyEdits[task.id] ?? task.suggestedReplyBody}
-                                                    onChange={e => setReplyEdits({ ...replyEdits, [task.id]: e.target.value })}
-                                                    placeholder="Edit the suggested response..."
-                                                />
-                                                <p className="text-xs text-gray-400 mt-1">Edit the response above, then click Approve to send.</p>
+
+                                                {/* Subject Line (only for email) */}
+                                                {(channelEdits[task.id] ?? task.suggestedChannel ?? 'email') === 'email' && (
+                                                    <div>
+                                                        <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Subject</label>
+                                                        <input
+                                                            type="text"
+                                                            className="w-full text-sm border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                                            value={subjectEdits[task.id] ?? task.suggestedReplySubject ?? ''}
+                                                            onChange={e => setSubjectEdits({ ...subjectEdits, [task.id]: e.target.value })}
+                                                            placeholder="Email subject line..."
+                                                        />
+                                                    </div>
+                                                )}
+
+                                                {/* Reply Body */}
+                                                <div>
+                                                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Message</label>
+                                                    <textarea
+                                                        className="w-full text-sm p-3 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono"
+                                                        rows={4}
+                                                        value={replyEdits[task.id] ?? task.suggestedReplyBody}
+                                                        onChange={e => setReplyEdits({ ...replyEdits, [task.id]: e.target.value })}
+                                                        placeholder="Edit the suggested response..."
+                                                    />
+                                                </div>
+
+                                                <p className="text-xs text-gray-400">Review and edit the response above, then click Approve to send.</p>
                                             </>
                                         ) : (
                                             <div className="text-sm text-gray-500 italic py-4 text-center">

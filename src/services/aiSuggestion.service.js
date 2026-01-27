@@ -57,8 +57,15 @@ async function generateAiSuggestion(taskId, wineryId) {
         // Check if AI returned a valid reply
         if (aiResult && aiResult.suggestedReply) {
             task.suggestedReplyBody = aiResult.suggestedReply;
+
+            // Generate subject for email channel
+            if ((task.suggestedChannel === 'email' || context.suggestedChannel === 'email') && !task.suggestedReplySubject) {
+                task.suggestedReplySubject = aiResult.suggestedTitle
+                    || `Re: ${task.subType?.replace(/_/g, ' ') || task.category}`;
+            }
+
             await task.save();
-            logger.info('[AI SUGGESTION] Successfully saved reply to task', { taskId });
+            logger.info('[AI SUGGESTION] Successfully saved reply to task', { taskId, hasSubject: !!task.suggestedReplySubject });
         } else {
             // Log error but also set a placeholder so UI knows it failed
             logger.error('[AI SUGGESTION] AI did not return suggestedReply', { taskId, aiResult });

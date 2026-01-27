@@ -43,7 +43,12 @@ export default function CreateTaskModal({ onClose, onCreated }: CreateTaskModalP
             setPriority(result.priority);
             setSentiment(result.sentiment);
             setSuggestedReply(result.payload?.suggestedReplyBody || '');
-            setSuggestedChannel('email');
+            setSuggestedChannel(result.suggestedChannel || 'sms');
+
+            // Auto-link member if AI extracted one and none was pre-selected
+            if (!selectedMember && result.suggestedMember) {
+                setSelectedMember(result.suggestedMember);
+            }
 
             setStep('PREVIEW');
         } catch (err: any) {
