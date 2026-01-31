@@ -31,6 +31,20 @@ export interface Task {
         displayName: string;
         role?: string;
     };
+    TaskActions?: TaskAction[];
+}
+
+export interface TaskAction {
+    id: number;
+    actionType: string;
+    details?: any;
+    createdAt: string;
+    userId?: number;
+    User?: {
+        id: number;
+        displayName: string;
+        role?: string;
+    };
 }
 
 export interface AutoclassifyResponse {
@@ -92,6 +106,22 @@ export async function updateTask(taskId: number, updates: Partial<Task>): Promis
 
     if (!res.ok) {
         throw new Error('Failed to update task');
+    }
+
+    const data = await res.json();
+    return data.task;
+}
+
+export async function getTask(taskId: number): Promise<Task> {
+    const res = await fetch(`${API_BASE}/tasks/${taskId}`, {
+        headers: {
+            'Authorization': await getAuthToken()
+        },
+        cache: 'no-store'
+    });
+
+    if (!res.ok) {
+        throw new Error('Failed to fetch task');
     }
 
     const data = await res.json();

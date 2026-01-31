@@ -1,4 +1,4 @@
-const { Task, WinerySettings, Member, Message, User } = require('../models');
+const { Task, WinerySettings, Member, Message, User, TaskAction } = require('../models');
 const { Op } = require('sequelize');
 const executionService = require('./execution.service');
 const logger = require('../config/logger');
@@ -350,7 +350,13 @@ async function getTaskById({ taskId, wineryId }) {
     include: [
       { model: Member },
       { model: Message },
-      { model: User, as: 'Creator', attributes: ['id', 'displayName'] }
+      { model: User, as: 'Creator', attributes: ['id', 'displayName'] },
+      {
+        model: TaskAction,
+        separate: true,
+        order: [['createdAt', 'ASC']],
+        include: [{ model: User, attributes: ['id', 'displayName', 'role'] }]
+      }
     ]
   });
 

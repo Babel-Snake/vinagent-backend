@@ -1,6 +1,6 @@
 'use client';
 
-import { Task, updateTask, Staff } from '../lib/api';
+import { Task, TaskAction, getTask, updateTask, Staff } from '../lib/api';
 import { useState } from 'react';
 
 interface TaskBoardProps {
@@ -16,6 +16,11 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
     const [subjectEdits, setSubjectEdits] = useState<{ [key: number]: string }>({});
     const [channelEdits, setChannelEdits] = useState<{ [key: number]: string }>({});
     const [expandedActions, setExpandedActions] = useState<{ [key: number]: boolean }>({});
+    const [noteEdits, setNoteEdits] = useState<{ [key: number]: string }>({});
+    const [historyOpen, setHistoryOpen] = useState<{ [key: number]: boolean }>({});
+    const [historyLoading, setHistoryLoading] = useState<{ [key: number]: boolean }>({});
+    const [historyError, setHistoryError] = useState<{ [key: number]: string }>({});
+    const [taskHistory, setTaskHistory] = useState<{ [key: number]: TaskAction[] }>({});
 
     async function handleStatusChange(id: number, newStatus: string, currentTask: Task) {
         setUpdating(id);
@@ -59,6 +64,52 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
         } finally {
             setUpdating(null);
         }
+    }
+
+    async function handleAddNote(taskId: number) {
+        const note = (noteEdits[taskId] || '').trim();
+        if (!note) return;
+        setUpdating(taskId);
+        try {
+            await updateTask(taskId, { notes: note });
+            setNoteEdits(prev => ({ ...prev, [taskId]: '' }));
+            if (historyOpen[taskId]) {
+                await loadHistory(taskId);
+            }
+            onRefresh();
+        } catch (err: any) {
+            alert('Failed to add note: ' + err.message);
+        } finally {
+            setUpdating(null);
+        }
+    }
+
+    async function loadHistory(taskId: number) {
+        if (historyLoading[taskId]) return;
+        setHistoryLoading(prev => ({ ...prev, [taskId]: true }));
+        setHistoryError(prev => ({ ...prev, [taskId]: '' }));
+        try {
+            const task = await getTask(taskId);
+            setTaskHistory(prev => ({ ...prev, [taskId]: task.TaskActions || [] }));
+        } catch (err: any) {
+            setHistoryError(prev => ({ ...prev, [taskId]: err.message || 'Failed to load history' }));
+        } finally {
+            setHistoryLoading(prev => ({ ...prev, [taskId]: false }));
+        }
+    }
+
+    function formatActionLabel(actionType: string) {
+        return actionType.replace(/_/g, ' ');
+    }
+
+    function renderActionDetails(action: TaskAction) {
+        if (action.actionType === 'NOTE_ADDED' && action.details?.note) {
+            return action.details.note;
+        }
+        if (action.details && Object.keys(action.details).length > 0) {
+            return JSON.stringify(action.details, null, 2);
+        }
+        return '';
     }
 
     if (tasks.length === 0) {
@@ -157,6 +208,81 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
                         {/* Payload Preview */}
                         <div className="bg-gray-50 rounded p-3 text-sm font-mono text-gray-700 whitespace-pre-wrap max-h-32 overflow-y-auto mb-4">
                             {JSON.stringify(task.payload, null, 2)}
+                        </div>
+
+                        {/* Notes */}
+                        <div className="mb-4">
+                            <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Add Note</label>
+                            <div className="flex flex-col sm:flex-row gap-2">
+                                <textarea
+                                    className="w-full text-sm p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                    rows={2}
+                                    value={noteEdits[task.id] ?? ''}
+                                    onChange={e => setNoteEdits({ ...noteEdits, [task.id]: e.target.value })}
+                                    placeholder="Add a quick update or follow-up..."
+                                />
+                                <button
+                                    onClick={() => handleAddNote(task.id)}
+                                    disabled={updating === task.id || !(noteEdits[task.id] || '').trim()}
+                                    className="px-4 py-2 bg-gray-900 text-white rounded text-sm font-medium hover:bg-gray-800 disabled:opacity-50"
+                                >
+                                    Add Note
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* History */}
+                        <div className="mb-4">
+                            <button
+                                onClick={() => {
+                                    const nextOpen = !historyOpen[task.id];
+                                    setHistoryOpen(prev => ({ ...prev, [task.id]: nextOpen }));
+                                    if (nextOpen && !taskHistory[task.id]) {
+                                        loadHistory(task.id);
+                                    }
+                                }}
+                                className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+                            >
+                                {historyOpen[task.id] ? 'Hide History' : 'Show History'}
+                            </button>
+
+                            {historyOpen[task.id] && (
+                                <div className="mt-3 border border-gray-100 rounded p-3 bg-gray-50">
+                                    {historyLoading[task.id] && (
+                                        <div className="text-sm text-gray-500">Loading history...</div>
+                                    )}
+                                    {historyError[task.id] && (
+                                        <div className="text-sm text-red-600">{historyError[task.id]}</div>
+                                    )}
+                                    {!historyLoading[task.id] && !historyError[task.id] && (
+                                        <>
+                                            {(taskHistory[task.id] || []).length === 0 ? (
+                                                <div className="text-sm text-gray-500">No history yet.</div>
+                                            ) : (
+                                                <div className="space-y-3">
+                                                    {(taskHistory[task.id] || []).map(action => {
+                                                        const detailsText = renderActionDetails(action);
+                                                        return (
+                                                            <div key={action.id} className="text-sm">
+                                                                <div className="flex flex-wrap items-center gap-2 text-gray-600">
+                                                                    <span className="font-semibold text-gray-800">{formatActionLabel(action.actionType)}</span>
+                                                                    <span className="text-xs text-gray-400">{new Date(action.createdAt).toLocaleString()}</span>
+                                                                    <span className="text-xs text-gray-400">{action.User?.displayName || 'System'}</span>
+                                                                </div>
+                                                                {detailsText && (
+                                                                    <div className="mt-1 text-xs text-gray-700 whitespace-pre-wrap font-mono bg-white border border-gray-200 rounded p-2">
+                                                                        {detailsText}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
+                                </div>
+                            )}
                         </div>
 
                         {/* Recommended Action Section */}
