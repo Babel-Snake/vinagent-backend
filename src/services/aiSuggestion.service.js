@@ -1,4 +1,4 @@
-const { Task, Member } = require('../models');
+const { Task, Member, TaskAction, User } = require('../models');
 const logger = require('../config/logger');
 
 /**
@@ -6,7 +6,8 @@ const logger = require('../config/logger');
  * Fetches context and calls AI Service to draft a reply.
  * Updates task with suggestedReplyBody.
  */
-async function generateAiSuggestion(taskId, wineryId) {
+async function generateAiSuggestion(taskId, wineryId, options = {}) {
+    const { force = false, includeHistory = false } = options;
     logger.info('[AI SUGGESTION] Starting generation', { taskId, wineryId });
 
     try {
@@ -22,7 +23,7 @@ async function generateAiSuggestion(taskId, wineryId) {
         }
 
         // Skip if already has a valid reply
-        if (task.suggestedReplyBody && task.suggestedReplyBody.length > 5) {
+        if (!force && task.suggestedReplyBody && task.suggestedReplyBody.length > 5) {
             logger.info('[AI SUGGESTION] Task already has reply, skipping', { taskId });
             return;
         }
@@ -41,7 +42,46 @@ async function generateAiSuggestion(taskId, wineryId) {
             || task.notes
             || `${task.category} - ${task.subType}`;
 
-        const prompt = `Task Category: ${task.category}\nTask Type: ${task.subType}\nRequest: "${originalText}"`;
+        let historyBlock = '';
+        if (includeHistory) {
+            const actions = await TaskAction.findAll({
+                where: { taskId },
+                include: [{ model: User, attributes: ['id', 'displayName', 'role'] }],
+                order: [['createdAt', 'ASC']],
+                limit: 15
+            });
+
+            const summarizeDetails = (action) => {
+                if (!action.details) return '';
+                if (action.actionType === 'NOTE_ADDED' && action.details.note) {
+                    return `Note: ${action.details.note}`;
+                }
+                if (action.details.changes) {
+                    const keys = Object.keys(action.details.changes);
+                    if (keys.length > 0) return `Changes: ${keys.join(', ')}`;
+                }
+                if (action.details.parentTaskId || action.details.childTaskId) {
+                    return `Linked: parent ${action.details.parentTaskId || 'n/a'}, child ${action.details.childTaskId || 'n/a'}`;
+                }
+                if (action.details.from !== undefined || action.details.to !== undefined) {
+                    return `Assignment: ${action.details.from || 'unassigned'} -> ${action.details.to || 'unassigned'}`;
+                }
+                const keys = Object.keys(action.details || {});
+                return keys.length > 0 ? `Details: ${keys.join(', ')}` : '';
+            };
+
+            const historyLines = actions.map((action, idx) => {
+                const actor = action.User?.displayName || 'System';
+                const details = summarizeDetails(action);
+                return `${idx + 1}. ${action.actionType} by ${actor} at ${action.createdAt.toISOString()}${details ? ` | ${details}` : ''}`;
+            });
+
+            if (historyLines.length > 0) {
+                historyBlock = `\nHistory (oldest to newest):\n${historyLines.join('\n')}`;
+            }
+        }
+
+        const prompt = `Task Category: ${task.category}\nTask Type: ${task.subType}\nCurrent Status: ${task.status}\nOriginal Request: "${originalText}"${historyBlock}\n\nGenerate the next best customer-facing response given the full context above.`;
 
         logger.info('[AI SUGGESTION] Calling AI Service', { taskId, prompt: prompt.substring(0, 100) });
 

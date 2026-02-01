@@ -32,6 +32,7 @@ export interface Task {
         role?: string;
     };
     TaskActions?: TaskAction[];
+    regenerateSuggestedReply?: boolean;
 }
 
 export interface TaskAction {

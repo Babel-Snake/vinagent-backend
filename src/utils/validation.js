@@ -108,7 +108,8 @@ const updateTaskSchema = Joi.object({
     suggestedChannel: Joi.string().valid(...CHANNELS),
     suggestedReplySubject: Joi.string().max(200).allow(''),
     assigneeId: Joi.number().integer().positive().allow(null),
-    parentTaskId: Joi.number().integer().positive().allow(null)
+    parentTaskId: Joi.number().integer().positive().allow(null),
+    regenerateSuggestedReply: Joi.boolean()
 }).min(1);
 
 const autoclassifySchema = Joi.object({

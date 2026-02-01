@@ -98,6 +98,19 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
         }
     }
 
+    async function handleRegenerateSuggestion(taskId: number) {
+        setUpdating(taskId);
+        try {
+            await updateTask(taskId, { regenerateSuggestedReply: true });
+            await loadHistory(taskId);
+            onRefresh();
+        } catch (err: any) {
+            alert('Failed to generate suggestion: ' + err.message);
+        } finally {
+            setUpdating(null);
+        }
+    }
+
     function formatActionLabel(actionType: string) {
         return actionType.replace(/_/g, ' ');
     }
@@ -279,6 +292,15 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
                                                     })}
                                                 </div>
                                             )}
+                                            <div className="mt-4">
+                                                <button
+                                                    onClick={() => handleRegenerateSuggestion(task.id)}
+                                                    disabled={updating === task.id}
+                                                    className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                                                >
+                                                    Generate Next Suggested Action
+                                                </button>
+                                            </div>
                                         </>
                                     )}
                                 </div>
@@ -298,7 +320,7 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
                                         {task.suggestedReplyBody ? (
                                             <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">Ready</span>
                                         ) : (
-                                            <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded animate-pulse">Analysing...</span>
+                                            <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded">Not generated</span>
                                         )}
                                     </div>
                                     <span className="text-gray-400">{expandedActions[task.id] ? '▲' : '▼'}</span>
@@ -373,7 +395,7 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
                                             </>
                                         ) : (
                                             <div className="text-sm text-gray-500 italic py-4 text-center">
-                                                AI is generating a recommended response... Refresh to see update.
+                                                No suggestion yet. Use "Generate Next Suggested Action" in History.
                                             </div>
                                         )}
                                     </div>

@@ -118,11 +118,6 @@ async function createTask({ wineryId, userId, data }) {
     await t.commit();
     logger.info('Task created manually', { taskId: task.id, userId, wineryId });
 
-    // Async AI Trigger (non-blocking)
-    if (!data.suggestedReplyBody) {
-      aiSuggestionService.generateAiSuggestion(task.id, wineryId);
-    }
-
     return task;
 
   } catch (err) {
@@ -137,6 +132,8 @@ async function createTask({ wineryId, userId, data }) {
  */
 async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
   const t = await Task.sequelize.transaction();
+  let noteAdded = false;
+  let regenerateRequested = false;
   try {
     const task = await Task.findOne({ where: { id: taskId, wineryId } });
     if (!task) throw new Error('Task not found');
@@ -144,7 +141,7 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
     const {
       status, payload, priority, notes, suggestedReplyBody,
       category, subType, sentiment, assigneeId, parentTaskId,
-      suggestedChannel, suggestedReplySubject
+      suggestedChannel, suggestedReplySubject, regenerateSuggestedReply
     } = updates;
 
     // --- LAYER 2: STATUS TRANSITION GUARD ---
@@ -273,6 +270,7 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
         actionType: 'NOTE_ADDED',
         details: { note: notes }
       });
+      noteAdded = true;
     }
 
     // EXECUTION TRIGGER
@@ -283,6 +281,28 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
 
     await t.commit();
     logger.info('Task updated', { taskId, userId, changes: Object.keys(changes) });
+
+    if (regenerateSuggestedReply) {
+      regenerateRequested = true;
+      await aiSuggestionService.generateAiSuggestion(task.id, wineryId, {
+        force: true,
+        includeHistory: true
+      });
+    }
+
+    if (noteAdded && !regenerateSuggestedReply) {
+      setImmediate(() => {
+        aiSuggestionService.generateAiSuggestion(task.id, wineryId, {
+          force: true,
+          includeHistory: true
+        });
+      });
+    }
+
+    if (regenerateRequested) {
+      const refreshed = await Task.findByPk(task.id);
+      return refreshed || task;
+    }
     return task;
 
   } catch (err) {
