@@ -116,13 +116,39 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
     }
 
     function renderActionDetails(action: TaskAction) {
+        // 1. NOTES
         if (action.actionType === 'NOTE_ADDED' && action.details?.note) {
-            return action.details.note;
+            return (
+                <div className="mt-2 text-sm text-gray-800 bg-yellow-50 border border-yellow-200 rounded p-3 italic">
+                    "{action.details.note}"
+                </div>
+            );
         }
+
+        // 2. STATUS CHANGES / ASSIGNMENTS / ETC (Structured Data)
         if (action.details && Object.keys(action.details).length > 0) {
-            return JSON.stringify(action.details, null, 2);
+            // Check for 'changes' object common in audit logs
+            const changes = action.details.changes || action.details;
+
+            // If simple key-value pairs, render clean list
+            const entries = Object.entries(changes);
+            if (entries.length > 0) {
+                return (
+                    <div className="mt-2 bg-gray-50 border border-gray-100 rounded p-2 text-xs">
+                        {entries.map(([key, value]: [string, any]) => (
+                            <div key={key} className="flex gap-2">
+                                <span className="font-semibold text-gray-500 uppercase">{key.replace(/_/g, ' ')}:</span>
+                                <span className="text-gray-800 break-all">{
+                                    typeof value === 'object' ? JSON.stringify(value) : String(value)
+                                }</span>
+                            </div>
+                        ))}
+                    </div>
+                );
+            }
         }
-        return '';
+
+        return null;
     }
 
     if (tasks.length === 0) {
@@ -218,10 +244,60 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
 
                         )}
 
-                        {/* Payload Preview */}
-                        <div className="bg-gray-50 rounded p-3 text-sm font-mono text-gray-700 whitespace-pre-wrap max-h-32 overflow-y-auto mb-4">
-                            {JSON.stringify(task.payload, null, 2)}
-                        </div>
+                        {/* Payload Display */}
+                        {(() => {
+                            let content = null;
+                            let raw = task.payload;
+
+                            // Try to parse if string
+                            if (typeof raw === 'string') {
+                                try {
+                                    raw = JSON.parse(raw);
+                                } catch (e) {
+                                    // ignore, keep as string
+                                }
+                            }
+
+                            // Check for structured data
+                            if (raw && typeof raw === 'object' && (raw.summary || raw.originalText)) {
+                                content = (
+                                    <div className="bg-white border boundary-gray-200 rounded-md overflow-hidden mb-4">
+                                        {raw.summary && (
+                                            <div className="bg-gray-50 px-4 py-2 border-b border-gray-100">
+                                                <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">Summary</div>
+                                                <div className="font-medium text-gray-900">{raw.summary}</div>
+                                            </div>
+                                        )}
+                                        {raw.originalText && (
+                                            <div className="p-4">
+                                                <div className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Original Request</div>
+                                                <div className="text-gray-700 whitespace-pre-wrap font-sans">{raw.originalText}</div>
+                                            </div>
+                                        )}
+                                        {/* Show other fields if any, excluding summary/originalText */}
+                                        {Object.keys(raw).some(k => k !== 'summary' && k !== 'originalText') && (
+                                            <div className="bg-gray-50 p-3 border-t border-gray-100 text-xs text-gray-500 font-mono">
+                                                <div className="mb-1 font-bold">Extra Data:</div>
+                                                {JSON.stringify(
+                                                    Object.fromEntries(Object.entries(raw).filter(([k]) => k !== 'summary' && k !== 'originalText')),
+                                                    null,
+                                                    2
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            } else {
+                                // Fallback to raw JSON
+                                content = (
+                                    <div className="bg-gray-50 rounded p-3 text-sm font-mono text-gray-700 whitespace-pre-wrap max-h-32 overflow-y-auto mb-4">
+                                        {JSON.stringify(raw, null, 2)}
+                                    </div>
+                                );
+                            }
+
+                            return content;
+                        })()}
 
                         {/* Notes */}
                         <div className="mb-4">
@@ -272,24 +348,18 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
                                             {(taskHistory[task.id] || []).length === 0 ? (
                                                 <div className="text-sm text-gray-500">No history yet.</div>
                                             ) : (
-                                                <div className="space-y-3">
-                                                    {(taskHistory[task.id] || []).map(action => {
-                                                        const detailsText = renderActionDetails(action);
-                                                        return (
-                                                            <div key={action.id} className="text-sm">
-                                                                <div className="flex flex-wrap items-center gap-2 text-gray-600">
-                                                                    <span className="font-semibold text-gray-800">{formatActionLabel(action.actionType)}</span>
-                                                                    <span className="text-xs text-gray-400">{new Date(action.createdAt).toLocaleString()}</span>
-                                                                    <span className="text-xs text-gray-400">{action.User?.displayName || 'System'}</span>
-                                                                </div>
-                                                                {detailsText && (
-                                                                    <div className="mt-1 text-xs text-gray-700 whitespace-pre-wrap font-mono bg-white border border-gray-200 rounded p-2">
-                                                                        {detailsText}
-                                                                    </div>
-                                                                )}
+                                                <div className="space-y-4">
+                                                    {(taskHistory[task.id] || []).map(action => (
+                                                        <div key={action.id} className="text-sm group">
+                                                            <div className="flex flex-wrap items-center gap-2 text-gray-600">
+                                                                <span className="font-semibold text-gray-800 bg-gray-100 px-2 py-0.5 rounded text-xs">{formatActionLabel(action.actionType)}</span>
+                                                                <span className="text-xs text-gray-400">
+                                                                    {new Date(action.createdAt).toLocaleString()} by {action.User?.displayName || 'System'}
+                                                                </span>
                                                             </div>
-                                                        );
-                                                    })}
+                                                            {renderActionDetails(action)}
+                                                        </div>
+                                                    ))}
                                                 </div>
                                             )}
                                             <div className="mt-4">

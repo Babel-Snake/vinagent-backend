@@ -9,6 +9,7 @@ export interface Task {
     priority: string;
     payload: any;
     createdAt: string;
+    notes?: string;
     assigneeId?: number;
     parentTaskId?: number;
     suggestedReplyBody?: string;
