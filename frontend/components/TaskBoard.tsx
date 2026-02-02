@@ -135,14 +135,23 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
             if (entries.length > 0) {
                 return (
                     <div className="mt-2 bg-gray-50 border border-gray-100 rounded p-2 text-xs">
-                        {entries.map(([key, value]: [string, any]) => (
-                            <div key={key} className="flex gap-2">
-                                <span className="font-semibold text-gray-500 uppercase">{key.replace(/_/g, ' ')}:</span>
-                                <span className="text-gray-800 break-all">{
-                                    typeof value === 'object' ? JSON.stringify(value) : String(value)
-                                }</span>
-                            </div>
-                        ))}
+                        {entries.map(([key, value]: [string, any]) => {
+                            let displayValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
+
+                            // Resolve User IDs to Names
+                            if ((key === 'assigneeId' || key === 'to' || key === 'from') && (typeof value === 'number' || typeof value === 'string')) {
+                                const uid = Number(value);
+                                const u = users.find(user => user.id === uid);
+                                if (u) displayValue = u.displayName;
+                            }
+
+                            return (
+                                <div key={key} className="flex gap-2">
+                                    <span className="font-semibold text-gray-500 uppercase">{key.replace(/_/g, ' ')}:</span>
+                                    <span className="text-gray-800 break-all">{displayValue}</span>
+                                </div>
+                            );
+                        })}
                     </div>
                 );
             }
@@ -227,7 +236,7 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
                             <div className="flex items-center gap-4 text-sm text-gray-500 mb-3 bg-gray-50 rounded px-3 py-2 w-fit">
                                 <span className="text-gray-500">👤 </span>
                                 <select
-                                    className="bg-transparent border-none text-sm font-medium text-gray-700 focus:ring-0 cursor-pointer hover:text-blue-600 p-0"
+                                    className="bg-transparent border-none text-sm font-medium text-gray-700 focus:ring-0 cursor:pointer hover:text-blue-600 p-0"
                                     value={task.assigneeId || ''}
                                     onChange={(e) => handleAssignment(task.id, e.target.value)}
                                     disabled={updating === task.id}
@@ -299,217 +308,225 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
                             return content;
                         })()}
 
-                        {/* Notes */}
-                        <div className="mb-4">
-                            <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Add Note</label>
-                            <div className="flex flex-col sm:flex-row gap-2">
-                                <textarea
-                                    className="w-full text-sm p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                                    rows={2}
-                                    value={noteEdits[task.id] ?? ''}
-                                    onChange={e => setNoteEdits({ ...noteEdits, [task.id]: e.target.value })}
-                                    placeholder="Add a quick update or follow-up..."
-                                />
+                        {/* History Stack & Activity */}
+                        <div className="mt-6 border-t border-gray-100 pt-4">
+
+                            {/* Toggle History Button (if closed) */}
+                            {!historyOpen[task.id] && (
                                 <button
-                                    onClick={() => handleAddNote(task.id)}
-                                    disabled={updating === task.id || !(noteEdits[task.id] || '').trim()}
-                                    className="px-4 py-2 bg-gray-900 text-white rounded text-sm font-medium hover:bg-gray-800 disabled:opacity-50"
-                                >
-                                    Add Note
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* History */}
-                        <div className="mb-4">
-                            <button
-                                onClick={() => {
-                                    const nextOpen = !historyOpen[task.id];
-                                    setHistoryOpen(prev => ({ ...prev, [task.id]: nextOpen }));
-                                    if (nextOpen && !taskHistory[task.id]) {
+                                    onClick={() => {
+                                        setHistoryOpen(prev => ({ ...prev, [task.id]: true }));
                                         loadHistory(task.id);
-                                    }
-                                }}
-                                className="text-sm text-blue-600 hover:text-blue-700 font-medium"
-                            >
-                                {historyOpen[task.id] ? 'Hide History' : 'Show History'}
-                            </button>
+                                    }}
+                                    className="text-xs text-blue-600 hover:text-blue-800 font-medium mb-3 flex items-center gap-1"
+                                >
+                                    <span>View previous activity</span>
+                                    <span>▼</span>
+                                </button>
+                            )}
 
+                            {/* History Feed (Expanded) */}
                             {historyOpen[task.id] && (
-                                <div className="mt-3 border border-gray-100 rounded p-3 bg-gray-50">
+                                <div className="mb-4 space-y-4">
                                     {historyLoading[task.id] && (
-                                        <div className="text-sm text-gray-500">Loading history...</div>
+                                        <div className="text-sm text-gray-500 animate-pulse">Loading activity...</div>
                                     )}
                                     {historyError[task.id] && (
                                         <div className="text-sm text-red-600">{historyError[task.id]}</div>
                                     )}
-                                    {!historyLoading[task.id] && !historyError[task.id] && (
+
+                                    {!historyLoading[task.id] && (
                                         <>
-                                            {(taskHistory[task.id] || []).length === 0 ? (
-                                                <div className="text-sm text-gray-500">No history yet.</div>
-                                            ) : (
-                                                <div className="space-y-4">
-                                                    {(taskHistory[task.id] || []).map(action => (
-                                                        <div key={action.id} className="text-sm group">
-                                                            <div className="flex flex-wrap items-center gap-2 text-gray-600">
-                                                                <span className="font-semibold text-gray-800 bg-gray-100 px-2 py-0.5 rounded text-xs">{formatActionLabel(action.actionType)}</span>
-                                                                <span className="text-xs text-gray-400">
-                                                                    {new Date(action.createdAt).toLocaleString()} by {action.User?.displayName || 'System'}
-                                                                </span>
-                                                            </div>
+                                            {/* Sort Oldest -> Newest and Filter */}
+                                            {(taskHistory[task.id] || [])
+                                                .filter(a => a.actionType !== 'TASK_CREATED' && a.actionType !== 'MANUAL_CREATED') // Filter redundant creation
+                                                .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) // Chronological
+                                                .map(action => (
+                                                    <div key={action.id} className="text-sm group flex flex-col items-start bg-gray-50/50 p-3 rounded-lg border border-gray-100">
+                                                        <div className="flex flex-wrap items-center gap-2 text-gray-500 text-xs mb-1">
+                                                            <span className="font-bold text-gray-700">{action.User?.displayName || 'System'}</span>
+                                                            <span>•</span>
+                                                            <span>{new Date(action.createdAt).toLocaleString()}</span>
+                                                            <span className="bg-gray-100 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider border border-gray-200">
+                                                                {formatActionLabel(action.actionType)}
+                                                            </span>
+                                                        </div>
+                                                        <div className="w-full">
                                                             {renderActionDetails(action)}
                                                         </div>
-                                                    ))}
-                                                </div>
-                                            )}
-                                            <div className="mt-4">
-                                                <button
-                                                    onClick={() => handleRegenerateSuggestion(task.id)}
-                                                    disabled={updating === task.id}
-                                                    className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-                                                >
-                                                    Generate Next Suggested Action
-                                                </button>
-                                            </div>
+                                                    </div>
+                                                ))}
+
+                                            {/* Hide Button */}
+                                            {/* <button onClick={() => setHistoryOpen(prev => ({...prev, [task.id]: false}))} className="text-xs text-gray-400 hover:text-gray-600 mb-2">Hide activity ▲</button> */}
                                         </>
                                     )}
                                 </div>
                             )}
-                        </div>
 
-                        {/* Recommended Action Section */}
-                        {task.status === 'PENDING_REVIEW' && (
-                            <div className="border border-blue-200 rounded overflow-hidden mb-2">
-                                {/* Header - Always visible */}
+                            {/* Add Note Input (Always Visible - Bottom of Stack) */}
+                            <div className="mb-2 flex gap-2 items-start transition-all">
+                                <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 text-xs font-bold shrink-0">
+                                    YOU
+                                </div>
+                                <div className="flex-1 relative">
+                                    <textarea
+                                        className="w-full text-sm p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none pr-24 min-h-[50px] resize-none overflow-hidden"
+                                        rows={1}
+                                        onInput={(e) => {
+                                            const target = e.target as HTMLTextAreaElement;
+                                            target.style.height = 'auto';
+                                            target.style.height = target.scrollHeight + 'px';
+                                        }}
+                                        value={noteEdits[task.id] ?? ''}
+                                        onChange={e => setNoteEdits({ ...noteEdits, [task.id]: e.target.value })}
+                                        placeholder="Add a note or reply..."
+                                    />
+                                    <div className="absolute bottom-1.5 right-1.5">
+                                        <button
+                                            onClick={() => handleAddNote(task.id)}
+                                            disabled={updating === task.id || !(noteEdits[task.id] || '').trim()}
+                                            className="px-3 py-1.5 bg-gray-900 text-white rounded-md text-xs font-bold hover:bg-gray-800 disabled:opacity-50 disabled:bg-gray-300"
+                                        >
+                                            Add Note
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Regenerate Suggestion Link */}
+                            <div className="mb-6 flex justify-end">
                                 <button
-                                    onClick={() => setExpandedActions({ ...expandedActions, [task.id]: !expandedActions[task.id] })}
-                                    className="w-full flex items-center justify-between p-3 bg-blue-50 hover:bg-blue-100 transition-colors text-left"
+                                    onClick={() => handleRegenerateSuggestion(task.id)}
+                                    disabled={updating === task.id}
+                                    className="text-xs text-blue-600 hover:underline disabled:opacity-50 flex items-center gap-1"
                                 >
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-blue-600 font-bold text-sm">📋 Recommended Action</span>
-                                        {task.suggestedReplyBody ? (
-                                            <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">Ready</span>
-                                        ) : (
-                                            <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded">Not generated</span>
-                                        )}
-                                    </div>
-                                    <span className="text-gray-400">{expandedActions[task.id] ? '▲' : '▼'}</span>
+                                    <span>⟳ Regenerate Suggestion</span>
                                 </button>
+                            </div>
 
-                                {/* Expanded Content */}
-                                {expandedActions[task.id] && (
-                                    <div className="p-4 bg-white border-t border-blue-100 space-y-3">
-                                        {task.suggestedReplyBody ? (
-                                            <>
-                                                {/* Response Channel & Contact */}
-                                                <div className="grid grid-cols-2 gap-4">
-                                                    <div>
-                                                        <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Channel</label>
-                                                        <select
-                                                            className="w-full text-sm border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
-                                                            value={channelEdits[task.id] ?? task.suggestedChannel ?? 'email'}
-                                                            onChange={e => setChannelEdits({ ...channelEdits, [task.id]: e.target.value })}
-                                                        >
-                                                            <option value="email">Email</option>
-                                                            <option value="sms">SMS</option>
-                                                            <option value="voice">Voice</option>
-                                                            <option value="none">None (Internal)</option>
-                                                        </select>
-                                                    </div>
-                                                    <div>
-                                                        <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Recipient</label>
-                                                        {task.Member ? (
-                                                            <div className="text-sm py-2 px-3 bg-gray-50 rounded border border-gray-200">
-                                                                <div className="font-medium">{task.Member.firstName} {task.Member.lastName}</div>
-                                                                <div className="text-xs text-gray-500">
-                                                                    {(channelEdits[task.id] ?? task.suggestedChannel) === 'email'
-                                                                        ? task.Member.email
-                                                                        : task.Member.phone || task.Member.email}
+                            {/* Recommended Current Action Section */}
+                            {task.status === 'PENDING_REVIEW' && (
+                                <div className="border border-blue-200 rounded-lg overflow-hidden mb-4 shadow-sm">
+                                    {/* Header */}
+                                    <button
+                                        onClick={() => setExpandedActions({ ...expandedActions, [task.id]: !expandedActions[task.id] })}
+                                        className="w-full flex items-center justify-between p-3 bg-blue-50 hover:bg-blue-100 transition-colors text-left"
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-blue-700 font-bold text-sm">✨ Recommended Current Action</span>
+                                            {task.suggestedReplyBody ? (
+                                                <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded border border-green-200 font-semibold">Ready</span>
+                                            ) : (
+                                                <span className="text-[10px] bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded border border-yellow-200">Not generated</span>
+                                            )}
+                                        </div>
+                                        <span className="text-blue-400 text-xs">{expandedActions[task.id] ? 'COLLAPSE' : 'EXPAND'}</span>
+                                    </button>
+
+                                    {/* Expanded Content */}
+                                    {expandedActions[task.id] && (
+                                        <div className="p-4 bg-white border-t border-blue-100 space-y-3">
+                                            {task.suggestedReplyBody ? (
+                                                <>
+                                                    <div className="flex gap-4">
+                                                        <div className="flex-1">
+                                                            <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Message Preview</label>
+                                                            <textarea
+                                                                className="w-full text-sm p-3 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-sans"
+                                                                rows={4}
+                                                                value={replyEdits[task.id] ?? task.suggestedReplyBody}
+                                                                onChange={e => setReplyEdits({ ...replyEdits, [task.id]: e.target.value })}
+                                                                placeholder="Edit the suggested response..."
+                                                            />
+                                                        </div>
+                                                        <div className="w-1/3 min-w-[200px] space-y-3">
+                                                            <div>
+                                                                <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Channel</label>
+                                                                <select
+                                                                    className="w-full text-sm border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                                                    value={channelEdits[task.id] ?? task.suggestedChannel ?? 'email'}
+                                                                    onChange={e => setChannelEdits({ ...channelEdits, [task.id]: e.target.value })}
+                                                                >
+                                                                    <option value="email">Email</option>
+                                                                    <option value="sms">SMS</option>
+                                                                    <option value="voice">Voice</option>
+                                                                    <option value="none">None (Internal)</option>
+                                                                </select>
+                                                            </div>
+                                                            {(channelEdits[task.id] ?? task.suggestedChannel ?? 'email') === 'email' && (
+                                                                <div>
+                                                                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Subject</label>
+                                                                    <input
+                                                                        type="text"
+                                                                        className="w-full text-sm border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                                                        value={subjectEdits[task.id] ?? task.suggestedReplySubject ?? ''}
+                                                                        onChange={e => setSubjectEdits({ ...subjectEdits, [task.id]: e.target.value })}
+                                                                        placeholder="Email subject..."
+                                                                    />
                                                                 </div>
-                                                            </div>
-                                                        ) : (
-                                                            <div className="text-sm py-2 px-3 bg-yellow-50 rounded border border-yellow-200 text-yellow-700">
-                                                                No member linked
-                                                            </div>
-                                                        )}
+                                                            )}
+                                                        </div>
                                                     </div>
-                                                </div>
 
-                                                {/* Subject Line (only for email) */}
-                                                {(channelEdits[task.id] ?? task.suggestedChannel ?? 'email') === 'email' && (
-                                                    <div>
-                                                        <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Subject</label>
-                                                        <input
-                                                            type="text"
-                                                            className="w-full text-sm border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
-                                                            value={subjectEdits[task.id] ?? task.suggestedReplySubject ?? ''}
-                                                            onChange={e => setSubjectEdits({ ...subjectEdits, [task.id]: e.target.value })}
-                                                            placeholder="Email subject line..."
-                                                        />
+                                                    <div className="flex justify-end pt-2">
+                                                        <button
+                                                            onClick={() => handleStatusChange(task.id, 'APPROVED', task)}
+                                                            disabled={updating === task.id}
+                                                            className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-bold hover:bg-blue-700 shadow-sm disabled:opacity-50"
+                                                        >
+                                                            Approve & Send
+                                                        </button>
                                                     </div>
-                                                )}
-
-                                                {/* Reply Body */}
-                                                <div>
-                                                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Message</label>
-                                                    <textarea
-                                                        className="w-full text-sm p-3 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono"
-                                                        rows={4}
-                                                        value={replyEdits[task.id] ?? task.suggestedReplyBody}
-                                                        onChange={e => setReplyEdits({ ...replyEdits, [task.id]: e.target.value })}
-                                                        placeholder="Edit the suggested response..."
-                                                    />
+                                                </>
+                                            ) : (
+                                                <div className="text-sm text-gray-500 italic py-4 text-center">
+                                                    No suggestion yet.
                                                 </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
 
-                                                <p className="text-xs text-gray-400">Review and edit the response above, then click Approve to send.</p>
-                                            </>
-                                        ) : (
-                                            <div className="text-sm text-gray-500 italic py-4 text-center">
-                                                No suggestion yet. Use "Generate Next Suggested Action" in History.
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
+                        </div>
+                    </div>
+
+                    {/* Actions Column (Right Side) */}
+                    <div className="flex flex-col gap-2 min-w-[140px] ml-4 pt-1">
+                        {task.status === 'PENDING_REVIEW' ? (
+                            <>
+                                {/* Approve Button now in Recommended Action usually, but keeping here for quick access if needed, or maybe remove? 
+                                    Let's keep Reject here. Approve is better inside the Action box if reviewing content.
+                                    But "Quick Approve" might be nice.
+                                */}
+                                <button
+                                    onClick={() => handleStatusChange(task.id, 'APPROVED', task)}
+                                    disabled={updating === task.id}
+                                    className="px-4 py-2 bg-green-50 text-green-700 border border-green-200 rounded hover:bg-green-100 text-sm font-medium transition-colors"
+                                >
+                                    Quick Approve
+                                </button>
+                                <button
+                                    onClick={() => handleStatusChange(task.id, 'REJECTED', task)}
+                                    disabled={updating === task.id}
+                                    className="px-4 py-2 bg-white border border-red-200 text-red-700 rounded hover:bg-red-50 text-sm font-medium transition-colors"
+                                >
+                                    Reject
+                                </button>
+                            </>
+                        ) : (
+                            <div className={`text-sm font-medium text-center border rounded py-2 px-3
+                                ${task.status === 'APPROVED' ? 'bg-green-50 text-green-700 border-green-200' : ''}
+                                ${task.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' : ''}
+                                ${task.status === 'EXECUTED' ? 'bg-blue-50 text-blue-700 border-blue-200' : ''}
+                            `}>
+                                {task.status === 'APPROVED' ? '✅ Approved' : task.status}
                             </div>
                         )}
                     </div>
-
-                    {/* Actions */}
-                    < div className="flex flex-col gap-2 min-w-[140px] ml-4" >
-                        {
-                            task.status === 'PENDING_REVIEW' && (
-                                <>
-                                    <button
-                                        onClick={() => handleStatusChange(task.id, 'APPROVED', task)}
-                                        disabled={updating === task.id}
-                                        className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm font-medium transition-colors disabled:opacity-50 flex flex-col items-center"
-                                    >
-                                        <span>Approve</span>
-                                        {(replyEdits[task.id] || task.suggestedReplyBody) && (
-                                            <span className="text-[10px] opacity-80">& Send Reply</span>
-                                        )}
-                                    </button>
-                                    <button
-                                        onClick={() => handleStatusChange(task.id, 'REJECTED', task)}
-                                        disabled={updating === task.id}
-                                        className="px-4 py-2 bg-white border border-red-300 text-red-700 rounded hover:bg-red-50 text-sm font-medium transition-colors disabled:opacity-50"
-                                    >
-                                        Reject
-                                    </button>
-                                </>
-                            )
-                        }
-                        {
-                            task.status !== 'PENDING_REVIEW' && (
-                                <div className="text-sm text-gray-400 font-medium text-center border border-gray-100 rounded py-2">
-                                    {task.status === 'APPROVED' ? '✅ Approved' : 'Actioned'}
-                                </div>
-                            )
-                        }
-                    </div>
-                </div >
-            ))
-            }
-        </div >
+                </div>
+            ))}
+        </div>
     );
 }

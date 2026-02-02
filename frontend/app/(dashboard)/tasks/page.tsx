@@ -36,10 +36,12 @@ export default function TasksPage() {
             const tasksData = await fetchTasks();
             setTasks(tasksData);
 
-            if (role !== 'staff') {
+            // Fetch users for everyone to support ID resolution in history
+            try {
                 const usersData = await getUsers();
                 setUsers(usersData);
-            } else {
+            } catch (ignore) {
+                // If fetching users fails (e.g. permission), we just won't have names
                 setUsers([]);
             }
             setError('');
