@@ -312,18 +312,21 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
                         <div className="mt-6 border-t border-gray-100 pt-4">
 
                             {/* Toggle History Button (if closed) */}
-                            {!historyOpen[task.id] && (
-                                <button
-                                    onClick={() => {
+                            {/* Toggle History/Notes Button - Always visible to allow toggle */}
+                            <button
+                                onClick={() => {
+                                    if (historyOpen[task.id]) {
+                                        setHistoryOpen(prev => ({ ...prev, [task.id]: false }));
+                                    } else {
                                         setHistoryOpen(prev => ({ ...prev, [task.id]: true }));
                                         loadHistory(task.id);
-                                    }}
-                                    className="text-xs text-blue-600 hover:text-blue-800 font-medium mb-3 flex items-center gap-1"
-                                >
-                                    <span>View previous activity</span>
-                                    <span>▼</span>
-                                </button>
-                            )}
+                                    }
+                                }}
+                                className="text-xs text-blue-600 hover:text-blue-800 font-medium mb-3 flex items-center gap-1"
+                            >
+                                <span>Task Notes</span>
+                                <span>{historyOpen[task.id] ? '▲' : '▼'}</span>
+                            </button>
 
                             {/* History Feed (Expanded) */}
                             {historyOpen[task.id] && (
@@ -394,16 +397,7 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
                                 </div>
                             </div>
 
-                            {/* Regenerate Suggestion Link */}
-                            <div className="mb-6 flex justify-end">
-                                <button
-                                    onClick={() => handleRegenerateSuggestion(task.id)}
-                                    disabled={updating === task.id}
-                                    className="text-xs text-blue-600 hover:underline disabled:opacity-50 flex items-center gap-1"
-                                >
-                                    <span>⟳ Regenerate Suggestion</span>
-                                </button>
-                            </div>
+
 
                             {/* Recommended Current Action Section */}
                             {task.status === 'PENDING_REVIEW' && (
@@ -427,6 +421,18 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
                                     {/* Expanded Content */}
                                     {expandedActions[task.id] && (
                                         <div className="p-4 bg-white border-t border-blue-100 space-y-3">
+
+                                            {/* Regenerate Suggestion Link (Moved Inside) */}
+                                            <div className="flex justify-end mb-2">
+                                                <button
+                                                    onClick={() => handleRegenerateSuggestion(task.id)}
+                                                    disabled={updating === task.id}
+                                                    className="text-xs text-blue-600 hover:underline disabled:opacity-50 flex items-center gap-1"
+                                                >
+                                                    <span>⟳ Regenerate Suggestion</span>
+                                                </button>
+                                            </div>
+
                                             {task.suggestedReplyBody ? (
                                                 <>
                                                     <div className="flex gap-4">
@@ -494,36 +500,32 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
 
                     {/* Actions Column (Right Side) */}
                     <div className="flex flex-col gap-2 min-w-[140px] ml-4 pt-1">
-                        {task.status === 'PENDING_REVIEW' ? (
-                            <>
-                                {/* Approve Button now in Recommended Action usually, but keeping here for quick access if needed, or maybe remove? 
-                                    Let's keep Reject here. Approve is better inside the Action box if reviewing content.
-                                    But "Quick Approve" might be nice.
-                                */}
-                                <button
-                                    onClick={() => handleStatusChange(task.id, 'APPROVED', task)}
-                                    disabled={updating === task.id}
-                                    className="px-4 py-2 bg-green-50 text-green-700 border border-green-200 rounded hover:bg-green-100 text-sm font-medium transition-colors"
-                                >
-                                    Quick Approve
-                                </button>
-                                <button
-                                    onClick={() => handleStatusChange(task.id, 'REJECTED', task)}
-                                    disabled={updating === task.id}
-                                    className="px-4 py-2 bg-white border border-red-200 text-red-700 rounded hover:bg-red-50 text-sm font-medium transition-colors"
-                                >
-                                    Reject
-                                </button>
-                            </>
-                        ) : (
-                            <div className={`text-sm font-medium text-center border rounded py-2 px-3
-                                ${task.status === 'APPROVED' ? 'bg-green-50 text-green-700 border-green-200' : ''}
-                                ${task.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' : ''}
-                                ${task.status === 'EXECUTED' ? 'bg-blue-50 text-blue-700 border-blue-200' : ''}
-                            `}>
-                                {task.status === 'APPROVED' ? '✅ Approved' : task.status}
+                        <div className={`text-sm font-medium border rounded py-2 px-2 w-full flex items-center justify-between gap-1 relative
+                            ${task.status === 'APPROVED' ? 'bg-green-50 text-green-700 border-green-200' : ''}
+                            ${task.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' : ''}
+                            ${task.status === 'EXECUTED' ? 'bg-blue-50 text-blue-700 border-blue-200' : ''}
+                            ${task.status === 'PENDING_REVIEW' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : ''}
+                        `}>
+                            <select
+                                className="bg-transparent border-none text-sm font-medium focus:ring-0 cursor-pointer p-0 w-full appearance-none z-10"
+                                value={task.status}
+                                onChange={(e) => handleStatusChange(task.id, e.target.value, task)}
+                                disabled={updating === task.id}
+                            >
+                                <option value="PENDING_REVIEW">Pending Review</option>
+                                <option value="APPROVED">Approved</option>
+                                <option value="REJECTED">Rejected</option>
+                                <option value="EXECUTED">Executed</option>
+                                <option value="IN_PROGRESS">In Progress</option>
+                                <option value="CANCELLED">Cancelled</option>
+                            </select>
+                            {/* Down Arrow Icon */}
+                            <div className="pointer-events-none absolute right-2 top-1/2 transform -translate-y-1/2 text-current opacity-70">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
                             </div>
-                        )}
+                        </div>
                     </div>
                 </div>
             ))}
