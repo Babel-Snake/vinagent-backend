@@ -19,7 +19,7 @@ const validate = (schema, data) => {
 
 // --- CONSTANTS ---
 const CATEGORIES = ['BOOKING', 'ORDER', 'ACCOUNT', 'GENERAL', 'OPERATIONS', 'INTERNAL', 'SYSTEM'];
-const STATUSES = ['PENDING_REVIEW', 'APPROVED', 'AWAITING_MEMBER_ACTION', 'REJECTED', 'EXECUTED', 'CANCELLED'];
+const STATUSES = ['PENDING_REVIEW', 'IN_PROGRESS', 'APPROVED', 'AWAITING_MEMBER_ACTION', 'REJECTED', 'EXECUTED', 'CANCELLED'];
 const PRIORITIES = ['low', 'normal', 'high'];
 const SENTIMENTS = ['POSITIVE', 'NEUTRAL', 'NEGATIVE'];
 const CUSTOMER_TYPES = ['MEMBER', 'VISITOR', 'UNKNOWN'];
@@ -50,16 +50,18 @@ const genericPayloadSchema = Joi.object({
     summary: Joi.string().max(500),
     originalText: Joi.string().max(2000),
     note: Joi.string().max(2000)
-}).unknown(true); // Allow extra fields for flexibility, but at least define expected ones
+}).unknown(true); // Allow extra fields for flexibility
 
 // --- STATUS TRANSITION RULES ---
+// Flexible transitions to support manager workflow via status dropdown
 const VALID_STATUS_TRANSITIONS = {
-    'PENDING_REVIEW': ['APPROVED', 'REJECTED', 'CANCELLED'],
-    'APPROVED': ['EXECUTED', 'AWAITING_MEMBER_ACTION', 'CANCELLED'],
-    'AWAITING_MEMBER_ACTION': ['EXECUTED', 'CANCELLED'],
-    'REJECTED': ['PENDING_REVIEW'], // Can be re-opened
-    'EXECUTED': [], // Terminal
-    'CANCELLED': ['PENDING_REVIEW'] // Can be re-opened
+    'PENDING_REVIEW': ['APPROVED', 'REJECTED', 'CANCELLED', 'IN_PROGRESS', 'EXECUTED'],
+    'IN_PROGRESS': ['PENDING_REVIEW', 'APPROVED', 'EXECUTED', 'CANCELLED'],
+    'APPROVED': ['EXECUTED', 'AWAITING_MEMBER_ACTION', 'CANCELLED', 'PENDING_REVIEW'],
+    'AWAITING_MEMBER_ACTION': ['EXECUTED', 'CANCELLED', 'PENDING_REVIEW'],
+    'REJECTED': ['PENDING_REVIEW', 'CANCELLED'],
+    'EXECUTED': ['PENDING_REVIEW'], // Can reopen if needed
+    'CANCELLED': ['PENDING_REVIEW']
 };
 
 function validateStatusTransition(currentStatus, newStatus) {
