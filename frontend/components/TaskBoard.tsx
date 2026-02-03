@@ -125,7 +125,21 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
             );
         }
 
-        // 2. STATUS CHANGES / ASSIGNMENTS / ETC (Structured Data)
+        // 2. ASSIGNED
+        if (action.actionType === 'ASSIGNED') {
+            const toUser = users.find(u => u.id === Number(action.details.to));
+            const assigner = action.User?.displayName || 'System';
+
+            return (
+                <div className="mt-2 text-sm bg-blue-50 border border-blue-100 rounded p-2 text-blue-900">
+                    <span className="font-semibold">Assigned to: </span>
+                    {toUser ? toUser.displayName : action.details.to}
+                    <span className="text-gray-500 ml-2 text-xs">by {assigner}</span>
+                </div>
+            );
+        }
+
+        // 3. STATUS CHANGES / ASSIGNMENTS / ETC (Structured Data)
         if (action.details && Object.keys(action.details).length > 0) {
             // Check for 'changes' object common in audit logs
             const changes = action.details.changes || action.details;
@@ -342,7 +356,15 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
                                         <>
                                             {/* Sort Oldest -> Newest and Filter */}
                                             {(taskHistory[task.id] || [])
-                                                .filter(a => a.actionType !== 'TASK_CREATED' && a.actionType !== 'MANUAL_CREATED') // Filter redundant creation
+                                                .filter(a => {
+                                                    if (a.actionType === 'TASK_CREATED' || a.actionType === 'MANUAL_CREATED') return false;
+                                                    // Filter redundant MANUAL_UPDATE if it only contains assigneeId (covered by ASSIGNED)
+                                                    if (a.actionType === 'MANUAL_UPDATE' && a.details?.changes) {
+                                                        const keys = Object.keys(a.details.changes).filter(k => k !== 'assigneeId');
+                                                        if (keys.length === 0) return false;
+                                                    }
+                                                    return true;
+                                                }) // Filter redundant creation and updates
                                                 .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) // Chronological
                                                 .map(action => (
                                                     <div key={action.id} className="text-sm group flex flex-col items-start bg-gray-50/50 p-3 rounded-lg border border-gray-100">
