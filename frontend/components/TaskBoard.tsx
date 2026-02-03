@@ -128,7 +128,13 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
         // 2. ASSIGNED
         if (action.actionType === 'ASSIGNED') {
             const toUser = users.find(u => u.id === Number(action.details.to));
-            const assigner = action.User?.displayName || 'System';
+            // Try action.User.displayName, then lookup from users list, then 'System'
+            let assigner = action.User?.displayName;
+            if (!assigner && action.userId) {
+                const assignerUser = users.find(u => u.id === action.userId);
+                assigner = assignerUser?.displayName;
+            }
+            assigner = assigner || 'System';
 
             return (
                 <div className="mt-2 text-sm bg-blue-50 border border-blue-100 rounded p-2 text-blue-900">
