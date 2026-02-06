@@ -1,4 +1,4 @@
-const { Task, WinerySettings, Member, Message, User, TaskAction } = require('../models');
+const { Task, WinerySettings, Member, Message, User, TaskAction, Notification } = require('../models');
 const { Op } = require('sequelize');
 const executionService = require('./execution.service');
 const logger = require('../config/logger');
@@ -271,6 +271,15 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
         details: { note: notes }
       });
       noteAdded = true;
+
+      // Process Mentions
+      await processMentions({
+        text: notes,
+        wineryId,
+        senderId: userId,
+        taskId: task.id,
+        transaction: t
+      });
     }
 
     // EXECUTION TRIGGER
@@ -396,3 +405,33 @@ module.exports = {
   getTasksForWinery,
   getTaskById
 };
+
+/**
+ * Helper to process text for user mentions
+ */
+async function processMentions({ text, wineryId, senderId, taskId, transaction }) {
+  if (!text || !text.includes('@')) return;
+
+  const users = await User.findAll({
+    where: { wineryId },
+    attributes: ['id', 'displayName']
+  });
+
+  for (const user of users) {
+    if (user.id === senderId) continue;
+    if (!user.displayName) continue;
+
+    // Case-insensitive match for @DisplayName
+    // Assuming simple names for now. If displayName has spaces, we check inclusion.
+    const mentionPattern = new RegExp(`@${user.displayName}\\b`, 'i');
+
+    if (mentionPattern.test(text)) {
+      await Notification.create({
+        userId: user.id,
+        type: 'MENTION',
+        message: `You were mentioned in a task note`,
+        data: { taskId }
+      }, { transaction });
+    }
+  }
+}

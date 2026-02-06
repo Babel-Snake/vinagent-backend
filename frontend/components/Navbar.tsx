@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import ProfileDropdown from './ProfileDropdown';
+import NotificationCenter from './NotificationCenter';
 
 interface NavbarProps {
     user: any;
@@ -59,6 +60,9 @@ export default function Navbar({ user, fullProfile }: NavbarProps) {
                                 {fullProfile.wineryName}
                             </div>
                         )}
+                        <div className="mr-4">
+                            <NotificationCenter />
+                        </div>
                         <ProfileDropdown user={user} fullProfile={fullProfile} />
                     </div>
                 </div>

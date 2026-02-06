@@ -4,7 +4,7 @@ interface TaskFiltersProps {
     filters: {
         category: string;
         priority: string;
-        assigneeId: string; // 'all' or number
+        assigneeId: string; // 'all' or 'me' or number
         createdById: string; // 'all' or number or 'system'
         status: string;
         sentiment: string;
@@ -12,9 +12,10 @@ interface TaskFiltersProps {
     };
     onFilterChange: (newFilters: any) => void;
     tasks: Task[]; // Passed to extract unique options dynamically (e.g. Assignees)
+    currentUserId?: number | null; // For "Me" filter
 }
 
-export default function TaskFilters({ filters, onFilterChange, tasks }: TaskFiltersProps) {
+export default function TaskFilters({ filters, onFilterChange, tasks, currentUserId }: TaskFiltersProps) {
     // Extract Unique Assignees for Dropdown
     const uniqueAssignees = Array.from(new Set(tasks.map(t => t.Assignee ? JSON.stringify(t.Assignee) : '').filter(Boolean)))
         .map(s => JSON.parse(s));
@@ -115,6 +116,7 @@ export default function TaskFilters({ filters, onFilterChange, tasks }: TaskFilt
                     onChange={(e) => handleChange('assigneeId', e.target.value)}
                 >
                     <option value="all">All Staff</option>
+                    {currentUserId && <option value="me">Assigned to Me</option>}
                     <option value="unassigned">Unassigned</option>
                     {uniqueAssignees.map((a: any) => (
                         <option key={a.id} value={a.id}>{a.displayName}</option>

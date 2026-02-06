@@ -66,6 +66,17 @@ export interface AutoclassifyResponse {
     };
 }
 
+
+export interface Notification {
+    id: number;
+    userId: number;
+    type: string;
+    message: string;
+    isRead: boolean;
+    data: any;
+    createdAt: string;
+}
+
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000') + '/api';
 
 import { auth } from './firebase';
@@ -361,6 +372,22 @@ export async function deleteFAQ(id: number): Promise<any> {
         method: 'DELETE',
         headers: { 'Authorization': await getAuthToken() }
     });
-    if (!res.ok) throw new Error('Failed to delete FAQ');
     return await res.json();
+}
+
+export async function getNotifications(): Promise<Notification[]> {
+    const res = await fetch(`${API_BASE}/notifications`, {
+        headers: { 'Authorization': await getAuthToken() }
+    });
+    if (!res.ok) throw new Error('Failed to fetch notifications');
+    const data = await res.json();
+    return data.notifications;
+}
+
+export async function markNotificationRead(id: number): Promise<void> {
+    const res = await fetch(`${API_BASE}/notifications/${id}/read`, {
+        method: 'PATCH',
+        headers: { 'Authorization': await getAuthToken() }
+    });
+    if (!res.ok) throw new Error('Failed to mark notification as read');
 }

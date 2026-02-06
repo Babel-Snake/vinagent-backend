@@ -13,6 +13,7 @@ export default function TasksPage() {
     const [error, setError] = useState('');
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [userRole, setUserRole] = useState<string | null>(null);
+    const [currentUserId, setCurrentUserId] = useState<number | null>(null);
     const [filters, setFilters] = useState({
         category: 'all',
         priority: 'all',
@@ -31,6 +32,7 @@ export default function TasksPage() {
                 const profileData = await getMyProfile();
                 role = profileData?.user?.role || null;
                 setUserRole(role);
+                setCurrentUserId(profileData?.user?.id || null);
             }
 
             const tasksData = await fetchTasks();
@@ -68,6 +70,8 @@ export default function TasksPage() {
         if (filters.assigneeId !== 'all') {
             if (filters.assigneeId === 'unassigned') {
                 if (task.assigneeId) return false;
+            } else if (filters.assigneeId === 'me') {
+                if (task.assigneeId !== currentUserId) return false;
             } else {
                 if (task.assigneeId !== Number(filters.assigneeId)) return false;
             }
@@ -128,6 +132,7 @@ export default function TasksPage() {
                 filters={filters}
                 onFilterChange={setFilters}
                 tasks={tasks}
+                currentUserId={currentUserId}
             />
 
             {loading ? (
@@ -141,6 +146,7 @@ export default function TasksPage() {
                     users={users}
                     onRefresh={loadTasks}
                     canAssign={userRole !== 'staff'}
+                    userRole={userRole}
                 />
             )}
 

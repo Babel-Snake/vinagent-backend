@@ -8,9 +8,10 @@ interface TaskBoardProps {
     users: Staff[];
     onRefresh: () => void;
     canAssign?: boolean;
+    userRole?: string | null;
 }
 
-export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }: TaskBoardProps) {
+export default function TaskBoard({ tasks, users, onRefresh, canAssign = true, userRole }: TaskBoardProps) {
     const [updating, setUpdating] = useState<number | null>(null);
     const [replyEdits, setReplyEdits] = useState<{ [key: number]: string }>({});
     const [subjectEdits, setSubjectEdits] = useState<{ [key: number]: string }>({});
@@ -533,26 +534,42 @@ export default function TaskBoard({ tasks, users, onRefresh, canAssign = true }:
                             ${task.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' : ''}
                             ${task.status === 'EXECUTED' ? 'bg-blue-50 text-blue-700 border-blue-200' : ''}
                             ${task.status === 'PENDING_REVIEW' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : ''}
+                            ${task.status === 'IN_PROGRESS' ? 'bg-purple-50 text-purple-700 border-purple-200' : ''}
                         `}>
-                            <select
-                                className="bg-transparent border-none text-sm font-medium focus:ring-0 cursor-pointer p-0 w-full appearance-none z-10"
-                                value={task.status}
-                                onChange={(e) => handleStatusChange(task.id, e.target.value, task)}
-                                disabled={updating === task.id}
-                            >
-                                <option value="PENDING_REVIEW">Pending Review</option>
-                                <option value="APPROVED">Approved</option>
-                                <option value="REJECTED">Rejected</option>
-                                <option value="EXECUTED">Executed</option>
-                                <option value="IN_PROGRESS">In Progress</option>
-                                <option value="CANCELLED">Cancelled</option>
-                            </select>
-                            {/* Down Arrow Icon */}
-                            <div className="pointer-events-none absolute right-2 top-1/2 transform -translate-y-1/2 text-current opacity-70">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                </svg>
-                            </div>
+                            {userRole === 'staff' ? (
+                                /* Staff: Read-only status badge */
+                                <span className="font-medium">
+                                    {task.status === 'PENDING_REVIEW' && 'Pending Review'}
+                                    {task.status === 'APPROVED' && 'Approved'}
+                                    {task.status === 'REJECTED' && 'Rejected'}
+                                    {task.status === 'EXECUTED' && 'Executed'}
+                                    {task.status === 'IN_PROGRESS' && 'In Progress'}
+                                    {task.status === 'CANCELLED' && 'Cancelled'}
+                                </span>
+                            ) : (
+                                /* Manager/Admin: Status dropdown */
+                                <>
+                                    <select
+                                        className="bg-transparent border-none text-sm font-medium focus:ring-0 cursor-pointer p-0 w-full appearance-none z-10"
+                                        value={task.status}
+                                        onChange={(e) => handleStatusChange(task.id, e.target.value, task)}
+                                        disabled={updating === task.id}
+                                    >
+                                        <option value="PENDING_REVIEW">Pending Review</option>
+                                        <option value="IN_PROGRESS">In Progress</option>
+                                        <option value="APPROVED">Approved</option>
+                                        <option value="REJECTED">Rejected</option>
+                                        <option value="EXECUTED">Executed</option>
+                                        <option value="CANCELLED">Cancelled</option>
+                                    </select>
+                                    {/* Down Arrow Icon */}
+                                    <div className="pointer-events-none absolute right-2 top-1/2 transform -translate-y-1/2 text-current opacity-70">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                    </div>
+                                </>
+                            )}
                         </div>
                     </div>
                 </div>
