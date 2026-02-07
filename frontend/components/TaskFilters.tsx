@@ -9,6 +9,7 @@ interface TaskFiltersProps {
         status: string;
         sentiment: string;
         search: string;
+        showOnlyFlagged?: boolean;
     };
     onFilterChange: (newFilters: any) => void;
     tasks: Task[]; // Passed to extract unique options dynamically (e.g. Assignees)
@@ -138,6 +139,17 @@ export default function TaskFilters({ filters, onFilterChange, tasks, currentUse
                         <option key={c.id} value={c.id}>{c.displayName}</option>
                     ))}
                 </select>
+            </div>
+
+            {/* Flagged Filter */}
+            <div className="flex items-center gap-2 md:pt-6">
+                <button
+                    onClick={() => onFilterChange({ ...filters, showOnlyFlagged: !filters.showOnlyFlagged })}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${filters.showOnlyFlagged ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' : 'bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200'}`}
+                >
+                    <span className={filters.showOnlyFlagged ? 'text-yellow-500' : 'text-gray-400'}>★</span>
+                    Flagged
+                </button>
             </div>
         </div>
     );

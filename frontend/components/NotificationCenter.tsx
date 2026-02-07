@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { getNotifications, markNotificationRead, Notification } from '../lib/api';
 
 export default function NotificationCenter() {
@@ -8,6 +9,7 @@ export default function NotificationCenter() {
     const [unreadCount, setUnreadCount] = useState(0);
     const [isOpen, setIsOpen] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
+    const router = useRouter();
 
     async function loadNotifications() {
         try {
@@ -83,11 +85,10 @@ export default function NotificationCenter() {
                                         className={`px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-50 cursor-pointer ${!notification.isRead ? 'bg-blue-50' : ''}`}
                                         onClick={() => {
                                             if (!notification.isRead) handleMarkRead(notification.id);
-                                            // Handle navigation if needed (e.g. check notification.data.taskId)
+
                                             if (notification.data?.taskId) {
-                                                // We could dispatch event or use context, but for now just letting user see it.
-                                                // Ideally integration: window.location.href = `/tasks`?
-                                                // User wants to see content. For now marking read is key.
+                                                setIsOpen(false);
+                                                router.push(`/tasks?taskId=${notification.data.taskId}&expandNotes=1`);
                                             }
                                         }}
                                     >

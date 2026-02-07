@@ -1,10 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { fetchTasks, Task, getUsers, Staff, getMyProfile } from '../../../lib/api';
+import { useSearchParams } from 'next/navigation';
+import { fetchTasks, Task, getUsers, Staff, getMyProfile, getFlaggedTaskIds, toggleTaskFlag } from '../../../lib/api';
 import TaskBoard from '../../../components/TaskBoard';
 import CreateTaskModal from '../../../components/CreateTaskModal';
 import TaskFilters from '../../../components/TaskFilters';
+import TaskDetailModal from '../../../components/TaskDetailModal';
 
 export default function TasksPage() {
     const [tasks, setTasks] = useState<Task[]>([]);
@@ -21,8 +23,22 @@ export default function TasksPage() {
         sentiment: 'all',
         assigneeId: 'all',
         createdById: 'all',
-        search: ''
+        search: '',
+        showOnlyFlagged: false
     });
+
+    const [flaggedTaskIds, setFlaggedTaskIds] = useState<number[]>([]);
+    const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
+
+    const searchParams = useSearchParams();
+    const highlightedTaskId = searchParams.get('taskId');
+    const autoExpand = searchParams.get('expandNotes') === '1';
+
+    useEffect(() => {
+        if (highlightedTaskId) {
+            setActiveTaskId(parseInt(highlightedTaskId));
+        }
+    }, [highlightedTaskId]);
 
     async function loadTasks() {
         try {
@@ -47,6 +63,14 @@ export default function TasksPage() {
                 setUsers([]);
             }
             setError('');
+
+            // Fetch flags
+            try {
+                const flagIds = await getFlaggedTaskIds();
+                setFlaggedTaskIds(flagIds);
+            } catch (err) {
+                console.error('Failed to load flags', err);
+            }
         } catch (err: any) {
             setError(err.message);
         } finally {
@@ -101,6 +125,10 @@ export default function TasksPage() {
             if (!matchesName && !matchesEmail && !matchesPhone) return false;
         }
 
+        // Special filter for flagged ONLY (if implemented in TaskFilters)
+        // For now, we'll check if a custom property is set in filters
+        if ((filters as any).showOnlyFlagged && !flaggedTaskIds.includes(task.id)) return false;
+
         return true;
     });
 
@@ -147,6 +175,26 @@ export default function TasksPage() {
                     onRefresh={loadTasks}
                     canAssign={userRole !== 'staff'}
                     userRole={userRole}
+                    flaggedTaskIds={flaggedTaskIds}
+                    onToggleFlag={async (id) => {
+                        const isFlagged = await toggleTaskFlag(id);
+                        setFlaggedTaskIds(prev => isFlagged ? [...prev, id] : prev.filter(fid => fid !== id));
+                    }}
+                />
+            )}
+
+            {activeTaskId && (
+                <TaskDetailModal
+                    taskId={activeTaskId}
+                    users={users}
+                    userRole={userRole}
+                    onClose={() => setActiveTaskId(null)}
+                    onRefresh={loadTasks}
+                    isFlagged={flaggedTaskIds.includes(activeTaskId)}
+                    onToggleFlag={async (id) => {
+                        const isFlagged = await toggleTaskFlag(id);
+                        setFlaggedTaskIds(prev => isFlagged ? [...prev, id] : prev.filter(fid => fid !== id));
+                    }}
                 />
             )}
 

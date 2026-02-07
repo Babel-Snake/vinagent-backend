@@ -15,18 +15,8 @@ router.use('/webhooks', webhookRoutes);
 // Public API (no auth required)
 router.use('/public', require('./public.routes'));
 
-// FIXME: Temporary endpoint to fix missing table
-router.get('/public/fix-db', async (req, res) => {
-    try {
-        const { sequelize } = require('../models');
-        await sequelize.sync({ alter: true });
-        res.send('Database synced successfully! You can close this tab.');
-    } catch (err) {
-        res.status(500).send('Sync failed: ' + err.message);
-    }
-});
-
 // Dashboard APIs (protected by Firebase auth)
+router.use('/tasks/flags', authMiddleware, require('./taskFlag.routes'));
 router.use('/tasks', authMiddleware, taskRoutes);
 router.use('/staff', authMiddleware, require('./staff.routes'));
 router.use('/users', authMiddleware, require('./user.routes'));
