@@ -30,9 +30,15 @@ async function getTask(req, res, next) {
         const { wineryId } = req.user;
         const { id } = req.params;
 
+        require('fs').appendFileSync('debug_controller.log', `[${new Date().toISOString()}] getTask request: id=${id}, user=${req.user.id}, role=${req.user.role}\n`);
+
         const task = await taskService.getTaskById({ taskId: id, wineryId });
+
+        require('fs').appendFileSync('debug_controller.log', `[${new Date().toISOString()}] getTask success: id=${id}, found=${!!task}\n`);
+
         res.json({ task });
     } catch (err) {
+        require('fs').appendFileSync('debug_controller.log', `[${new Date().toISOString()}] getTask error: id=${req.params.id}, error=${err.message}\n${err.stack}\n`);
         // Service throws generic Error for 404, we can let global handler catch it 
         // if it has statusCode attached (which it does in service)
         next(err);

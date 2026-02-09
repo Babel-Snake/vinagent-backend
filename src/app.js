@@ -27,27 +27,27 @@ app.use((req, res, next) => {
 // Correlation ID (First middleware)
 app.use(requestId);
 
-// Security Headers
 app.use(helmet());
 
 // Logging
 app.use(requestLogger);
 
+// CORS must be before rate limiter so 429s have headers
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || 'http://localhost:3001',
+  credentials: true
+}));
+
 // Rate Limiting
 const limiter = rateLimit({
   windowMs: (process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000), // Default 15 mins
-  max: (process.env.RATE_LIMIT_MAX || 100), // Limit each IP to 100 requests per windowMs
+  max: (process.env.RATE_LIMIT_MAX || 1000), // Increased to 1000 to allow polling
   standardHeaders: true,
   legacyHeaders: false,
   // Skip webhooks as they have their own dedicated limiter (allowing bursts)
   skip: (req) => req.path.startsWith('/api/webhooks')
 });
 app.use(limiter);
-
-app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:3001',
-  credentials: true
-}));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

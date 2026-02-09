@@ -383,7 +383,8 @@ async function getTaskById({ taskId, wineryId }) {
       {
         model: TaskAction,
         separate: true,
-        order: [['createdAt', 'ASC']],
+        order: [['createdAt', 'DESC']], // recent first
+        limit: 50, // Safety limit
         include: [{ model: User, attributes: ['id', 'displayName', 'role'] }]
       }
     ]
@@ -395,6 +396,12 @@ async function getTaskById({ taskId, wineryId }) {
     err.code = 'NOT_FOUND';
     throw err;
   }
+
+  // Re-sort actions for frontend if needed (frontend expects chronological?)
+  // The frontend sorts them: .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+  // So returning them DESC is fine, frontend will re-sort. 
+  // But wait, if we limit 50 DESC, we get the *latest* 50.
+  // Frontend sorts ASC. So we'll have the last 50 actions, in correct order after frontend sort.
 
   return task;
 }

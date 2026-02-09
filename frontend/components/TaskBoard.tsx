@@ -1,7 +1,7 @@
 'use client';
 
 import { Task, Staff } from '../lib/api';
-import TaskCard from './TaskCard';
+import TaskSummaryCard from './TaskSummaryCard';
 
 interface TaskBoardProps {
     tasks: Task[];
@@ -13,6 +13,7 @@ interface TaskBoardProps {
     autoExpand?: boolean;
     flaggedTaskIds?: number[];
     onToggleFlag?: (taskId: number) => void;
+    onTaskClick?: (taskId: number) => void;
 }
 
 export default function TaskBoard({
@@ -24,7 +25,8 @@ export default function TaskBoard({
     highlightedTaskId,
     autoExpand,
     flaggedTaskIds = [],
-    onToggleFlag
+    onToggleFlag,
+    onTaskClick
 }: TaskBoardProps) {
     if (tasks.length === 0) {
         return (
@@ -35,19 +37,15 @@ export default function TaskBoard({
     }
 
     return (
-        <div className="space-y-4">
+        <div className="space-y-3">
             {tasks.map(task => (
-                <TaskCard
+                <TaskSummaryCard
                     key={task.id}
                     task={task}
                     users={users}
-                    onRefresh={onRefresh}
-                    canAssign={canAssign}
-                    userRole={userRole}
                     isFlagged={flaggedTaskIds.includes(task.id)}
-                    highlighted={highlightedTaskId === task.id}
                     onToggleFlag={onToggleFlag}
-                    autoExpand={autoExpand && highlightedTaskId === task.id}
+                    onClick={() => onTaskClick && onTaskClick(task.id)}
                 />
             ))}
         </div>

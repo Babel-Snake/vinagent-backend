@@ -196,6 +196,14 @@ export default function TaskCard({
                     </button>
 
                     <span className={`px-2 py-1 rounded text-xs font-bold uppercase tracking-wide
+                        ${task.priority === 'high' ? 'bg-red-100 text-red-800' : ''}
+                        ${task.priority === 'normal' ? 'bg-blue-50 text-blue-600' : ''}
+                        ${task.priority === 'low' ? 'bg-gray-100 text-gray-500' : ''}
+                    `}>
+                        {task.priority || 'NORMAL'}
+                    </span>
+
+                    <span className={`px-2 py-1 rounded text-xs font-bold uppercase tracking-wide
                         ${task.category === 'OPERATIONS' ? 'bg-purple-100 text-purple-800' : ''}
                         ${task.category === 'ORDER' ? 'bg-blue-100 text-blue-800' : ''}
                         ${task.category === 'BOOKING' ? 'bg-pink-100 text-pink-800' : ''}
@@ -228,6 +236,7 @@ export default function TaskCard({
 
                     <span className="text-sm text-gray-400">#{task.id}</span>
                     <span className="text-sm text-gray-400">{new Date(task.createdAt).toLocaleString()}</span>
+                    <span className="text-sm text-gray-500 italic">by {task.Creator ? task.Creator.displayName : 'System'}</span>
                 </div>
 
                 <h3 className="text-lg font-semibold text-gray-900 mb-1">

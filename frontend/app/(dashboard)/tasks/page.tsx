@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { fetchTasks, Task, getUsers, Staff, getMyProfile, getFlaggedTaskIds, toggleTaskFlag } from '../../../lib/api';
 import TaskBoard from '../../../components/TaskBoard';
 import CreateTaskModal from '../../../components/CreateTaskModal';
@@ -31,6 +31,8 @@ export default function TasksPage() {
     const [activeTaskId, setActiveTaskId] = useState<number | null>(null);
 
     const searchParams = useSearchParams();
+    const router = useRouter();
+
     const highlightedTaskId = searchParams.get('taskId');
     const autoExpand = searchParams.get('expandNotes') === '1';
 
@@ -125,8 +127,7 @@ export default function TasksPage() {
             if (!matchesName && !matchesEmail && !matchesPhone) return false;
         }
 
-        // Special filter for flagged ONLY (if implemented in TaskFilters)
-        // For now, we'll check if a custom property is set in filters
+        // Special filter for flagged ONLY
         if ((filters as any).showOnlyFlagged && !flaggedTaskIds.includes(task.id)) return false;
 
         return true;
@@ -135,6 +136,11 @@ export default function TasksPage() {
     const sortedTasks = [...filteredTasks].sort((a, b) => {
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
+
+    const handleCloseModal = () => {
+        setActiveTaskId(null);
+        router.push('/tasks');
+    };
 
     return (
         <div className="px-4 py-6 sm:px-0">
@@ -180,6 +186,7 @@ export default function TasksPage() {
                         const isFlagged = await toggleTaskFlag(id);
                         setFlaggedTaskIds(prev => isFlagged ? [...prev, id] : prev.filter(fid => fid !== id));
                     }}
+                    onTaskClick={setActiveTaskId}
                 />
             )}
 
@@ -188,7 +195,7 @@ export default function TasksPage() {
                     taskId={activeTaskId}
                     users={users}
                     userRole={userRole}
-                    onClose={() => setActiveTaskId(null)}
+                    onClose={handleCloseModal}
                     onRefresh={loadTasks}
                     isFlagged={flaggedTaskIds.includes(activeTaskId)}
                     onToggleFlag={async (id) => {
