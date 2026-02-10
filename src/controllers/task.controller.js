@@ -6,13 +6,13 @@ const { validate, createTaskSchema, updateTaskSchema, autoclassifySchema } = req
 async function listTasks(req, res, next) {
     try {
         const { wineryId, role, id: userId } = req.user;
-        const { status, type, priority, assignedToMe, page, pageSize } = req.query;
+        const { status, type, priority, assignedToMe, category, sentiment, assigneeId, createdById, search, dateFrom, dateTo, sortBy, page, pageSize } = req.query;
 
         const result = await taskService.getTasksForWinery({
             wineryId,
             userId,
             userRole: role,
-            filters: { status, type, priority, assignedToMe },
+            filters: { status, type, priority, assignedToMe, category, sentiment, assigneeId, createdById, search, dateFrom, dateTo, sortBy },
             pagination: { page, pageSize }
         });
 

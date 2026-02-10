@@ -24,7 +24,11 @@ export default function TasksPage() {
         assigneeId: 'all',
         createdById: 'all',
         search: '',
-        showOnlyFlagged: false
+        showOnlyFlagged: false,
+        sortBy: 'newest',
+        dateFrom: '',
+        dateTo: '',
+        dateRangeType: 'all'
     });
 
     const [flaggedTaskIds, setFlaggedTaskIds] = useState<number[]>([]);
@@ -53,7 +57,8 @@ export default function TasksPage() {
                 setCurrentUserId(profileData?.user?.id || null);
             }
 
-            const tasksData = await fetchTasks();
+            // Pass current filters to API
+            const tasksData = await fetchTasks(filters);
             setTasks(tasksData);
 
             // Fetch users for everyone to support ID resolution in history
@@ -61,7 +66,6 @@ export default function TasksPage() {
                 const usersData = await getUsers();
                 setUsers(usersData);
             } catch (ignore) {
-                // If fetching users fails (e.g. permission), we just won't have names
                 setUsers([]);
             }
             setError('');
@@ -80,62 +84,24 @@ export default function TasksPage() {
         }
     }
 
+    // Reload when filters change (debouncing search is handled by user action or natural delay, 
+    // but here we just react to state change. For better perf with typing, we might want a separate effect 
+    // or rely on TaskFilters to debounce the state update. Assuming TaskFilters updates state instantly:
+    // We should probably debounce the load if search is typing.
+    // However, existing TaskFilters likely updates state instantly.
+    // For now, to keep it simple, we reload on filter change.)
     useEffect(() => {
-        loadTasks();
-    }, []);
+        const timer = setTimeout(() => {
+            loadTasks();
+        }, 300); // 300ms debounce to prevent spamming on typing
+        return () => clearTimeout(timer);
+    }, [filters, highlightedTaskId]); // highlightedTaskId trigger is legacy, technically not needed if we rely on initial load
 
     const normalizePhone = (value: string) => value.replace(/[^\d]/g, '');
 
-    // Filter Logic
-    const filteredTasks = tasks.filter(task => {
-        if (filters.category !== 'all' && task.category !== filters.category) return false;
-        if (filters.priority !== 'all' && task.priority !== filters.priority) return false;
-        if (filters.status !== 'all' && task.status !== filters.status) return false;
-        if (filters.sentiment !== 'all' && task.sentiment !== filters.sentiment) return false;
-
-        if (filters.assigneeId !== 'all') {
-            if (filters.assigneeId === 'unassigned') {
-                if (task.assigneeId) return false;
-            } else if (filters.assigneeId === 'me') {
-                if (task.assigneeId !== currentUserId) return false;
-            } else {
-                if (task.assigneeId !== Number(filters.assigneeId)) return false;
-            }
-        }
-
-        if (filters.createdById !== 'all') {
-            if (filters.createdById === 'system') {
-                if (task.Creator) return false;
-            } else {
-                if (task.Creator?.id !== Number(filters.createdById)) return false;
-            }
-        }
-
-        if (filters.search.trim()) {
-            const term = filters.search.trim().toLowerCase();
-            const member = task.Member;
-            const fullName = member ? `${member.firstName} ${member.lastName}`.toLowerCase() : '';
-            const email = (member?.email || '').toLowerCase();
-            const phone = member?.phone || '';
-            const normalizedPhone = normalizePhone(phone);
-            const normalizedTerm = normalizePhone(term);
-
-            const matchesName = fullName.includes(term);
-            const matchesEmail = email.includes(term);
-            const matchesPhone = normalizedTerm ? normalizedPhone.includes(normalizedTerm) : false;
-
-            if (!matchesName && !matchesEmail && !matchesPhone) return false;
-        }
-
-        // Special filter for flagged ONLY
-        if ((filters as any).showOnlyFlagged && !flaggedTaskIds.includes(task.id)) return false;
-
-        return true;
-    });
-
-    const sortedTasks = [...filteredTasks].sort((a, b) => {
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
+    // No client-side filtering anymore
+    const filteredTasks = tasks;
+    const sortedTasks = tasks; // Backend sorts DESC
 
     const handleCloseModal = () => {
         setActiveTaskId(null);
@@ -166,6 +132,7 @@ export default function TasksPage() {
                 filters={filters}
                 onFilterChange={setFilters}
                 tasks={tasks}
+                users={users}
                 currentUserId={currentUserId}
             />
 

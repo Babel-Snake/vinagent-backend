@@ -88,9 +88,18 @@ async function getAuthToken(): Promise<string> {
     return '';
 }
 
-export async function fetchTasks(status?: string): Promise<Task[]> {
+export async function fetchTasks(filters: any = {}): Promise<Task[]> {
     const params = new URLSearchParams();
-    if (status) params.append('status', status);
+    if (filters.status && filters.status !== 'all') params.append('status', filters.status);
+    if (filters.category && filters.category !== 'all') params.append('category', filters.category);
+    if (filters.priority && filters.priority !== 'all') params.append('priority', filters.priority);
+    if (filters.sentiment && filters.sentiment !== 'all') params.append('sentiment', filters.sentiment);
+    if (filters.assigneeId && filters.assigneeId !== 'all') params.append('assigneeId', filters.assigneeId);
+    if (filters.createdById && filters.createdById !== 'all') params.append('createdById', filters.createdById);
+    if (filters.search) params.append('search', filters.search);
+    if (filters.sortBy) params.append('sortBy', filters.sortBy);
+    if (filters.dateFrom) params.append('dateFrom', filters.dateFrom);
+    if (filters.dateTo) params.append('dateTo', filters.dateTo);
 
     const res = await fetch(`${API_BASE}/tasks?${params.toString()}`, {
         headers: {

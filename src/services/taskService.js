@@ -324,8 +324,9 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
  * Get tasks for a winery with filtering and pagination
  */
 async function getTasksForWinery({ wineryId, userId, userRole, filters = {}, pagination = {} }) {
-  const { status, type, priority, assignedToMe } = filters;
+  const { status, type, priority, assignedToMe, category, sentiment, assigneeId, createdById, search, dateFrom, dateTo, sortBy } = filters;
   const { page = 1, pageSize = 20 } = pagination;
+  const Sequelize = require('sequelize');
 
   // Validate pagination parameters
   const limit = Math.min(Math.max(parseInt(pageSize) || 20, 1), 100);
@@ -333,20 +334,125 @@ async function getTasksForWinery({ wineryId, userId, userRole, filters = {}, pag
 
   const whereClause = { wineryId };
 
-  if (status) whereClause.status = status;
-  if (type) whereClause.type = type;
-  if (priority) whereClause.priority = priority;
+  // --- STANDARD FILTERS ---
+  if (status && status !== 'all') whereClause.status = status;
+  if (type && type !== 'all') whereClause.type = type;
+  if (priority && priority !== 'all') whereClause.priority = priority;
+  if (category && category !== 'all') whereClause.category = category;
+  if (sentiment && sentiment !== 'all') whereClause.sentiment = sentiment;
 
-  // RBAC: Staff can only see their assigned tasks or unassigned tasks
+  // --- DATE RANGE FILTERS ---
+  if (dateFrom || dateTo) {
+    whereClause.createdAt = {};
+    if (dateFrom) whereClause.createdAt[Op.gte] = new Date(dateFrom);
+    if (dateTo) {
+      // Set to end of day if only date provided
+      const d = new Date(dateTo);
+      d.setHours(23, 59, 59, 999);
+      whereClause.createdAt[Op.lte] = d;
+    }
+  }
+
+  if (assigneeId && assigneeId !== 'all') {
+    if (assigneeId === 'unassigned') whereClause.assigneeId = null;
+    else if (assigneeId === 'me') whereClause.assigneeId = userId; // Should already be covered by generic logic but explicit is safe
+    else whereClause.assigneeId = Number(assigneeId);
+  }
+
+  if (createdById && createdById !== 'all') {
+    if (createdById === 'system') whereClause.createdBy = null; // Assuming system is null or checks relation
+    else whereClause.createdBy = Number(createdById);
+  }
+
+  // RBAC: Staff can only see their assigned tasks or unassigned tasks (unless overridden)
   if (userRole === 'staff') {
     whereClause[Op.or] = [
       { assigneeId: userId },
       { assigneeId: null }
     ];
   } else if (assignedToMe === 'true') {
-    // Managers/Admins can filter to their own if they want
     whereClause.assigneeId = userId;
   }
+
+  // --- DEEP SEARCH ---
+  if (search && search.trim()) {
+    const term = `%${search.trim().toLowerCase()}%`;
+    const searchOp = { [Op.like]: term }; // Use ILIKE if Postgres, but LIKE is standard
+
+    // 1. Find matching Members
+    const members = await Member.findAll({
+      attributes: ['id'],
+      where: {
+        wineryId,
+        [Op.or]: [
+          { firstName: searchOp },
+          { lastName: searchOp },
+          { email: searchOp },
+          { phone: searchOp }
+        ]
+      }
+    });
+    const memberIds = members.map(m => m.id);
+
+    // 2. Find matching TaskActions (Notes)
+    // Cast details to text to search the JSON blob
+    const actions = await TaskAction.findAll({
+      attributes: ['taskId'],
+      where: {
+        actionType: 'NOTE_ADDED',
+        [Op.and]: [
+          Sequelize.where(
+            Sequelize.cast(Sequelize.col('details'), 'text'),
+            searchOp
+          )
+        ]
+      }
+    });
+    const actionTaskIds = actions.map(a => a.taskId);
+
+    // 3. Find matching Payloads (on Task itself)
+    // We can just add this to the IDs list by querying separately or part of main query
+    // Let's query separately to get IDs for clean merging
+    const payloadTasks = await Task.findAll({
+      attributes: ['id'],
+      where: {
+        wineryId,
+        [Op.and]: [
+          Sequelize.where(
+            Sequelize.cast(Sequelize.col('payload'), 'text'),
+            searchOp
+          )
+        ]
+      }
+    });
+    const payloadTaskIds = payloadTasks.map(t => t.id);
+
+    // Combine all IDs
+    const combinedIds = [...new Set([...actionTaskIds, ...payloadTaskIds])];
+
+    // Apply to Main Where Clause
+    // Logic: (Normal Filters) AND ( (ID in CombinedIds) OR (MemberID in MemberIds) )
+    // Actually we can just say: ID must be in CombinedIds OR MemberID must be in MemberIds
+    // EXCEPT we still need to respect the search term being the *restrictor*.
+    // So: MainWhere AND ( (id IN combinedIds) OR (memberId IN memberIds) )
+
+    const searchRestrictions = [];
+    if (combinedIds.length > 0) searchRestrictions.push({ id: { [Op.in]: combinedIds } });
+    if (memberIds.length > 0) searchRestrictions.push({ memberId: { [Op.in]: memberIds } });
+
+    if (searchRestrictions.length > 0) {
+      whereClause[Op.and] = [
+        ...(whereClause[Op.and] || []),
+        { [Op.or]: searchRestrictions }
+      ];
+    } else {
+      // Search term provided but nothing found? Return no results
+      whereClause.id = -1; // Hack to force empty result
+    }
+  }
+
+  // Sorting
+  const order = [['createdAt', sortBy === 'oldest' ? 'ASC' : 'DESC']];
 
   const { count, rows } = await Task.findAndCountAll({
     where: whereClause,
@@ -354,7 +460,7 @@ async function getTasksForWinery({ wineryId, userId, userRole, filters = {}, pag
       { model: Member, attributes: ['id', 'firstName', 'lastName', 'email', 'phone'] },
       { model: User, as: 'Creator', attributes: ['id', 'displayName', 'role'] },
     ],
-    order: [['createdAt', 'DESC']],
+    order: order,
     limit,
     offset
   });
