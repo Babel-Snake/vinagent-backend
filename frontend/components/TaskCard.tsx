@@ -254,10 +254,10 @@ export default function TaskCard({
                 </div>
 
                 {canAssign && (
-                    <div className="flex items-center gap-4 text-sm text-gray-500 mb-3 bg-gray-50 rounded px-3 py-2 w-fit">
-                        <span className="text-gray-500">👤 </span>
+                    <div className="flex items-center gap-2 text-sm text-gray-700 mb-3 bg-gray-50 border border-gray-200 rounded px-3 py-2 w-fit shadow-sm">
+                        <span className="font-bold text-gray-500 uppercase text-xs tracking-wide">Assign to:</span>
                         <select
-                            className="bg-transparent border-none text-sm font-medium text-gray-700 focus:ring-0 cursor-pointer hover:text-blue-600 p-0"
+                            className="bg-transparent border-none text-sm font-semibold text-gray-900 focus:ring-0 cursor-pointer hover:text-blue-600 p-0"
                             value={task.assigneeId || ''}
                             onChange={(e) => handleAssignment(e.target.value)}
                             disabled={updating}

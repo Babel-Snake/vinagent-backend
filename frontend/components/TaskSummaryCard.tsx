@@ -108,6 +108,16 @@ export default function TaskSummaryCard({
                         </button>
 
                         <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide
+                            ${task.status === 'PENDING_REVIEW' ? 'bg-yellow-100 text-yellow-800' : ''}
+                            ${task.status === 'APPROVED' ? 'bg-green-100 text-green-800' : ''}
+                            ${task.status === 'REJECTED' ? 'bg-red-100 text-red-800' : ''}
+                            ${task.status === 'EXECUTED' ? 'bg-blue-100 text-blue-800' : ''}
+                            ${task.status === 'IN_PROGRESS' ? 'bg-purple-100 text-purple-800' : ''}
+                        `}>
+                            {task.status.replace(/_/g, ' ')}
+                        </span>
+
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide
                             ${task.priority === 'high' ? 'bg-red-100 text-red-800' : ''}
                             ${task.priority === 'normal' ? 'bg-blue-50 text-blue-600' : ''}
                             ${task.priority === 'low' ? 'bg-gray-100 text-gray-500' : ''}
