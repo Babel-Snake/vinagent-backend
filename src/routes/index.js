@@ -22,6 +22,9 @@ router.use('/staff', authMiddleware, require('./staff.routes'));
 router.use('/users', authMiddleware, require('./user.routes'));
 router.use('/members', authMiddleware, require('./member.routes'));
 router.use('/winery', authMiddleware, require('./winery.routes')); // Phase 12
+
 router.use('/notifications', authMiddleware, require('./notification.routes'));
+router.use('/calendar', authMiddleware, require('./calendar.routes'));
+
 
 module.exports = router;

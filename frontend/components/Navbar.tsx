@@ -34,9 +34,14 @@ export default function Navbar({ user, fullProfile }: NavbarProps) {
                             <span className="text-xl font-bold text-indigo-600">VinAgent</span>
                         </div>
                         <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
+
                             <Link href="/tasks" className={navLinkClass(isActive('/tasks'))}>
                                 Tasks
                             </Link>
+                            <Link href="/calendar" className={navLinkClass(isActive('/calendar'))}>
+                                Calendar
+                            </Link>
+
 
                             {isManagerOrAdmin && (
                                 <>

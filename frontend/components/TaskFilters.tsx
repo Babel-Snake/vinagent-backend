@@ -29,9 +29,11 @@ export default function TaskFilters({ filters, onFilterChange, tasks, users, cur
     // Extract Unique Categories
     const uniqueCategories = Array.from(new Set(tasks.map(t => t.category).filter(Boolean))).sort();
 
-    const handleChange = (field: string, value: string) => {
+
+    const handleChange = (field: string, value: any) => {
         onFilterChange({ ...filters, [field]: value });
     };
+
 
     return (
         <div className="bg-white p-4 rounded-lg shadow mb-6">

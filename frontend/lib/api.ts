@@ -190,12 +190,15 @@ export async function autoclassifyTask(text: string, memberId?: number): Promise
     return await res.json();
 }
 
+
 export interface Staff {
     id: number;
     displayName: string;
     email: string;
     createdAt: string;
+    role?: string;
 }
+
 
 export async function createStaff(data: { username: string; password: string; }): Promise<Staff> {
     const res = await fetch(`${API_BASE}/staff`, {
@@ -410,6 +413,7 @@ export async function getFlaggedTaskIds(): Promise<number[]> {
     return data.taskIds;
 }
 
+
 export async function toggleTaskFlag(taskId: number): Promise<boolean> {
     const res = await fetch(`${API_BASE}/tasks/flags/${taskId}/toggle`, {
         method: 'POST',
@@ -419,3 +423,104 @@ export async function toggleTaskFlag(taskId: number): Promise<boolean> {
     const data = await res.json();
     return data.flagged;
 }
+
+// --- Calendar Module ---
+
+export interface CalendarEvent {
+    id: number;
+    title: string;
+    description?: string;
+    start: string;
+    end: string;
+    allDay: boolean;
+    type: 'reminder' | 'meeting' | 'task_deadline' | 'other';
+    wineryId: number;
+    createdBy: number;
+    taskId?: number;
+
+    LinkedTask?: {
+        id: number;
+        title?: string;
+        category?: string;
+        subType?: string;
+        status: string;
+        priority: string;
+    };
+
+    Creator?: {
+        id: number;
+        displayName: string;
+        email: string;
+    };
+}
+
+export async function getCalendarEvents(start: Date, end: Date): Promise<CalendarEvent[]> {
+    const params = new URLSearchParams({
+        start: start.toISOString(),
+        end: end.toISOString()
+    });
+
+    const res = await fetch(`${API_BASE}/calendar?${params.toString()}`, {
+        headers: {
+            'Authorization': await getAuthToken()
+        },
+        cache: 'no-store'
+    });
+
+
+    if (!res.ok) {
+        console.error('Calendar Fetch Error:', res.status, res.statusText, await res.text());
+        throw new Error('Failed to fetch calendar events');
+    }
+
+
+    return await res.json();
+}
+
+export async function createCalendarEvent(eventData: Partial<CalendarEvent>): Promise<CalendarEvent> {
+    const res = await fetch(`${API_BASE}/calendar`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': await getAuthToken()
+        },
+        body: JSON.stringify(eventData)
+    });
+
+    if (!res.ok) {
+        throw new Error('Failed to create calendar event');
+    }
+
+    return await res.json();
+}
+
+export async function updateCalendarEvent(id: number, eventData: Partial<CalendarEvent>): Promise<CalendarEvent> {
+    const res = await fetch(`${API_BASE}/calendar/${id}`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': await getAuthToken()
+        },
+        body: JSON.stringify(eventData)
+    });
+
+    if (!res.ok) {
+        throw new Error('Failed to update calendar event');
+    }
+
+    return await res.json();
+}
+
+export async function deleteCalendarEvent(id: number): Promise<void> {
+    const res = await fetch(`${API_BASE}/calendar/${id}`, {
+        method: 'DELETE',
+        headers: {
+            'Authorization': await getAuthToken()
+        }
+    });
+
+    if (!res.ok) {
+        throw new Error('Failed to delete calendar event');
+    }
+}
+
