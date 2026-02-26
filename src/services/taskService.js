@@ -374,10 +374,16 @@ async function getTasksForWinery({ wineryId, userId, userRole, filters = {}, pag
     whereClause.assigneeId = userId;
   }
 
+
+
+
+
   // --- DEEP SEARCH ---
   if (search && search.trim()) {
     const term = `%${search.trim().toLowerCase()}%`;
-    const searchOp = { [Op.like]: term }; // Use ILIKE if Postgres, but LIKE is standard
+    const searchOp = { [Op.like]: term };
+
+
 
     // 1. Find matching Members
     const members = await Member.findAll({
@@ -402,7 +408,7 @@ async function getTasksForWinery({ wineryId, userId, userRole, filters = {}, pag
         actionType: 'NOTE_ADDED',
         [Op.and]: [
           Sequelize.where(
-            Sequelize.cast(Sequelize.col('details'), 'text'),
+            Sequelize.cast(Sequelize.col('details'), 'char'),
             searchOp
           )
         ]
@@ -411,15 +417,13 @@ async function getTasksForWinery({ wineryId, userId, userRole, filters = {}, pag
     const actionTaskIds = actions.map(a => a.taskId);
 
     // 3. Find matching Payloads (on Task itself)
-    // We can just add this to the IDs list by querying separately or part of main query
-    // Let's query separately to get IDs for clean merging
     const payloadTasks = await Task.findAll({
       attributes: ['id'],
       where: {
         wineryId,
         [Op.and]: [
           Sequelize.where(
-            Sequelize.cast(Sequelize.col('payload'), 'text'),
+            Sequelize.cast(Sequelize.col('payload'), 'char'),
             searchOp
           )
         ]
@@ -427,35 +431,56 @@ async function getTasksForWinery({ wineryId, userId, userRole, filters = {}, pag
     });
     const payloadTaskIds = payloadTasks.map(t => t.id);
 
-    // Combine all IDs
+    // Combine explicit ID matches (from payload/notes)
     const combinedIds = [...new Set([...actionTaskIds, ...payloadTaskIds])];
 
-    // Apply to Main Where Clause
-    // Logic: (Normal Filters) AND ( (ID in CombinedIds) OR (MemberID in MemberIds) )
-    // Actually we can just say: ID must be in CombinedIds OR MemberID must be in MemberIds
-    // EXCEPT we still need to respect the search term being the *restrictor*.
-    // So: MainWhere AND ( (id IN combinedIds) OR (memberId IN memberIds) )
+    // Build the OR conditions
+    const searchOrConditions = [];
 
-    const searchRestrictions = [];
-    if (combinedIds.length > 0) searchRestrictions.push({ id: { [Op.in]: combinedIds } });
-    if (memberIds.length > 0) searchRestrictions.push({ memberId: { [Op.in]: memberIds } });
 
-    if (searchRestrictions.length > 0) {
-      whereClause[Op.and] = [
-        ...(whereClause[Op.and] || []),
-        { [Op.or]: searchRestrictions }
-      ];
-    } else {
-      // Search term provided but nothing found? Return no results
-      whereClause.id = -1; // Hack to force empty result
+    // A. ID Match (if numeric)
+    // Use strict regex to avoid matching "123 abc" as ID 123
+    const isStrictid = /^\d+$/.test(search.trim());
+    if (isStrictid) {
+      searchOrConditions.push({ id: parseInt(search.trim()) });
     }
+
+    // B. Direct Column Matches
+    searchOrConditions.push({ category: searchOp });
+    searchOrConditions.push({ subType: searchOp });
+
+    // C. Indirect Matches (Member, Note, Payload)
+    if (combinedIds.length > 0) {
+      searchOrConditions.push({ id: { [Op.in]: combinedIds } });
+    }
+    if (memberIds.length > 0) {
+      searchOrConditions.push({ memberId: { [Op.in]: memberIds } });
+    }
+
+    // Apply to Main Where Clause
+    whereClause[Op.and] = [
+      ...(whereClause[Op.and] || []),
+      { [Op.or]: searchOrConditions }
+    ];
   }
+
 
   // Sorting
   const order = [['createdAt', sortBy === 'oldest' ? 'ASC' : 'DESC']];
 
+
+  // Prioritize exact ID match if search is strictly numeric
+  if (search && /^\d+$/.test(search.trim())) {
+    const exactId = parseInt(search.trim());
+    // MySQL boolean expression: (id = val) returns 1 if true, 0 if false. DESC puts 1 (match) first.
+    // Use qualified column name `Task`.`id` to avoid ambiguity with joined tables
+    order.unshift([Sequelize.literal(`\`Task\`.\`id\` = ${exactId}`), 'DESC']);
+  }
+
+
   const { count, rows } = await Task.findAndCountAll({
     where: whereClause,
+
     include: [
       { model: Member, attributes: ['id', 'firstName', 'lastName', 'email', 'phone'] },
       { model: User, as: 'Creator', attributes: ['id', 'displayName', 'role'] },

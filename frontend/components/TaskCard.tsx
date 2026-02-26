@@ -37,6 +37,12 @@ export default function TaskCard({
     const [historyError, setHistoryError] = useState('');
     const [taskActions, setTaskActions] = useState<TaskAction[]>(task.TaskActions || []);
 
+    // Mentions state
+    const [mentionActive, setMentionActive] = useState(false);
+    const [mentionQuery, setMentionQuery] = useState('');
+    const [mentionStartIndex, setMentionStartIndex] = useState(-1);
+    const [mentionOptions, setMentionOptions] = useState<Staff[]>([]);
+
     useEffect(() => {
         if (autoExpand) {
             loadHistory();
@@ -81,6 +87,7 @@ export default function TaskCard({
         try {
             await updateTask(task.id, { notes: note });
             setNoteEdit('');
+            setMentionActive(false);
             if (historyOpen) {
                 await loadHistory();
             }
@@ -90,6 +97,47 @@ export default function TaskCard({
         } finally {
             setUpdating(false);
         }
+    }
+
+    // Handle typing in the note field to detect @mentions
+    function handleNoteChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+        const val = e.target.value;
+        const pos = e.target.selectionStart || 0;
+        setNoteEdit(val);
+
+        // Look backwards from cursor to find an @ symbol
+        const textBeforeCursor = val.substring(0, pos);
+        const match = textBeforeCursor.match(/(?:^|\s)@([a-zA-Z0-9_]*)$/);
+
+        if (match) {
+            const query = match[1].toLowerCase();
+            const startIndex = pos - query.length - 1; // -1 for the '@'
+            setMentionActive(true);
+            setMentionQuery(query);
+            setMentionStartIndex(startIndex);
+
+            // Filter users based on query
+            const filtered = users.filter(u =>
+                u.displayName && u.displayName.toLowerCase().includes(query)
+            );
+            setMentionOptions(filtered);
+        } else {
+            setMentionActive(false);
+        }
+    }
+
+    function insertMention(user: Staff) {
+        if (mentionStartIndex === -1 || !user.displayName) return;
+
+        const beforeMention = noteEdit.substring(0, mentionStartIndex);
+        const afterCursor = noteEdit.substring(mentionStartIndex + mentionQuery.length + 1); // +1 for '@'
+
+        // Ensure strictly one space after name, replace any existing spaces right after the cursor
+        const newText = beforeMention + `@${user.displayName} ` + afterCursor.replace(/^\s+/, '');
+
+        setNoteEdit(newText);
+        setMentionActive(false);
+        // We ideally want to refocus and reset cursor here, but standard state update works fine for basic UX
     }
 
     async function loadHistory() {
@@ -339,11 +387,30 @@ export default function TaskCard({
                     {/* Add Note */}
                     <div className="mb-2 flex gap-2 items-start">
                         <div className="flex-1 relative">
+                            {/* Mention Dropdown */}
+                            {mentionActive && mentionOptions.length > 0 && (
+                                <div className="absolute bottom-full mb-1 left-0 w-64 max-h-48 overflow-y-auto bg-white border border-gray-200 shadow-lg rounded-md z-50 divide-y divide-gray-100">
+                                    <div className="px-3 py-1.5 text-xs font-semibold text-gray-500 bg-gray-50 sticky top-0">
+                                        Mention Staff
+                                    </div>
+                                    {mentionOptions.map(user => (
+                                        <button
+                                            key={user.id}
+                                            className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-blue-50 focus:bg-blue-50 focus:outline-none transition-colors"
+                                            onClick={() => insertMention(user)}
+                                        >
+                                            <div className="font-medium text-gray-900">{user.displayName}</div>
+                                            <div className="text-xs text-gray-500">{user.role || 'Staff'}</div>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+
                             <textarea
                                 className="w-full text-sm p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none pr-24 min-h-[50px] resize-none"
                                 value={noteEdit}
-                                onChange={e => setNoteEdit(e.target.value)}
-                                placeholder="Add a note..."
+                                onChange={handleNoteChange}
+                                placeholder="Add a note... (type @ to mention)"
                                 rows={1}
                             />
                             <div className="absolute bottom-1.5 right-1.5">
