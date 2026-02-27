@@ -263,8 +263,8 @@ async function extractMemberFromText(text, wineryId) {
             const member = await Member.findOne({
                 where: {
                     wineryId,
-                    firstName: { [Op.iLike]: firstName },
-                    lastName: { [Op.iLike]: lastName }
+                    firstName: { [Op.like]: firstName },
+                    lastName: { [Op.like]: lastName }
                 }
             });
 

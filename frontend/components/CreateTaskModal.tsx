@@ -135,12 +135,70 @@ export default function CreateTaskModal({ onClose, onCreated }: CreateTaskModalP
                     </>
                 ) : (
                     <>
-                        <div className="bg-blue-50 p-4 rounded mb-4">
+                        <div className="bg-blue-50 p-4 rounded mb-4 overflow-y-auto max-h-[60vh]">
+                            <div className="mb-4">
+                                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Task Details / Original Request</label>
+                                <textarea
+                                    className="w-full text-sm p-2 border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                    rows={4}
+                                    value={text}
+                                    onChange={e => setText(e.target.value)}
+                                />
+                            </div>
+
+                            <div className="mb-4 p-3 bg-white border border-gray-200 rounded">
+                                <label className="block text-xs font-bold text-gray-700 uppercase mb-2">Linked Member</label>
+                                {selectedMember ? (
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <div className="text-sm font-semibold text-gray-900">{selectedMember.firstName} {selectedMember.lastName}</div>
+                                            <div className="text-xs text-gray-500">{selectedMember.phone || selectedMember.email || 'No contact info'}</div>
+                                        </div>
+                                        <button
+                                            onClick={() => setSelectedMember(null)}
+                                            className="text-xs text-red-600 hover:text-red-800 font-medium"
+                                        >
+                                            Remove
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="relative">
+                                        <input
+                                            type="text"
+                                            placeholder="Search to link a member..."
+                                            className="w-full text-sm p-2 border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                            value={memberQuery}
+                                            onChange={e => setMemberQuery(e.target.value)}
+                                        />
+                                        {searchingMember && <div className="absolute right-2 top-2 text-xs text-gray-400">Searching...</div>}
+
+                                        {members.length > 0 && (
+                                            <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 shadow-lg rounded-md max-h-48 overflow-y-auto">
+                                                {members.map(m => (
+                                                    <button
+                                                        key={m.id}
+                                                        className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 focus:bg-blue-50 border-b border-gray-100 last:border-0"
+                                                        onClick={() => {
+                                                            setSelectedMember(m);
+                                                            setMemberQuery('');
+                                                            setMembers([]);
+                                                        }}
+                                                    >
+                                                        <div className="font-medium text-gray-900">{m.firstName} {m.lastName}</div>
+                                                        <div className="text-xs text-gray-500">{m.phone || m.email}</div>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
                             <div className="mb-3">
                                 <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Title</label>
                                 <input
                                     type="text"
-                                    className="w-full text-sm border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                    className="w-full text-sm p-2 border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
                                     value={title}
                                     onChange={e => setTitle(e.target.value)}
                                 />
