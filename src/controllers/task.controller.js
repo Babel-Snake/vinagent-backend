@@ -101,10 +101,36 @@ async function updateTask(req, res, next) {
     }
 }
 
+async function updateNotePrivacy(req, res, next) {
+    try {
+        const { wineryId, userId, role } = req.user;
+        const { id, actionId } = req.params;
+        const { updateTaskNoteSchema } = require('../utils/validation');
+        const validUpdates = validate(updateTaskNoteSchema, req.body);
+
+        const action = await taskService.updateNotePrivacy({
+            taskId: id,
+            actionId,
+            wineryId,
+            userId,
+            userRole: role,
+            isPrivate: validUpdates.isPrivate
+        });
+
+        res.json({ action });
+    } catch (err) {
+        if (err.message === 'Task Action not found') {
+            return next(new AppError('Note not found', 404, 'NOT_FOUND'));
+        }
+        next(err);
+    }
+}
+
 module.exports = {
     listTasks,
     getTask,
     createTask,
     updateTask,
-    autoclassify
+    autoclassify,
+    updateNotePrivacy
 };

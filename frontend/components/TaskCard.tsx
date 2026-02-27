@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Task, TaskAction, getTask, updateTask, Staff, toggleTaskFlag } from '../lib/api';
+import { Task, TaskAction, getTask, updateTask, updateNotePrivacy, Staff, toggleTaskFlag } from '../lib/api';
 
 interface TaskCardProps {
     task: Task;
@@ -9,6 +9,7 @@ interface TaskCardProps {
     onRefresh: () => void;
     canAssign?: boolean;
     userRole?: string | null;
+    currentUserId?: number | null;
     isFlagged?: boolean;
     highlighted?: boolean;
     onToggleFlag?: (taskId: number) => void;
@@ -21,6 +22,7 @@ export default function TaskCard({
     onRefresh,
     canAssign = true,
     userRole,
+    currentUserId,
     isFlagged = false,
     highlighted = false,
     onToggleFlag,
@@ -32,6 +34,7 @@ export default function TaskCard({
     const [channelEdit, setChannelEdit] = useState(task.suggestedChannel || 'email');
     const [expandedActions, setExpandedActions] = useState(false);
     const [noteEdit, setNoteEdit] = useState('');
+    const [isPrivateNote, setIsPrivateNote] = useState(false);
     const [historyOpen, setHistoryOpen] = useState(autoExpand);
     const [historyLoading, setHistoryLoading] = useState(false);
     const [historyError, setHistoryError] = useState('');
@@ -85,8 +88,9 @@ export default function TaskCard({
         if (!note) return;
         setUpdating(true);
         try {
-            await updateTask(task.id, { notes: note });
+            await updateTask(task.id, { notes: note, isPrivateNote } as any);
             setNoteEdit('');
+            setIsPrivateNote(false);
             setMentionActive(false);
             if (historyOpen) {
                 await loadHistory();
@@ -97,6 +101,33 @@ export default function TaskCard({
         } finally {
             setUpdating(false);
         }
+    }
+
+    async function handleToggleNotePrivacy(actionId: number, currentIsPrivate: boolean) {
+        setUpdating(true);
+        try {
+            await updateNotePrivacy(task.id, actionId, !currentIsPrivate);
+            await loadHistory();
+        } catch (err: any) {
+            alert('Failed to toggle note privacy: ' + err.message);
+        } finally {
+            setUpdating(false);
+        }
+    }
+
+    function canSeePrivateNote(action: TaskAction): boolean {
+        // Managers/admins always see everything
+        if (userRole === 'manager' || userRole === 'admin') return true;
+        // Author can always see their own note
+        if (currentUserId && action.userId === currentUserId) return true;
+        // If user is @tagged in the note text
+        if (currentUserId) {
+            const currentUser = users.find(u => u.id === currentUserId);
+            if (currentUser?.displayName && action.details?.note) {
+                if (action.details.note.includes(`@${currentUser.displayName}`)) return true;
+            }
+        }
+        return false;
     }
 
     // Handle typing in the note field to detect @mentions
@@ -175,9 +206,31 @@ export default function TaskCard({
 
     function renderActionDetails(action: TaskAction) {
         if (action.actionType === 'NOTE_ADDED' && action.details?.note) {
+            const noteIsPrivate = action.details.isPrivate === true;
+            const canToggle = userRole === 'manager' || userRole === 'admin' || (currentUserId && action.userId === currentUserId);
+
             return (
-                <div className="mt-2 text-sm text-gray-800 bg-yellow-50 border border-yellow-200 rounded p-3 italic">
-                    "{action.details.note}"
+                <div className={`mt-2 text-sm rounded p-3 ${noteIsPrivate ? 'bg-red-50 border border-red-200 text-gray-800' : 'bg-yellow-50 border border-yellow-200 text-gray-800'}`}>
+                    <div className="flex items-center justify-between gap-2">
+                        <div className="italic flex-1">
+                            "{action.details.note}"
+                        </div>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                            {noteIsPrivate && (
+                                <span className="text-xs font-bold text-red-500 uppercase tracking-wide">Private</span>
+                            )}
+                            {canToggle && (
+                                <button
+                                    onClick={() => handleToggleNotePrivacy(action.id, noteIsPrivate)}
+                                    disabled={updating}
+                                    className={`p-1 rounded text-xs hover:bg-gray-200 transition-colors ${noteIsPrivate ? 'text-red-500' : 'text-gray-400'}`}
+                                    title={noteIsPrivate ? 'Make Public' : 'Make Private'}
+                                >
+                                    {noteIsPrivate ? '🔒' : '🔓'}
+                                </button>
+                            )}
+                        </div>
+                    </div>
                 </div>
             );
         }
@@ -368,6 +421,13 @@ export default function TaskCard({
                                 <div className="space-y-4">
                                     {taskActions
                                         .filter(a => a.actionType !== 'TASK_CREATED' && a.actionType !== 'MANUAL_CREATED')
+                                        .filter(a => {
+                                            // Hide private notes the user shouldn't see
+                                            if (a.actionType === 'NOTE_ADDED' && a.details?.isPrivate) {
+                                                return canSeePrivateNote(a);
+                                            }
+                                            return true;
+                                        })
                                         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
                                         .map(action => (
                                             <div key={action.id} className="text-sm flex flex-col items-start bg-gray-50/50 p-3 rounded-lg border border-gray-100">
@@ -413,7 +473,15 @@ export default function TaskCard({
                                 placeholder="Add a note... (type @ to mention)"
                                 rows={1}
                             />
-                            <div className="absolute bottom-1.5 right-1.5">
+                            <div className="absolute bottom-1.5 right-1.5 flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsPrivateNote(!isPrivateNote)}
+                                    className={`p-1.5 rounded-md text-xs font-bold transition-colors ${isPrivateNote ? 'bg-red-100 text-red-600 hover:bg-red-200' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}
+                                    title={isPrivateNote ? 'Note will be Private (only tagged users & managers can see)' : 'Note will be Public (everyone can see)'}
+                                >
+                                    {isPrivateNote ? '🔒 Private' : '🔓 Public'}
+                                </button>
                                 <button
                                     onClick={handleAddNote}
                                     disabled={updating || !noteEdit.trim()}

@@ -14,4 +14,7 @@ router.get('/:id', taskController.getTask);
 // Updates (including approval) - controller handles role check for status=APPROVED
 router.patch('/:id', taskController.updateTask);
 
+// Note Privacy Toggle
+router.patch('/:id/notes/:actionId', taskController.updateNotePrivacy);
+
 module.exports = router;

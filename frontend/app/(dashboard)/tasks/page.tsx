@@ -162,6 +162,7 @@ export default function TasksPage() {
                     taskId={activeTaskId}
                     users={users}
                     userRole={userRole}
+                    currentUserId={currentUserId}
                     onClose={handleCloseModal}
                     onRefresh={loadTasks}
                     isFlagged={flaggedTaskIds.includes(activeTaskId)}

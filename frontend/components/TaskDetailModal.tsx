@@ -8,6 +8,7 @@ interface TaskDetailModalProps {
     taskId: number;
     users: Staff[];
     userRole: string | null;
+    currentUserId?: number | null;
     onClose: () => void;
     onRefresh: () => void;
     isFlagged?: boolean;
@@ -18,6 +19,7 @@ export default function TaskDetailModal({
     taskId,
     users,
     userRole,
+    currentUserId,
     onClose,
     onRefresh,
     isFlagged,
@@ -91,6 +93,7 @@ export default function TaskDetailModal({
                                 task={task}
                                 users={users}
                                 userRole={userRole}
+                                currentUserId={currentUserId}
                                 onRefresh={() => {
                                     onRefresh();
                                     // Reload this modal's data too

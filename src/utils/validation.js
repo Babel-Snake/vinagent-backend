@@ -91,7 +91,12 @@ const createTaskSchema = Joi.object({
     // Suggested Reply Fields
     suggestedReplyBody: Joi.string().max(2000).allow(''),
     suggestedChannel: Joi.string().valid(...CHANNELS),
-    suggestedReplySubject: Joi.string().max(200).allow('')
+    suggestedReplySubject: Joi.string().max(200).allow(''),
+    isPrivateNote: Joi.boolean().default(false)
+});
+
+const updateTaskNoteSchema = Joi.object({
+    isPrivate: Joi.boolean().required()
 });
 
 const updateTaskSchema = Joi.object({
@@ -111,7 +116,8 @@ const updateTaskSchema = Joi.object({
     suggestedReplySubject: Joi.string().max(200).allow(''),
     assigneeId: Joi.number().integer().positive().allow(null),
     parentTaskId: Joi.number().integer().positive().allow(null),
-    regenerateSuggestedReply: Joi.boolean()
+    regenerateSuggestedReply: Joi.boolean(),
+    isPrivateNote: Joi.boolean()
 }).min(1);
 
 const autoclassifySchema = Joi.object({
@@ -194,6 +200,7 @@ module.exports = {
     validateStatusTransition,
     createTaskSchema,
     updateTaskSchema,
+    updateTaskNoteSchema,
     autoclassifySchema,
     smsWebhookSchema,
     emailWebhookSchema,

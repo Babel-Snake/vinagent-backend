@@ -141,7 +141,8 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
     const {
       status, payload, priority, notes, suggestedReplyBody,
       category, subType, sentiment, assigneeId, parentTaskId,
-      suggestedChannel, suggestedReplySubject, regenerateSuggestedReply
+      suggestedChannel, suggestedReplySubject, regenerateSuggestedReply,
+      isPrivateNote
     } = updates;
 
     // --- LAYER 2: STATUS TRANSITION GUARD ---
@@ -263,12 +264,17 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
 
     // Notes
     if (notes) {
+      const detailsObj = { note: notes };
+      if (isPrivateNote) {
+        detailsObj.isPrivate = true;
+      }
+
       await auditService.logTaskAction({
         transaction: t,
         taskId: task.id,
         userId,
         actionType: 'NOTE_ADDED',
-        details: { note: notes }
+        details: detailsObj
       });
       noteAdded = true;
 
@@ -541,8 +547,43 @@ module.exports = {
   createTask,
   updateTask,
   getTasksForWinery,
-  getTaskById
+  getTaskById,
+  updateNotePrivacy
 };
+
+/**
+ * Toggle the isPrivate flag on an existing NOTE_ADDED TaskAction.
+ * Only the note author or a manager/admin can toggle.
+ */
+async function updateNotePrivacy({ taskId, actionId, wineryId, userId, userRole, isPrivate }) {
+  const { TaskAction } = require('../models');
+
+  // Verify the task belongs to this winery
+  const task = await Task.findOne({ where: { id: taskId, wineryId } });
+  if (!task) throw new Error('Task not found');
+
+  const action = await TaskAction.findOne({
+    where: { id: actionId, taskId, actionType: 'NOTE_ADDED' }
+  });
+  if (!action) throw new Error('Task Action not found');
+
+  // Only the author or a manager/admin can toggle privacy
+  if (action.userId !== userId && userRole === 'staff') {
+    const err = new Error('Only the note author or a manager can change note privacy.');
+    err.statusCode = 403;
+    err.code = 'FORBIDDEN';
+    throw err;
+  }
+
+  const details = action.details || {};
+  details.isPrivate = isPrivate;
+  action.details = details;
+  action.changed('details', true); // Force Sequelize to detect JSON change
+  await action.save();
+
+  logger.info('Note privacy toggled', { actionId, taskId, isPrivate, userId });
+  return action;
+}
 
 /**
  * Helper to process text for user mentions

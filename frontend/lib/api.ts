@@ -134,6 +134,24 @@ export async function updateTask(taskId: number, updates: Partial<Task>): Promis
     return data.task;
 }
 
+export async function updateNotePrivacy(taskId: number, actionId: number, isPrivate: boolean): Promise<any> {
+    const res = await fetch(`${API_BASE}/tasks/${taskId}/notes/${actionId}`, {
+        method: 'PATCH',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': await getAuthToken()
+        },
+        body: JSON.stringify({ isPrivate })
+    });
+
+    if (!res.ok) {
+        throw new Error('Failed to update note privacy');
+    }
+
+    const data = await res.json();
+    return data.action;
+}
+
 export async function getTask(taskId: number): Promise<Task> {
     const res = await fetch(`${API_BASE}/tasks/${taskId}`, {
         headers: {
