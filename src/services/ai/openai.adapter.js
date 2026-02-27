@@ -53,8 +53,22 @@ ${memberContextString || 'Unknown Visitor'}
 
 **Classification Rules:**
 Return a JSON object with the following fields:
-- category: One of [BOOKING, ORDER, ACCOUNT, GENERAL, OPERATIONS, INTERNAL, SYSTEM]
-- subType: A specific intent (e.g., ORDER_SHIPPING_DELAY, OPERATIONS_SUPPLY_REQUEST). Infer from context.
+- category: MUST be one of the following exact strings:
+    - BOOKING: Any request to make, change, cancel, or inquire about a tasting, tour, or visit.
+    - ORDER: Anything related to purchasing wine, shipping updates, tracking, damaged goods, modifying an existing order, or postponing wine club orders.
+    - ACCOUNT: Managing customer details, address changes, updating payment methods, or login/password issues.
+    - OPERATIONS: Internal winery issues, maintenance, broken equipment, or staff supplies.
+    - INTERNAL: Reminders and follow-ups between staff.
+    - SYSTEM: Automated alerts from the software.
+    - GENERAL: General questions that do not fit any of the above (e.g., "What time do you open?", "Are you dog friendly?"). Do NOT use GENERAL if the user mentions orders, shipping, addresses, or bookings.
+
+- subType: A specific intent string. Preferably use one of these standards, or invent a clear one if none fit:
+    - Booking: BOOKING_NEW, BOOKING_CHANGE, BOOKING_CANCELLATION, BOOKING_INQUIRY
+    - Order: ORDER_NEW, ORDER_MODIFICATION, ORDER_SHIPPING_DELAY, ORDER_STATUS, ORDER_REPLACEMENT_REQUEST, ORDER_POSTPONE
+    - Account: ACCOUNT_ADDRESS_CHANGE, ACCOUNT_PAYMENT_ISSUE, ACCOUNT_LOGIN_ISSUE
+    - Operations: OPERATIONS_SUPPLY_REQUEST, OPERATIONS_MAINTENANCE_REQUEST, OPERATIONS_ESCALATION
+    - General: GENERAL_ENQUIRY, GENERAL_FEEDBACK
+
 - sentiment: One of [POSITIVE, NEUTRAL, NEGATIVE]
 - priority: [low, normal, high] (High if angry, urgent, or payment issue)
 - summary: A brief 1-sentence summary of the request.
