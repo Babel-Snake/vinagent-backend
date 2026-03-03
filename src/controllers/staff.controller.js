@@ -1,5 +1,5 @@
 const admin = require('../config/firebase');
-const { User, Winery } = require('../models');
+const { User, Winery, sequelize } = require('../models');
 const AppError = require('../utils/AppError');
 
 /**
@@ -94,12 +94,125 @@ exports.listStaff = async (req, res, next) => {
         const staffMembers = await User.findAll({
             where: {
                 wineryId: requester.wineryId,
-                role: 'staff'
             },
-            attributes: ['id', 'displayName', 'email', 'createdAt']
+            attributes: ['id', 'displayName', 'email', 'createdAt', 'role', 'isActive']
         });
 
         res.json({ staff: staffMembers });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * Update a staff member's details (currently just displayName).
+ */
+exports.updateStaff = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { displayName, email, role, isActive } = req.body;
+        const requester = req.user;
+
+        if (!requester.wineryId) {
+            throw new AppError('User not associated with a winery.', 400, 'WINERY_REQUIRED');
+        }
+
+        const staffToUpdate = await User.findByPk(id);
+        if (!staffToUpdate) {
+            throw new AppError('Staff member not found.', 404, 'NOT_FOUND');
+        }
+
+        // Verify staff belongs to manager's winery
+        if (staffToUpdate.wineryId !== requester.wineryId) {
+            throw new AppError('Unauthorized to modify this staff member.', 403, 'FORBIDDEN');
+        }
+
+        // Protect Admins
+        if (staffToUpdate.role === 'admin') {
+            throw new AppError('Cannot modify admin accounts through this endpoint.', 403, 'INVALID_ROLE');
+        }
+
+        // Validate new role
+        if (role && role !== 'staff' && role !== 'manager') {
+            throw new AppError('Invalid role specified. Must be staff or manager.', 400, 'INVALID_ROLE');
+        }
+
+        const fbUpdates = {};
+        if (displayName !== undefined) fbUpdates.displayName = displayName;
+        if (email !== undefined) fbUpdates.email = email;
+        if (isActive !== undefined) fbUpdates.disabled = !isActive;
+
+        if (Object.keys(fbUpdates).length > 0) {
+            // 1. Update Firebase
+            await admin.auth().updateUser(staffToUpdate.firebaseUid, fbUpdates);
+        }
+
+        // 2. Update Database
+        if (displayName !== undefined) staffToUpdate.displayName = displayName;
+        if (email !== undefined) staffToUpdate.email = email;
+        if (role !== undefined) staffToUpdate.role = role;
+        if (isActive !== undefined) staffToUpdate.isActive = isActive;
+
+        await staffToUpdate.save();
+
+        res.json({
+            message: 'Staff updated successfully.',
+            staff: {
+                id: staffToUpdate.id,
+                displayName: staffToUpdate.displayName,
+                email: staffToUpdate.email,
+                role: staffToUpdate.role,
+                isActive: staffToUpdate.isActive
+            }
+        });
+
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * Delete a staff member.
+ */
+exports.deleteStaff = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const requester = req.user;
+
+        if (!requester.wineryId) {
+            throw new AppError('User not associated with a winery.', 400, 'WINERY_REQUIRED');
+        }
+
+        const staffToDelete = await User.findByPk(id);
+        if (!staffToDelete) {
+            throw new AppError('Staff member not found.', 404, 'NOT_FOUND');
+        }
+
+        // Verify staff belongs to manager's winery
+        if (staffToDelete.wineryId !== requester.wineryId) {
+            throw new AppError('Unauthorized to delete this staff member.', 403, 'FORBIDDEN');
+        }
+
+        // Protect Admins
+        if (staffToDelete.role === 'admin') {
+            throw new AppError('Cannot delete admin accounts through this endpoint.', 403, 'INVALID_ROLE');
+        }
+
+        // 1. Delete from Firebase
+        try {
+            await admin.auth().deleteUser(staffToDelete.firebaseUid);
+        } catch (fbError) {
+            // If user doesn't exist in firebase but does in DB, we should still allow DB deletion to clean up
+            if (fbError.code !== 'auth/user-not-found') {
+                throw fbError;
+            }
+        }
+
+        // 2. Delete from Database
+        await staffToDelete.destroy();
+
+        res.json({ message: 'Staff member deleted successfully.' });
+
     } catch (error) {
         next(error);
     }

@@ -12,4 +12,10 @@ router.post('/', requireRole(['manager', 'admin']), staffController.createStaff)
 // List staff (GET /api/staff) - Manager/Admin only
 router.get('/', requireRole(['manager', 'admin']), staffController.listStaff);
 
+// Update staff (PUT /api/staff/:id) - Manager/Admin only
+router.put('/:id', requireRole(['manager', 'admin']), staffController.updateStaff);
+
+// Delete staff (DELETE /api/staff/:id) - Manager/Admin only
+router.delete('/:id', requireRole(['manager', 'admin']), staffController.deleteStaff);
+
 module.exports = router;

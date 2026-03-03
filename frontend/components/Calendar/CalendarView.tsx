@@ -2,8 +2,8 @@
 'use client';
 
 
-import { useState, useEffect, useCallback } from 'react';
-import { Calendar, dateFnsLocalizer, Views } from 'react-big-calendar';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Calendar, dateFnsLocalizer, Views, EventProps } from 'react-big-calendar';
 import { format, parse, startOfWeek, getDay } from 'date-fns';
 import { enUS } from 'date-fns/locale';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
@@ -114,6 +114,40 @@ export default function CalendarView({ userRole, users }: CalendarViewProps) {
         };
     };
 
+    // Custom event component: shows a clickable task icon for task-linked events
+    const calendarComponents = useMemo(() => ({
+        event: ({ event }: EventProps<CalendarEvent>) => {
+            const hasTask = !!(event as CalendarEvent).taskId;
+            return (
+                <span className="rbc-custom-event" style={{ display: 'flex', alignItems: 'center', gap: '4px', width: '100%' }}>
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {event.title}
+                    </span>
+                    {hasTask && (
+                        <span
+                            role="button"
+                            title="Open linked task"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedTaskForPopup((event as CalendarEvent).taskId!);
+                            }}
+                            style={{
+                                cursor: 'pointer',
+                                fontSize: '0.85em',
+                                flexShrink: 0,
+                                opacity: 0.9,
+                                lineHeight: 1,
+                                padding: '0 2px',
+                            }}
+                        >
+                            📋
+                        </span>
+                    )}
+                </span>
+            );
+        },
+    }), []);
+
     return (
         <div className="h-[calc(100vh-100px)] bg-white p-4 rounded-lg shadow">
             {loading && <div className="text-center text-sm text-gray-500 mb-2">Loading events...</div>}
@@ -133,6 +167,7 @@ export default function CalendarView({ userRole, users }: CalendarViewProps) {
                 onView={handleViewChange}
                 eventPropGetter={eventStyleGetter}
                 views={['month', 'week', 'day', 'agenda']}
+                components={calendarComponents}
             />
 
             {showEventModal && (

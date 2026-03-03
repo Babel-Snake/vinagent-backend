@@ -215,6 +215,7 @@ export interface Staff {
     email: string;
     createdAt: string;
     role?: string;
+    isActive?: boolean;
 }
 
 
@@ -235,6 +236,39 @@ export async function createStaff(data: { username: string; password: string; })
 
     const json = await res.json();
     return json.staff;
+}
+
+export async function updateStaff(id: number, data: { displayName?: string; email?: string; role?: string; isActive?: boolean }): Promise<Staff> {
+    const res = await fetch(`${API_BASE}/staff/${id}`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': await getAuthToken()
+        },
+        body: JSON.stringify(data)
+    });
+
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || err.message || 'Failed to update staff');
+    }
+
+    const json = await res.json();
+    return json.staff;
+}
+
+export async function deleteStaff(id: number): Promise<void> {
+    const res = await fetch(`${API_BASE}/staff/${id}`, {
+        method: 'DELETE',
+        headers: {
+            'Authorization': await getAuthToken()
+        }
+    });
+
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || err.message || 'Failed to delete staff');
+    }
 }
 
 export async function resolveStaff(username: string): Promise<{ email: string; wineryId: number }> {
