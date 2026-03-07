@@ -21,4 +21,9 @@ router.delete('/products/:id', protect, requireRole(['manager', 'admin']), winer
 router.post('/faqs', protect, requireRole(['manager', 'admin']), wineryController.createFAQ);
 router.delete('/faqs/:id', protect, requireRole(['manager', 'admin']), wineryController.deleteFAQ);
 
+// SOPs
+router.post('/sops', protect, requireRole(['manager', 'admin']), wineryController.createSop);
+router.put('/sops/:id', protect, requireRole(['manager', 'admin']), wineryController.updateSop);
+router.delete('/sops/:id', protect, requireRole(['manager', 'admin']), wineryController.deleteSop);
+
 module.exports = router;

@@ -15,6 +15,10 @@ module.exports = (sequelize, DataTypes) => {
         emailFromAddress: DataTypes.STRING,
         channelsEnabled: DataTypes.JSON,
         kioskModeEnabled: { type: DataTypes.BOOLEAN, defaultValue: false },
+        posProvider: { type: DataTypes.STRING, defaultValue: 'other' },
+        crmProvider: { type: DataTypes.STRING, defaultValue: 'other' },
+        bookingProvider: { type: DataTypes.STRING, defaultValue: 'other' },
+        deliveryProvider: { type: DataTypes.STRING, defaultValue: 'other' },
         planTier: { type: DataTypes.ENUM('basic', 'advanced'), defaultValue: 'basic' }
     }, {
         sequelize,

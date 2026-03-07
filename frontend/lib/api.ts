@@ -439,6 +439,41 @@ export async function deleteFAQ(id: number): Promise<any> {
     return await res.json();
 }
 
+export async function createSOP(data: any): Promise<any> {
+    const res = await fetch(`${API_BASE}/winery/sops`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': await getAuthToken()
+        },
+        body: JSON.stringify(data)
+    });
+    if (!res.ok) throw new Error('Failed to create SOP');
+    return await res.json();
+}
+
+export async function updateSOP(id: number, data: any): Promise<any> {
+    const res = await fetch(`${API_BASE}/winery/sops/${id}`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': await getAuthToken()
+        },
+        body: JSON.stringify(data)
+    });
+    if (!res.ok) throw new Error('Failed to update SOP');
+    return await res.json();
+}
+
+export async function deleteSOP(id: number): Promise<any> {
+    const res = await fetch(`${API_BASE}/winery/sops/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': await getAuthToken() }
+    });
+    if (!res.ok) throw new Error('Failed to delete SOP');
+    return await res.json();
+}
+
 export async function getNotifications(): Promise<Notification[]> {
     const res = await fetch(`${API_BASE}/notifications`, {
         headers: { 'Authorization': await getAuthToken() }

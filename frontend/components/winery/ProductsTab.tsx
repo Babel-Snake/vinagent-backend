@@ -13,7 +13,8 @@ export function ProductsTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
         stockStatus: 'IN_STOCK',
         tastingNotes: '',
         keySellingPoints: '', // Comma separated for input convenience
-        pairingSuggestions: ''
+        pairingSuggestions: '',
+        awards: ''
     });
     const [loading, setLoading] = useState(false);
 
@@ -40,7 +41,8 @@ export function ProductsTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
                 stockStatus: 'IN_STOCK',
                 tastingNotes: '',
                 keySellingPoints: '',
-                pairingSuggestions: ''
+                pairingSuggestions: '',
+                awards: ''
             });
             onUpdate();
         } catch (e) {
@@ -148,6 +150,11 @@ export function ProductsTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
                     <div className="sm:col-span-6">
                         <label className="block text-sm font-medium text-gray-700">Selling Points (Comma separated)</label>
                         <input type="text" value={newProduct.keySellingPoints} onChange={e => setNewProduct({ ...newProduct, keySellingPoints: e.target.value })} placeholder="Gold Medal 2023, Organic, Single Vineyard" className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" />
+                    </div>
+
+                    <div className="sm:col-span-6">
+                        <label className="block text-sm font-medium text-gray-700">Awards/Accolades</label>
+                        <input type="text" value={newProduct.awards} onChange={e => setNewProduct({ ...newProduct, awards: e.target.value })} placeholder="Gold Medal, 95pts" className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" />
                     </div>
 
                     <div className="sm:col-span-6">

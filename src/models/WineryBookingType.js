@@ -10,6 +10,7 @@ module.exports = (sequelize, DataTypes) => {
     WineryBookingType.init({
         wineryId: { type: DataTypes.INTEGER, allowNull: false },
         name: { type: DataTypes.STRING, allowNull: false },
+        description: DataTypes.TEXT,
         durationMinutes: DataTypes.INTEGER,
         priceCents: { type: DataTypes.INTEGER, defaultValue: 0 },
         currency: { type: DataTypes.STRING, defaultValue: 'AUD' },

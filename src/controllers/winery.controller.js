@@ -1,12 +1,12 @@
 const {
     Winery, WineryBrandProfile, WineryBookingsConfig,
     WineryBookingType, WineryProduct, WineryPolicyProfile,
-    WineryFAQItem, WineryIntegrationConfig
+    WineryFAQItem, WineryIntegrationConfig, WinerySop
 } = require('../models');
 const AppError = require('../utils/AppError');
 const {
     validate, wineryBrandSchema, wineryBookingsSchema,
-    wineryPolicySchema, wineryIntegrationSchema
+    wineryPolicySchema, wineryIntegrationSchema, winerySopSchema
 } = require('../utils/validation');
 
 // --- GET FULL PROFILE ---
@@ -21,6 +21,7 @@ exports.getWinery = async (req, res, next) => {
                 { model: WineryProduct, as: 'products' }, // Include inactive for admin
                 { model: WineryPolicyProfile, as: 'policyProfile' },
                 { model: WineryFAQItem, as: 'faqs' },
+                { model: WinerySop, as: 'sops' },
                 { model: WineryIntegrationConfig, as: 'integrationConfig' }
             ]
         });
@@ -126,6 +127,33 @@ exports.deleteFAQ = async (req, res, next) => {
         const { id } = req.params;
         // Handle Rename: if user hits /policies endpoint, it might route here
         await WineryFAQItem.destroy({ where: { id, wineryId: req.user.wineryId } });
+        res.json({ success: true });
+    } catch (err) { next(err); }
+};
+
+// --- CRUD: SOPS ---
+exports.createSop = async (req, res, next) => {
+    try {
+        const payload = validate(winerySopSchema, req.body);
+        const sop = await WinerySop.create({ ...payload, wineryId: req.user.wineryId });
+        res.status(201).json({ success: true, data: sop });
+    } catch (err) { next(err); }
+};
+
+exports.updateSop = async (req, res, next) => {
+    try {
+        const payload = validate(winerySopSchema, req.body);
+        const sop = await WinerySop.findOne({ where: { id: req.params.id, wineryId: req.user.wineryId } });
+        if (!sop) throw new AppError('SOP not found', 404, 'NOT_FOUND');
+        await sop.update(payload);
+        res.json({ success: true, data: sop });
+    } catch (err) { next(err); }
+};
+
+exports.deleteSop = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        await WinerySop.destroy({ where: { id, wineryId: req.user.wineryId } });
         res.json({ success: true });
     } catch (err) { next(err); }
 };

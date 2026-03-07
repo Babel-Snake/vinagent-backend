@@ -19,7 +19,7 @@ export function BookingsTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
     });
 
     // Quick Add for Booking Type
-    const [newType, setNewType] = useState({ name: '', priceCents: 0 });
+    const [newType, setNewType] = useState({ name: '', description: '', priceCents: 0 });
 
     const [saving, setSaving] = useState(false);
 
@@ -39,7 +39,7 @@ export function BookingsTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
         if (!newType.name) return;
         try {
             await createBookingType(newType);
-            setNewType({ name: '', priceCents: 0 });
+            setNewType({ name: '', description: '', priceCents: 0 });
             onUpdate();
         } catch (e) { alert('Failed to creating type'); }
     };
@@ -104,6 +104,7 @@ export function BookingsTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
                                 <div>
                                     <p className="text-sm font-medium text-indigo-600 truncate">{type.name}</p>
                                     <p className="text-sm text-gray-500">{type.priceCents > 0 ? `$${(type.priceCents / 100).toFixed(2)}` : 'Free'}</p>
+                                    {type.description && <p className="text-sm text-gray-600 mt-1 max-w-2xl">{type.description}</p>}
                                 </div>
                                 <button onClick={() => handleDeleteType(type.id)} className="text-red-600 hover:text-red-900 text-sm">Delete</button>
                             </li>
@@ -113,18 +114,32 @@ export function BookingsTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
                 </div>
 
                 {/* Simple Add Form */}
-                <form onSubmit={handleAddType} className="flex gap-4 items-end bg-gray-50 p-4 rounded-lg">
-                    <div className="flex-grow">
-                        <label className="block text-sm font-medium text-gray-700">New Experience Name</label>
-                        <input type="text" required value={newType.name} onChange={e => setNewType({ ...newType, name: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" />
+                <form onSubmit={handleAddType} className="flex flex-col gap-4 bg-gray-50 p-4 rounded-lg">
+                    <div className="flex gap-4 items-start w-full">
+                        <div className="flex-grow">
+                            <label className="block text-sm font-medium text-gray-700">New Experience Name</label>
+                            <input type="text" required value={newType.name} onChange={e => setNewType({ ...newType, name: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">Price (Cents)</label>
+                            <input type="number" value={newType.priceCents} onChange={e => setNewType({ ...newType, priceCents: parseInt(e.target.value) })} className="mt-1 block w-24 rounded-md border-gray-300 shadow-sm border p-2" />
+                        </div>
                     </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">Price (Cents)</label>
-                        <input type="number" value={newType.priceCents} onChange={e => setNewType({ ...newType, priceCents: parseInt(e.target.value) })} className="mt-1 block w-24 rounded-md border-gray-300 shadow-sm border p-2" />
+                    <div className="w-full">
+                        <label className="block text-sm font-medium text-gray-700">Description</label>
+                        <textarea
+                            rows={2}
+                            value={newType.description}
+                            onChange={e => setNewType({ ...newType, description: e.target.value })}
+                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
+                            placeholder="Optional short description of what's included..."
+                        />
                     </div>
-                    <button type="submit" className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700">
-                        Add
-                    </button>
+                    <div className="flex justify-end">
+                        <button type="submit" className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700">
+                            Add Experience
+                        </button>
+                    </div>
                 </form>
             </div>
         </div>

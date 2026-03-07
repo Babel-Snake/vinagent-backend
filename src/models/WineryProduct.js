@@ -20,6 +20,7 @@ module.exports = (sequelize, DataTypes) => {
         tastingNotes: DataTypes.TEXT,
         keySellingPoints: DataTypes.JSON,
         pairingSuggestions: DataTypes.TEXT,
+        awards: DataTypes.TEXT,
         isFeatured: { type: DataTypes.BOOLEAN, defaultValue: false },
         isActive: { type: DataTypes.BOOLEAN, defaultValue: true }
     }, {

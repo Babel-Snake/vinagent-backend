@@ -1,18 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { updatePolicyProfile, createFAQ, deleteFAQ } from '../../lib/api';
+import { createFAQ, deleteFAQ, createSOP, updateSOP, deleteSOP } from '../../lib/api';
 
 export function PoliciesTab({ winery, onUpdate }: { winery: any, onUpdate: () => void }) {
-    // 1. Policy Profile (Long text fields)
-    const profile = winery.policyProfile || {};
-    const [profileForm, setProfileForm] = useState({
-        shippingTimeframesText: profile.shippingTimeframesText || '',
-        returnsRefundsPolicyText: profile.returnsRefundsPolicyText || '',
-        wineClubSummary: profile.wineClubSummary || '',
-        accessibilityNotes: profile.accessibilityNotes || '',
-        eventPolicy: profile.eventPolicy || ''
-    });
+    // 1. SOPs (Dynamic List)
+    const sops = winery.sops || [];
+    const [newSOP, setNewSOP] = useState({ title: '', body: '' });
+    const [editingSOP, setEditingSOP] = useState<any>(null);
 
     // 2. FAQs (List)
     const faqs = winery.faqs || [];
@@ -20,15 +15,34 @@ export function PoliciesTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
 
     const [saving, setSaving] = useState(false);
 
-    const handleProfileSubmit = async (e: React.FormEvent) => {
+    const handleCreateSOP = async (e: React.FormEvent) => {
         e.preventDefault();
         setSaving(true);
         try {
-            await updatePolicyProfile(profileForm);
-            alert('Policies Saved!');
+            await createSOP(newSOP);
+            setNewSOP({ title: '', body: '' });
             onUpdate();
-        } catch (e) { alert('Failed to save policies'); }
+        } catch (e) { alert('Failed to create SOP'); }
         finally { setSaving(false); }
+    };
+
+    const handleUpdateSOP = async (e: React.FormEvent, id: number) => {
+        e.preventDefault();
+        setSaving(true);
+        try {
+            await updateSOP(id, { title: editingSOP.title, body: editingSOP.body });
+            setEditingSOP(null);
+            onUpdate();
+        } catch (e) { alert('Failed to update SOP'); }
+        finally { setSaving(false); }
+    };
+
+    const handleDeleteSOP = async (id: number) => {
+        if (!confirm('Delete this SOP?')) return;
+        try {
+            await deleteSOP(id);
+            onUpdate();
+        } catch (e) { alert('Failed'); }
     };
 
     const handleCreateFAQ = async (e: React.FormEvent) => {
@@ -51,27 +65,46 @@ export function PoliciesTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
 
     return (
         <div className="space-y-8">
-            {/* Policy Profile Form */}
-            <form onSubmit={handleProfileSubmit} className="bg-white p-6 rounded-lg border border-gray-200 space-y-6">
+            {/* SOP Manager */}
+            <div className="space-y-4">
                 <h3 className="text-lg font-medium text-gray-900">Standard Operating Policies</h3>
 
-                <div>
-                    <label className="block text-sm font-medium text-gray-700">Shipping Timeframes</label>
-                    <textarea rows={2} value={profileForm.shippingTimeframesText} onChange={e => setProfileForm({ ...profileForm, shippingTimeframesText: e.target.value })} className="block w-full rounded-md border-gray-300 shadow-sm border p-2" />
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-gray-700">Returns & Refunds</label>
-                    <textarea rows={2} value={profileForm.returnsRefundsPolicyText} onChange={e => setProfileForm({ ...profileForm, returnsRefundsPolicyText: e.target.value })} className="block w-full rounded-md border-gray-300 shadow-sm border p-2" />
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-gray-700">Wine Club Summary</label>
-                    <textarea rows={2} value={profileForm.wineClubSummary} onChange={e => setProfileForm({ ...profileForm, wineClubSummary: e.target.value })} className="block w-full rounded-md border-gray-300 shadow-sm border p-2" />
-                </div>
+                {sops.map((sop: any) => (
+                    <div key={sop.id} className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm relative group">
+                        <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity flex space-x-2">
+                            <button onClick={() => setEditingSOP(sop)} className="text-blue-500 hover:text-blue-700 text-xs">Edit</button>
+                            <button onClick={() => handleDeleteSOP(sop.id)} className="text-red-500 hover:text-red-700 text-xs">Delete</button>
+                        </div>
+                        {editingSOP?.id === sop.id ? (
+                            <form onSubmit={(e) => handleUpdateSOP(e, sop.id)} className="space-y-2 mt-2">
+                                <input type="text" required value={editingSOP.title} onChange={e => setEditingSOP({ ...editingSOP, title: e.target.value })} className="block w-full rounded-md border-gray-300 shadow-sm border p-2 font-medium" />
+                                <textarea rows={3} required value={editingSOP.body} onChange={e => setEditingSOP({ ...editingSOP, body: e.target.value })} className="block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm" />
+                                <div className="flex space-x-2">
+                                    <button type="submit" disabled={saving} className="inline-flex py-1 px-3 border border-transparent text-xs font-medium rounded text-white bg-indigo-600 hover:bg-indigo-700">Save</button>
+                                    <button type="button" onClick={() => setEditingSOP(null)} className="inline-flex py-1 px-3 border border-gray-300 text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50">Cancel</button>
+                                </div>
+                            </form>
+                        ) : (
+                            <>
+                                <h4 className="text-sm font-semibold text-gray-900">{sop.title}</h4>
+                                <p className="text-sm text-gray-600 mt-1 whitespace-pre-wrap">{sop.body}</p>
+                            </>
+                        )}
+                    </div>
+                ))}
 
-                <button type="submit" disabled={saving} className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400">
-                    {saving ? 'Saving...' : 'Save Policies'}
-                </button>
-            </form>
+                {/* Add SOP */}
+                <form onSubmit={handleCreateSOP} className="bg-gray-50 p-4 rounded-lg flex flex-col gap-4 border border-dashed border-gray-300 shadow-sm">
+                    <h4 className="text-sm font-medium text-gray-700">Add New Policy</h4>
+                    <input type="text" placeholder="Policy Title (e.g. Shipping Timeframes)" required value={newSOP.title} onChange={e => setNewSOP({ ...newSOP, title: e.target.value })} className="block w-full rounded-md border-gray-300 shadow-sm border p-2" />
+                    <textarea rows={3} placeholder="Policy Body" required value={newSOP.body} onChange={e => setNewSOP({ ...newSOP, body: e.target.value })} className="block w-full rounded-md border-gray-300 shadow-sm border p-2" />
+                    <div className="flex justify-end">
+                        <button type="submit" disabled={saving} className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400">
+                            {saving ? 'Adding...' : 'Add Policy'}
+                        </button>
+                    </div>
+                </form>
+            </div>
 
             {/* FAQ Manager */}
             <div className="space-y-4">

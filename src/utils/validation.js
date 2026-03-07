@@ -184,13 +184,22 @@ const wineryPolicySchema = Joi.object({
     eventPolicy: Joi.string().max(2000).allow('')
 });
 
+const winerySopSchema = Joi.object({
+    title: Joi.string().required().max(200),
+    body: Joi.string().required().max(5000)
+});
+
 const wineryIntegrationSchema = Joi.object({
-    smsProvider: Joi.string().valid('twilio', 'other').default('twilio'),
+    smsProvider: Joi.string().valid('twilio', 'messagemedia', 'other').default('twilio'),
     smsFromNumber: Joi.string().max(20).allow(''),
-    emailProvider: Joi.string().valid('sendgrid', 'other').default('sendgrid'),
+    emailProvider: Joi.string().valid('sendgrid', 'mailgun', 'ses', 'other').default('sendgrid'),
     emailFromAddress: Joi.string().email().allow(''),
     channelsEnabled: Joi.array().items(Joi.string()).optional(),
-    kioskModeEnabled: Joi.boolean()
+    kioskModeEnabled: Joi.boolean(),
+    posProvider: Joi.string().valid('square', 'shopify', 'vend', 'lightspeed', 'other').default('other'),
+    crmProvider: Joi.string().valid('commerce7', 'winedirect', 'ecellar', 'other').default('other'),
+    bookingProvider: Joi.string().valid('sevenrooms', 'resy', 'opentable', 'nowbookit', 'other').default('other'),
+    deliveryProvider: Joi.string().valid('auspost', 'shippit', 'startrack', 'other').default('other')
     // planTier excluded for security (admin only via billing)
 });
 
@@ -208,6 +217,7 @@ module.exports = {
     wineryBrandSchema,
     wineryBookingsSchema,
     wineryPolicySchema,
+    winerySopSchema,
     wineryIntegrationSchema,
     VALID_STATUS_TRANSITIONS,
     CATEGORIES,
