@@ -474,6 +474,68 @@ export async function deleteSOP(id: number): Promise<any> {
     return await res.json();
 }
 
+// --- Customer/Member Module ---
+
+export async function getCustomers(filters: any = {}): Promise<any> {
+    const params = new URLSearchParams();
+    if (filters.q) params.append('q', filters.q);
+    if (filters.source && filters.source !== 'all') params.append('source', filters.source);
+    if (filters.loyaltyTier && filters.loyaltyTier !== 'all') params.append('loyaltyTier', filters.loyaltyTier);
+    if (filters.isWineClubMember) params.append('isWineClubMember', 'true');
+    if (filters.sortBy) params.append('sortBy', filters.sortBy);
+    if (filters.page) params.append('page', filters.page.toString());
+
+    const res = await fetch(`${API_BASE}/members?${params.toString()}`, {
+        headers: { 'Authorization': await getAuthToken() },
+        cache: 'no-store'
+    });
+    if (!res.ok) throw new Error('Failed to fetch customers');
+    return await res.json();
+}
+
+export async function getCustomer(id: number): Promise<any> {
+    const res = await fetch(`${API_BASE}/members/${id}`, {
+        headers: { 'Authorization': await getAuthToken() }
+    });
+    if (!res.ok) throw new Error('Failed to fetch customer');
+    return await res.json();
+}
+
+export async function createCustomer(data: any): Promise<any> {
+    const res = await fetch(`${API_BASE}/members`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': await getAuthToken()
+        },
+        body: JSON.stringify(data)
+    });
+    if (!res.ok) throw new Error('Failed to create customer');
+    return await res.json();
+}
+
+export async function updateCustomer(id: number, data: any): Promise<any> {
+    const res = await fetch(`${API_BASE}/members/${id}`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': await getAuthToken()
+        },
+        body: JSON.stringify(data)
+    });
+    if (!res.ok) throw new Error('Failed to update customer');
+    return await res.json();
+}
+
+export async function deleteCustomer(id: number): Promise<void> {
+    const res = await fetch(`${API_BASE}/members/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': await getAuthToken() }
+    });
+    if (!res.ok) throw new Error('Failed to delete customer');
+}
+
+
 export async function getNotifications(): Promise<Notification[]> {
     const res = await fetch(`${API_BASE}/notifications`, {
         headers: { 'Authorization': await getAuthToken() }

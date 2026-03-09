@@ -203,6 +203,57 @@ const wineryIntegrationSchema = Joi.object({
     // planTier excluded for security (admin only via billing)
 });
 
+// --- MEMBER SCHEMAS ---
+
+const MEMBER_SOURCES = ['manual', 'sms', 'email', 'booking', 'wine_club', 'pos', 'import', 'website', 'referral', 'walk_in'];
+const LOYALTY_TIERS = ['none', 'bronze', 'silver', 'gold', 'platinum'];
+const CONTACT_METHODS = ['email', 'sms', 'phone', 'any'];
+
+const winePreferencesSchema = Joi.object({
+    varietals: Joi.array().items(Joi.string()).optional(),
+    styles: Joi.array().items(Joi.string()).optional(),
+    priceRange: Joi.object({
+        min: Joi.number().min(0),
+        max: Joi.number().min(0)
+    }).optional(),
+    dietaryNotes: Joi.string().max(500).allow('').optional()
+}).optional();
+
+const createMemberSchema = Joi.object({
+    firstName: Joi.string().required().max(100),
+    lastName: Joi.string().required().max(100),
+    email: Joi.string().email().allow('', null),
+    phone: Joi.string().max(30).allow('', null),
+    addressLine1: Joi.string().max(200).allow('', null),
+    addressLine2: Joi.string().max(200).allow('', null),
+    suburb: Joi.string().max(100).allow('', null),
+    state: Joi.string().max(50).allow('', null),
+    postcode: Joi.string().max(20).allow('', null),
+    country: Joi.string().max(50).default('Australia'),
+    dateOfBirth: Joi.date().iso().allow(null),
+    gender: Joi.string().max(20).allow('', null),
+    preferredLanguage: Joi.string().max(10).default('en'),
+    source: Joi.string().valid(...MEMBER_SOURCES).default('manual'),
+    externalRef: Joi.string().max(200).allow('', null),
+    winePreferences: winePreferencesSchema,
+    lifetimeSpend: Joi.number().min(0).default(0),
+    totalOrders: Joi.number().integer().min(0).default(0),
+    visitCount: Joi.number().integer().min(0).default(0),
+    lastContactAt: Joi.date().iso().allow(null),
+    lastVisitAt: Joi.date().iso().allow(null),
+    lastPurchaseAt: Joi.date().iso().allow(null),
+    loyaltyTier: Joi.string().valid(...LOYALTY_TIERS).default('none'),
+    isWineClubMember: Joi.boolean().default(false),
+    tags: Joi.array().items(Joi.string()).optional(),
+    preferredContactMethod: Joi.string().valid(...CONTACT_METHODS).default('any'),
+    marketingOptIn: Joi.boolean().default(false),
+    notes: Joi.string().max(5000).allow('', null)
+});
+
+const updateMemberSchema = createMemberSchema.fork(
+    ['firstName', 'lastName'],
+    (schema) => schema.optional()
+).min(1);
 
 module.exports = {
     validate,
@@ -219,6 +270,8 @@ module.exports = {
     wineryPolicySchema,
     winerySopSchema,
     wineryIntegrationSchema,
+    createMemberSchema,
+    updateMemberSchema,
     VALID_STATUS_TRANSITIONS,
     CATEGORIES,
     STATUSES
