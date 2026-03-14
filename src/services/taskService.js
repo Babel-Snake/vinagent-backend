@@ -330,15 +330,27 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
  * Get tasks for a winery with filtering and pagination
  */
 async function getTasksForWinery({ wineryId, userId, userRole, filters = {}, pagination = {} }) {
-  const { status, type, priority, assignedToMe, category, sentiment, assigneeId, createdById, search, dateFrom, dateTo, sortBy } = filters;
+  const { status, type, priority, assignedToMe, category, sentiment, assigneeId, createdById, search, dateFrom, dateTo, sortBy, showOnlyFlagged } = filters;
   const { page = 1, pageSize = 20 } = pagination;
   const Sequelize = require('sequelize');
+  const { UserTaskFlag } = require('../models');
 
   // Validate pagination parameters
   const limit = Math.min(Math.max(parseInt(pageSize) || 20, 1), 100);
   const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
 
   const whereClause = { wineryId };
+
+  // --- FLAG FILTER ---
+  if (showOnlyFlagged === 'true' || showOnlyFlagged === true) {
+    const flags = await UserTaskFlag.findAll({ where: { userId } });
+    const flaggedIds = flags.map(f => f.taskId);
+    if (flaggedIds.length === 0) {
+      // If none flagged by user, return empty instantly
+      return { tasks: [], pagination: { page: 1, pageSize: limit, total: 0, totalPages: 0 }};
+    }
+    whereClause.id = { [Op.in]: flaggedIds };
+  }
 
   // --- STANDARD FILTERS ---
   if (status && status !== 'all') whereClause.status = status;

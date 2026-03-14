@@ -84,8 +84,6 @@ export default function TaskSummaryCard({
 
                         {/* Meta Row */}
                         <div className="flex items-center gap-3 text-xs text-gray-400 mt-1">
-                            <span>#{task.id}</span>
-                            <span>•</span>
                             <span>{formatDate(task.createdAt)}</span>
                             <span>•</span>
                             <span className={`font-medium ${!task.assigneeId ? 'text-red-400' : 'text-gray-500'}`}>

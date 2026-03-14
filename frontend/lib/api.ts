@@ -100,6 +100,7 @@ export async function fetchTasks(filters: any = {}): Promise<Task[]> {
     if (filters.sortBy) params.append('sortBy', filters.sortBy);
     if (filters.dateFrom) params.append('dateFrom', filters.dateFrom);
     if (filters.dateTo) params.append('dateTo', filters.dateTo);
+    if (filters.showOnlyFlagged) params.append('showOnlyFlagged', String(filters.showOnlyFlagged));
 
     const res = await fetch(`${API_BASE}/tasks?${params.toString()}`, {
         headers: {
@@ -543,6 +544,18 @@ export async function getNotifications(): Promise<Notification[]> {
     if (!res.ok) throw new Error('Failed to fetch notifications');
     const data = await res.json();
     return data.notifications;
+}
+
+// --- Analytics ---
+
+export async function getAnalytics(period = 'month', offset = 0): Promise<any> {
+    const params = new URLSearchParams({ period, offset: offset.toString() });
+    const res = await fetch(`${API_BASE}/analytics?${params.toString()}`, {
+        headers: { 'Authorization': await getAuthToken() },
+        cache: 'no-store'
+    });
+    if (!res.ok) throw new Error('Failed to fetch analytics');
+    return await res.json();
 }
 
 export async function markNotificationRead(id: number): Promise<void> {

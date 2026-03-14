@@ -335,7 +335,6 @@ export default function TaskCard({
                         </span>
                     )}
 
-                    <span className="text-sm text-gray-400">#{task.id}</span>
                     <span className="text-sm text-gray-400">{new Date(task.createdAt).toLocaleString()}</span>
                     <span className="text-sm text-gray-500 italic">by {task.Creator ? task.Creator.displayName : 'System'}</span>
                 </div>

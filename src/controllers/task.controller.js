@@ -6,13 +6,16 @@ const { validate, createTaskSchema, updateTaskSchema, autoclassifySchema } = req
 async function listTasks(req, res, next) {
     try {
         const { wineryId, role, id: userId } = req.user;
-        const { status, type, priority, assignedToMe, category, sentiment, assigneeId, createdById, search, dateFrom, dateTo, sortBy, page, pageSize } = req.query;
+        const { status, type, priority, assignedToMe, category, sentiment, assigneeId, createdById, search, dateFrom, dateTo, sortBy, showOnlyFlagged, page, pageSize } = req.query;
+
+        // DEBUG LOGGING
+        require('fs').appendFileSync('debug-query.txt', new Date().toISOString() + ' - req.query: ' + JSON.stringify(req.query) + '\\n');
 
         const result = await taskService.getTasksForWinery({
             wineryId,
             userId,
             userRole: role,
-            filters: { status, type, priority, assignedToMe, category, sentiment, assigneeId, createdById, search, dateFrom, dateTo, sortBy },
+            filters: { status, type, priority, assignedToMe, category, sentiment, assigneeId, createdById, search, dateFrom, dateTo, sortBy, showOnlyFlagged },
             pagination: { page, pageSize }
         });
 
