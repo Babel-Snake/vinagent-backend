@@ -101,6 +101,7 @@ export async function fetchTasks(filters: any = {}): Promise<Task[]> {
     if (filters.dateFrom) params.append('dateFrom', filters.dateFrom);
     if (filters.dateTo) params.append('dateTo', filters.dateTo);
     if (filters.showOnlyFlagged) params.append('showOnlyFlagged', String(filters.showOnlyFlagged));
+    if (filters.mentionedMe) params.append('mentionedMe', String(filters.mentionedMe));
 
     const res = await fetch(`${API_BASE}/tasks?${params.toString()}`, {
         headers: {

@@ -25,6 +25,7 @@ export default function TasksPage() {
         createdById: 'all',
         search: '',
         showOnlyFlagged: false,
+        mentionedMe: false,
         sortBy: 'newest',
         dateFrom: '',
         dateTo: '',

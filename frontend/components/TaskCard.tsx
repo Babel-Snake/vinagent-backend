@@ -283,79 +283,86 @@ export default function TaskCard({
     return (
         <div
             id={`task-${task.id}`}
-            className={`bg-white shadow rounded-lg p-6 flex flex-col md:flex-row items-start justify-between gap-4 transition-all duration-500 ${highlighted ? 'ring-2 ring-blue-500 bg-blue-50/30' : ''}`}
+            className={`bg-white shadow-sm border-y border-r border-l-4 border-gray-100 rounded-xl p-6 lg:p-8 flex flex-col items-start gap-4 transition-all duration-500 
+                ${highlighted ? 'ring-2 ring-blue-500 bg-blue-50/30' : ''}
+                ${task.priority === 'high' ? 'border-l-red-500' : ''}
+                ${task.priority === 'normal' || !task.priority ? 'border-l-amber-500' : ''}
+                ${task.priority === 'low' ? 'border-l-blue-400' : ''}
+            `}
         >
             <div className="flex-1 w-full">
                 {/* Header */}
-                <div className="flex items-center gap-3 mb-2 flex-wrap">
-                    <button
-                        onClick={onToggleStar}
-                        className={`text-xl focus:outline-none transition-transform hover:scale-125 ${isFlagged ? 'text-yellow-400' : 'text-gray-300'}`}
-                        title={isFlagged ? "Unflag" : "Flag for follow-up"}
-                    >
-                        {isFlagged ? '★' : '☆'}
-                    </button>
-
-                    <span className={`px-2 py-1 rounded text-xs font-bold uppercase tracking-wide
-                        ${task.priority === 'high' ? 'bg-red-100 text-red-800' : ''}
-                        ${task.priority === 'normal' ? 'bg-blue-50 text-blue-600' : ''}
-                        ${task.priority === 'low' ? 'bg-gray-100 text-gray-500' : ''}
-                    `}>
-                        {task.priority || 'NORMAL'}
-                    </span>
-
-                    <span className={`px-2 py-1 rounded text-xs font-bold uppercase tracking-wide
-                        ${task.category === 'OPERATIONS' ? 'bg-purple-100 text-purple-800' : ''}
-                        ${task.category === 'ORDER' ? 'bg-blue-100 text-blue-800' : ''}
-                        ${task.category === 'BOOKING' ? 'bg-pink-100 text-pink-800' : ''}
-                        ${task.category === 'ACCOUNT' ? 'bg-orange-100 text-orange-800' : ''}
-                        ${task.category === 'GENERAL' ? 'bg-gray-100 text-gray-800' : ''}
+                <div className="flex items-center gap-3 mb-4 flex-wrap">
+                    <span className={`px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider
+                        ${task.category === 'OPERATIONS' ? 'bg-purple-50 text-purple-700 border border-purple-200' : ''}
+                        ${task.category === 'ORDER' ? 'bg-sky-50 text-sky-700 border border-sky-200' : ''}
+                        ${task.category === 'BOOKING' ? 'bg-pink-50 text-pink-700 border border-pink-200' : ''}
+                        ${task.category === 'ACCOUNT' ? 'bg-orange-50 text-orange-700 border border-orange-200' : ''}
+                        ${task.category === 'GENERAL' ? 'bg-gray-50 text-gray-700 border border-gray-200' : ''}
                     `}>
                         {task.category || 'GENERAL'}
                     </span>
 
-                    <span className={`px-2 py-1 rounded text-xs font-medium
-                        ${task.status === 'PENDING_REVIEW' ? 'bg-yellow-100 text-yellow-800' : ''}
-                        ${task.status === 'APPROVED' ? 'bg-green-100 text-green-800' : ''}
-                        ${task.status === 'REJECTED' ? 'bg-red-100 text-red-800' : ''}
-                        ${task.status === 'EXECUTED' ? 'bg-blue-100 text-blue-800' : ''}
-                        ${task.status === 'IN_PROGRESS' ? 'bg-purple-100 text-purple-800' : ''}
+                    <span className={`px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider
+                        ${task.status === 'PENDING_REVIEW' ? 'bg-yellow-100 text-yellow-800 border border-yellow-200' : ''}
+                        ${task.status === 'APPROVED' ? 'bg-green-100 text-green-800 border border-green-200' : ''}
+                        ${task.status === 'REJECTED' ? 'bg-red-100 text-red-800 border border-red-200' : ''}
+                        ${task.status === 'EXECUTED' ? 'bg-blue-100 text-blue-800 border border-blue-200' : ''}
+                        ${task.status === 'IN_PROGRESS' ? 'bg-purple-100 text-purple-800 border border-purple-200' : ''}
                     `}>
                         {task.status.replace('_', ' ')}
                     </span>
 
                     {task.sentiment === 'NEGATIVE' && (
-                        <span className="px-2 py-1 rounded text-xs font-bold bg-red-600 text-white animate-pulse">
+                        <span className="px-3 py-1.5 rounded-md text-xs font-bold bg-red-600 text-white animate-pulse shadow-sm">
                             NEGATIVE
                         </span>
                     )}
                     {task.sentiment === 'POSITIVE' && (
-                        <span className="px-2 py-1 rounded text-xs font-bold bg-green-600 text-white">
+                        <span className="px-3 py-1.5 rounded-md text-xs font-bold bg-green-600 text-white shadow-sm">
                             POSITIVE
                         </span>
                     )}
 
-                    <span className="text-sm text-gray-400">{new Date(task.createdAt).toLocaleString()}</span>
-                    <span className="text-sm text-gray-500 italic">by {task.Creator ? task.Creator.displayName : 'System'}</span>
+                    <div className="flex items-center gap-1.5 text-sm font-medium text-gray-500 ml-auto">
+                        <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span>{new Date(task.createdAt).toLocaleString()}</span>
+                        <span className="text-gray-300 px-1">•</span>
+                        <span className="text-gray-500">by {task.Creator ? task.Creator.displayName : 'System'}</span>
+                    </div>
                 </div>
 
-                <h3 className="text-lg font-semibold text-gray-900 mb-1">
-                    {task.subType ? task.subType.replace(/_/g, ' ') : task.type}
-                </h3>
+                <div className="flex items-center gap-3 mb-2">
+                    <button
+                        onClick={onToggleStar}
+                        className={`text-3xl focus:outline-none transition-transform hover:scale-125 ${isFlagged ? 'text-yellow-400' : 'text-gray-300'}`}
+                        title={isFlagged ? "Unflag" : "Flag for follow-up"}
+                    >
+                        {isFlagged ? '★' : '☆'}
+                    </button>
+                    <h3 className="text-2xl font-bold text-gray-900 tracking-tight">
+                        {task.subType ? task.subType.replace(/_/g, ' ') : task.type}
+                    </h3>
+                </div>
 
-                <div className="text-sm text-gray-600 mb-3">
+                <div className="text-sm mb-6">
                     {task.Member ? (
-                        <span className="font-medium text-blue-600">
-                            Member: {task.Member.firstName} {task.Member.lastName}
+                        <span className="inline-flex items-center gap-1.5 bg-gray-100 px-3 py-1 rounded-full font-semibold text-gray-700">
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                            </svg>
+                            {task.Member.firstName} {task.Member.lastName}
                         </span>
                     ) : (
-                        <span className="italic text-gray-500">Visitor / Internal</span>
+                        <span className="italic text-gray-500">Visitor / Internal Task</span>
                     )}
                 </div>
 
                 {canAssign && (
-                    <div className="flex items-center gap-2 text-sm text-gray-700 mb-3 bg-gray-50 border border-gray-200 rounded px-3 py-2 w-fit shadow-sm">
-                        <span className="font-bold text-gray-500 uppercase text-xs tracking-wide">Assign to:</span>
+                    <div className="flex items-center gap-3 text-sm text-gray-700 mb-6 bg-gray-50/80 border border-gray-200 rounded-lg px-4 py-2.5 w-fit shadow-sm">
+                        <span className="font-bold text-gray-500 uppercase text-xs tracking-wider">Assign to:</span>
                         <select
                             className="bg-transparent border-none text-sm font-semibold text-gray-900 focus:ring-0 cursor-pointer hover:text-blue-600 p-0"
                             value={task.assigneeId || ''}

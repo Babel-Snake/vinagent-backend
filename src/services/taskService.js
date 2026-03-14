@@ -330,16 +330,18 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
  * Get tasks for a winery with filtering and pagination
  */
 async function getTasksForWinery({ wineryId, userId, userRole, filters = {}, pagination = {} }) {
-  const { status, type, priority, assignedToMe, category, sentiment, assigneeId, createdById, search, dateFrom, dateTo, sortBy, showOnlyFlagged } = filters;
+  const { status, type, priority, assignedToMe, category, sentiment, assigneeId, createdById, search, dateFrom, dateTo, sortBy, showOnlyFlagged, mentionedMe } = filters;
   const { page = 1, pageSize = 20 } = pagination;
   const Sequelize = require('sequelize');
-  const { UserTaskFlag } = require('../models');
+  const { UserTaskFlag, User, TaskAction } = require('../models');
 
   // Validate pagination parameters
   const limit = Math.min(Math.max(parseInt(pageSize) || 20, 1), 100);
   const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
 
   const whereClause = { wineryId };
+  
+  let idFilters = null;
 
   // --- FLAG FILTER ---
   if (showOnlyFlagged === 'true' || showOnlyFlagged === true) {
@@ -349,7 +351,48 @@ async function getTasksForWinery({ wineryId, userId, userRole, filters = {}, pag
       // If none flagged by user, return empty instantly
       return { tasks: [], pagination: { page: 1, pageSize: limit, total: 0, totalPages: 0 }};
     }
-    whereClause.id = { [Op.in]: flaggedIds };
+    idFilters = flaggedIds;
+  }
+
+  // --- MENTIONS FILTER ---
+  if (mentionedMe === 'true' || mentionedMe === true) {
+    const currentUser = await User.findByPk(userId);
+    if (currentUser && currentUser.displayName) {
+      const mentionSearchOp = { [Op.like]: `%@${currentUser.displayName}%` };
+      const actions = await TaskAction.findAll({
+        attributes: ['taskId'],
+        where: {
+          actionType: 'NOTE_ADDED',
+          [Op.and]: [
+            Sequelize.where(
+              Sequelize.cast(Sequelize.col('details'), 'char'),
+              mentionSearchOp
+            )
+          ]
+        }
+      });
+      const actionTaskIds = [...new Set(actions.map(a => a.taskId))];
+      
+      if (actionTaskIds.length === 0) {
+        return { tasks: [], pagination: { page: 1, pageSize: limit, total: 0, totalPages: 0 }};
+      }
+      
+      if (idFilters === null) {
+        idFilters = actionTaskIds;
+      } else {
+        idFilters = idFilters.filter(id => actionTaskIds.includes(id));
+        if (idFilters.length === 0) {
+          return { tasks: [], pagination: { page: 1, pageSize: limit, total: 0, totalPages: 0 }};
+        }
+      }
+    } else {
+      // If no displayName exists, user cannot be mentioned
+      return { tasks: [], pagination: { page: 1, pageSize: limit, total: 0, totalPages: 0 }};
+    }
+  }
+
+  if (idFilters !== null) {
+    whereClause.id = { [Op.in]: idFilters };
   }
 
   // --- STANDARD FILTERS ---
