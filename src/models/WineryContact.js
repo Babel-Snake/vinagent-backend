@@ -5,6 +5,8 @@ module.exports = (sequelize, DataTypes) => {
     class WineryContact extends Model {
         static associate(models) {
             WineryContact.belongsTo(models.Winery, { foreignKey: 'wineryId' });
+            WineryContact.belongsTo(models.WineryContact, { as: 'manager', foreignKey: 'reportsToId' });
+            WineryContact.hasMany(models.WineryContact, { as: 'directReports', foreignKey: 'reportsToId' });
         }
     }
     WineryContact.init({
@@ -15,6 +17,8 @@ module.exports = (sequelize, DataTypes) => {
         phone: DataTypes.STRING,
         layer: DataTypes.STRING,
         notes: DataTypes.TEXT,
+        reportsToId: DataTypes.INTEGER,
+        responsibilities: DataTypes.TEXT,
         isActive: { type: DataTypes.BOOLEAN, defaultValue: true }
     }, {
         sequelize,

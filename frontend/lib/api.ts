@@ -332,6 +332,8 @@ export interface WineryContact {
     phone?: string;
     layer?: string;
     notes?: string;
+    reportsToId?: number;
+    responsibilities?: string;
     isActive: boolean;
     createdAt: string;
     updatedAt: string;

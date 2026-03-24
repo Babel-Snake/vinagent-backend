@@ -258,6 +258,8 @@ const wineryContactSchema = Joi.object({
     phone: Joi.string().max(30).allow('', null),
     layer: Joi.string().max(50).allow('', null),
     notes: Joi.string().max(1000).allow('', null),
+    reportsToId: Joi.number().integer().allow(null).optional(),
+    responsibilities: Joi.string().max(2000).allow('', null),
     isActive: Joi.boolean().default(true)
 });
 
