@@ -56,7 +56,7 @@ export default function TaskCard({
         setUpdating(true);
         try {
             const updates: any = { status: newStatus };
-            if (newStatus === 'APPROVED') {
+            if (newStatus === 'ACTIONED') {
                 updates.suggestedReplyBody = replyEdit;
                 updates.suggestedChannel = channelEdit;
                 updates.suggestedReplySubject = subjectEdit;
@@ -304,11 +304,9 @@ export default function TaskCard({
                     </span>
 
                     <span className={`px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider
-                        ${task.status === 'PENDING_REVIEW' ? 'bg-yellow-100 text-yellow-800 border border-yellow-200' : ''}
-                        ${task.status === 'APPROVED' ? 'bg-green-100 text-green-800 border border-green-200' : ''}
+                        ${task.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800 border border-yellow-200' : ''}
+                        ${task.status === 'ACTIONED' ? 'bg-green-100 text-green-800 border border-green-200' : ''}
                         ${task.status === 'REJECTED' ? 'bg-red-100 text-red-800 border border-red-200' : ''}
-                        ${task.status === 'EXECUTED' ? 'bg-blue-100 text-blue-800 border border-blue-200' : ''}
-                        ${task.status === 'IN_PROGRESS' ? 'bg-purple-100 text-purple-800 border border-purple-200' : ''}
                     `}>
                         {task.status.replace('_', ' ')}
                     </span>
@@ -500,7 +498,7 @@ export default function TaskCard({
                     </div>
 
                     {/* AI Suggestion Section */}
-                    {task.status === 'PENDING_REVIEW' && (
+                    {task.status === 'PENDING' && (
                         <div className="border border-blue-200 rounded-lg overflow-hidden mt-4 shadow-sm">
                             <button
                                 onClick={() => setExpandedActions(!expandedActions)}
@@ -541,7 +539,7 @@ export default function TaskCard({
                                         </div>
                                     </div>
                                     <div className="flex justify-end pt-2">
-                                        <button onClick={() => handleStatusChange('APPROVED')} disabled={updating} className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-bold shadow-sm hover:bg-blue-700">Approve & Send</button>
+                                        <button onClick={() => handleStatusChange('ACTIONED')} disabled={updating} className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-bold shadow-sm hover:bg-blue-700">Action & Send</button>
                                     </div>
                                 </div>
                             )}
@@ -553,26 +551,20 @@ export default function TaskCard({
             {/* Status Column */}
             <div className="flex flex-col gap-2 min-w-[140px] ml-4 pt-1">
                 <div className={`text-sm font-medium border rounded py-2 px-2 w-full relative
-                    ${task.status === 'APPROVED' ? 'bg-green-50 text-green-700 border-green-200' : ''}
-                    ${task.status === 'PENDING_REVIEW' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : ''}
-                    ${task.status === 'IN_PROGRESS' ? 'bg-purple-50 text-purple-700 border-purple-200' : ''}
+                    ${task.status === 'ACTIONED' ? 'bg-green-50 text-green-700 border-green-200' : ''}
+                    ${task.status === 'PENDING' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : ''}
+                    ${task.status === 'REJECTED' ? 'bg-red-50 text-red-700 border-red-200' : ''}
                 `}>
-                    {userRole === 'staff' ? (
-                        <span>{task.status.replace('_', ' ')}</span>
-                    ) : (
-                        <select
-                            className="bg-transparent border-none text-sm font-medium w-full p-0"
-                            value={task.status}
-                            onChange={(e) => handleStatusChange(e.target.value)}
-                            disabled={updating}
-                        >
-                            <option value="PENDING_REVIEW">Pending Review</option>
-                            <option value="IN_PROGRESS">In Progress</option>
-                            <option value="APPROVED">Approved</option>
-                            <option value="REJECTED">Rejected</option>
-                            <option value="EXECUTED">Executed</option>
-                        </select>
-                    )}
+                    <select
+                        className="bg-transparent border-none text-sm font-medium w-full p-0"
+                        value={task.status}
+                        onChange={(e) => handleStatusChange(e.target.value)}
+                        disabled={updating}
+                    >
+                        <option value="PENDING">Pending</option>
+                        <option value="ACTIONED">Actioned</option>
+                        {(userRole !== 'staff') && <option value="REJECTED">Rejected</option>}
+                    </select>
                 </div>
             </div>
         </div>

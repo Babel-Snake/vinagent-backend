@@ -8,6 +8,7 @@ import { BookingsTab } from '../../../components/winery/BookingsTab';
 import { ProductsTab } from '../../../components/winery/ProductsTab';
 import { PoliciesTab } from '../../../components/winery/PoliciesTab';
 import { IntegrationsTab } from '../../../components/winery/IntegrationsTab';
+import { OrganisationTab } from '../../../components/winery/OrganisationTab';
 
 export default function WineryPage() {
     const [winery, setWinery] = useState<any>(null);
@@ -19,7 +20,7 @@ export default function WineryPage() {
         try {
             setLoading(true);
             const res = await getWineryFull();
-            setWinery(res.data);
+            setWinery(res);
         } catch (e) {
             console.error(e);
             alert('Failed to load winery profile');
@@ -48,6 +49,7 @@ export default function WineryPage() {
         { id: 'bookings', label: 'Bookings' },
         { id: 'products', label: 'Products' },
         { id: 'policies', label: 'Policies & FAQs' },
+        { id: 'organisation', label: 'Organisation' },
         { id: 'integrations', label: 'Integrations' },
     ];
 
@@ -80,9 +82,10 @@ export default function WineryPage() {
                     {activeTab === 'overview' && <OverviewTab winery={winery} onUpdate={handleRefresh} />}
                     {activeTab === 'brand' && <BrandTab winery={winery} onUpdate={handleRefresh} />}
                     {activeTab === 'bookings' && <BookingsTab winery={winery} onUpdate={handleRefresh} />}
-                    {activeTab === 'products' && <ProductsTab winery={winery} onUpdate={handleRefresh} />}
-                    {activeTab === 'policies' && <PoliciesTab winery={winery} onUpdate={handleRefresh} />}
-                    {activeTab === 'integrations' && <IntegrationsTab winery={winery} onUpdate={handleRefresh} />}
+                    { activeTab === 'products' && <ProductsTab winery={winery} onUpdate={handleRefresh} /> }
+                    { activeTab === 'policies' && <PoliciesTab winery={winery} onUpdate={handleRefresh} /> }
+                    { activeTab === 'organisation' && <OrganisationTab winery={winery} onUpdate={handleRefresh} /> }
+                    { activeTab === 'integrations' && <IntegrationsTab winery={winery} onUpdate={handleRefresh} /> }
                 </div>
             </div>
         </div>

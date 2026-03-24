@@ -11,8 +11,8 @@ const aiSuggestionService = require('./aiSuggestion.service');
  * Centralizes business logic, logging, and side effects.
  */
 
-// Pre-approval payload validation per task type
-function validatePayloadForApproval(task) {
+// Pre-actioning payload validation per task type
+function validatePayloadForActioning(task) {
   const errors = [];
 
   if (task.subType === 'ACCOUNT_ADDRESS_CHANGE' || task.type === 'ADDRESS_CHANGE') {
@@ -67,7 +67,8 @@ async function createTask({ wineryId, userId, data }) {
   try {
     const {
       category, subType, customerType, type, memberId, messageId,
-      payload, priority, notes, sentiment, assigneeId, parentTaskId
+      payload, priority, notes, sentiment, assigneeId, parentTaskId,
+      initialNote
     } = data;
 
     // 1. Create Task
@@ -77,7 +78,7 @@ async function createTask({ wineryId, userId, data }) {
       subType: subType || 'INTERNAL_TASK',
       customerType: customerType || 'UNKNOWN',
       type: subType || type || 'INTERNAL_TASK', // Legacy fallback
-      status: 'PENDING_REVIEW',
+      status: 'PENDING',
       priority: priority || 'normal',
       sentiment: sentiment || 'NEUTRAL',
       payload: payload || {},
@@ -112,6 +113,25 @@ async function createTask({ wineryId, userId, data }) {
           parentTaskId,
           childTaskId: task.id
         }
+      });
+    }
+
+    // 4. Log Initial Note + Process @Mentions (if provided)
+    if (initialNote && initialNote.trim()) {
+      await auditService.logTaskAction({
+        transaction: t,
+        taskId: task.id,
+        userId,
+        actionType: 'NOTE_ADDED',
+        details: { note: initialNote.trim() }
+      });
+
+      await processMentions({
+        text: initialNote.trim(),
+        wineryId,
+        senderId: userId,
+        taskId: task.id,
+        transaction: t
       });
     }
 
@@ -155,24 +175,19 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
       }
     }
 
-    // --- LAYER 2: ROLE CHECK FOR APPROVAL ---
-    if (status === 'APPROVED' && status !== task.status) {
+    // --- LAYER 2: ROLE CHECK FOR REJECTION ---
+    if (status === 'REJECTED' && status !== task.status) {
       if (userRole === 'staff') {
-        const err = new Error('Staff cannot approve tasks.');
+        const err = new Error('Staff cannot reject tasks.');
         err.statusCode = 403;
         err.code = 'FORBIDDEN';
         throw err;
       }
-
-      // Validate payload has required fields before approval
-      const payloadErrors = validatePayloadForApproval(task);
-      if (payloadErrors.length > 0) {
-        const err = new Error(`Cannot approve: ${payloadErrors.join(', ')}`);
-        err.statusCode = 400;
-        err.code = 'INCOMPLETE_PAYLOAD';
-        throw err;
-      }
     }
+
+    // --- LAYER 2: PAYLOAD VALIDATION FOR ACTIONING ---
+    // Note: Removed hard-block. Users should be able to action tasks freely.
+    // The execution service handles missing payload data gracefully.
 
     // --- LAYER 2: STAFF CANNOT REASSIGN TASKS ---
     if (updates.assigneeId !== undefined && updates.assigneeId !== task.assigneeId) {
@@ -250,7 +265,7 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
     // Generic Update Action
     if (Object.keys(changes).length > 0) {
       let actionType = 'MANUAL_UPDATE';
-      if (changes.status === 'APPROVED') actionType = 'APPROVED';
+      if (changes.status === 'ACTIONED') actionType = 'ACTIONED';
       if (changes.status === 'REJECTED') actionType = 'REJECTED';
 
       await auditService.logTaskAction({
@@ -288,10 +303,14 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
       });
     }
 
-    // EXECUTION TRIGGER
-    if (changes.status === 'APPROVED') {
-      const settings = await WinerySettings.findOne({ where: { wineryId } });
-      await executionService.executeTask(task, t, settings);
+    // EXECUTION TRIGGER (best-effort — don't block status change if execution fails)
+    if (changes.status === 'ACTIONED') {
+      try {
+        const settings = await WinerySettings.findOne({ where: { wineryId } });
+        await executionService.executeTask(task, t, settings);
+      } catch (execErr) {
+        logger.warn('Execution skipped for task', { taskId, reason: execErr.message });
+      }
     }
 
     await t.commit();
@@ -330,7 +349,7 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
  * Get tasks for a winery with filtering and pagination
  */
 async function getTasksForWinery({ wineryId, userId, userRole, filters = {}, pagination = {} }) {
-  const { status, type, priority, assignedToMe, category, sentiment, assigneeId, createdById, search, dateFrom, dateTo, sortBy, showOnlyFlagged, mentionedMe } = filters;
+  const { status, type, priority, assignedToMe, category, sentiment, assigneeId, createdById, search, dateFrom, dateTo, sortBy, showOnlyFlagged, mentionedMe, actionedById } = filters;
   const { page = 1, pageSize = 20 } = pagination;
   const Sequelize = require('sequelize');
   const { UserTaskFlag, User, TaskAction } = require('../models');
@@ -388,6 +407,32 @@ async function getTasksForWinery({ wineryId, userId, userRole, filters = {}, pag
     } else {
       // If no displayName exists, user cannot be mentioned
       return { tasks: [], pagination: { page: 1, pageSize: limit, total: 0, totalPages: 0 }};
+    }
+  }
+
+  // --- ACTIONED BY FILTER ---
+  if (actionedById && actionedById !== 'all') {
+    const actionUserId = actionedById === 'me' ? userId : Number(actionedById);
+    const actions = await TaskAction.findAll({
+      attributes: ['taskId'],
+      where: {
+        userId: actionUserId,
+        actionType: 'ACTIONED'
+      }
+    });
+    const actionTaskIds = [...new Set(actions.map(a => a.taskId))];
+    
+    if (actionTaskIds.length === 0) {
+      return { tasks: [], pagination: { page: 1, pageSize: limit, total: 0, totalPages: 0 }};
+    }
+    
+    if (idFilters === null) {
+      idFilters = actionTaskIds;
+    } else {
+      idFilters = idFilters.filter(id => actionTaskIds.includes(id));
+      if (idFilters.length === 0) {
+        return { tasks: [], pagination: { page: 1, pageSize: limit, total: 0, totalPages: 0 }};
+      }
     }
   }
 

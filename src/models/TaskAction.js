@@ -13,10 +13,9 @@ module.exports = (sequelize, DataTypes) => {
             actionType: {
                 type: DataTypes.ENUM(
                     'CREATED',
-                    'APPROVED',
+                    'ACTIONED',
                     'REJECTED',
                     'EXECUTION_TRIGGERED',
-                    'EXECUTED',
                     'UPDATED_PAYLOAD',
                     'NOTE_ADDED',
                     'MANUAL_CREATED',

@@ -92,7 +92,7 @@ async function triageMessage(message, context = {}) {
         customerType,
         sentiment: result.sentiment,
         priority: result.priority,
-        status: 'PENDING_REVIEW',
+        status: 'PENDING',
         payload: {
             ...result.payload, // Default or existing payload
             // User wants a "brief title which encapsulates the entire thing".

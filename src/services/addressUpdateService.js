@@ -56,14 +56,14 @@ async function confirmAddress({ token, newAddress }) {
 
     // 6. Update Task status to EXECUTED (if linked)
     if (task) {
-      task.status = 'EXECUTED';
+      task.status = 'ACTIONED';
       await task.save({ transaction: t });
 
       // 7. Create TaskAction
       await TaskAction.create({
         taskId: task.id,
         userId: null, // Member action, no staff user
-        actionType: 'EXECUTED',
+        actionType: 'ACTIONED',
         details: {
           action: 'MEMBER_CONFIRMED_ADDRESS',
           tokenId: tokenRecord.id,

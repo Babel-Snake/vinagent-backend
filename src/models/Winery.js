@@ -14,6 +14,7 @@ module.exports = (sequelize, DataTypes) => {
             Winery.hasMany(models.Task, { foreignKey: 'wineryId' });
             Winery.hasOne(models.WinerySettings, { foreignKey: 'wineryId', as: 'settings' });
             Winery.hasMany(models.WineryProduct, { foreignKey: 'wineryId', as: 'products' });
+            Winery.hasMany(models.WineryContact, { foreignKey: 'wineryId', as: 'contacts' });
 
             // New Associations
             Winery.hasOne(models.WineryBrandProfile, { foreignKey: 'wineryId', as: 'brandProfile' });

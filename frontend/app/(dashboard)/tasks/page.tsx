@@ -19,10 +19,11 @@ export default function TasksPage() {
     const [filters, setFilters] = useState({
         category: 'all',
         priority: 'all',
-        status: 'PENDING_REVIEW',
+        status: 'PENDING',
         sentiment: 'all',
         assigneeId: 'all',
         createdById: 'all',
+        actionedById: 'all',
         search: '',
         showOnlyFlagged: false,
         mentionedMe: false,

@@ -41,15 +41,12 @@ module.exports = (sequelize, DataTypes) => {
       },
       status: {
         type: DataTypes.ENUM(
-          'PENDING_REVIEW',
-          'APPROVED',
-          'AWAITING_MEMBER_ACTION',
-          'REJECTED',
-          'EXECUTED',
-          'CANCELLED'
+          'PENDING',
+          'ACTIONED',
+          'REJECTED'
         ),
         allowNull: false,
-        defaultValue: 'PENDING_REVIEW'
+        defaultValue: 'PENDING'
       },
       payload: { type: DataTypes.JSON, allowNull: true },
       suggestedChannel: {

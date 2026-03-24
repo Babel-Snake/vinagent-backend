@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { autoclassifyTask, createTask, searchMembers, AutoclassifyResponse } from '../lib/api';
+import { autoclassifyTask, createTask, searchMembers, AutoclassifyResponse, getUsers, Staff } from '../lib/api';
 
 interface CreateTaskModalProps {
     onClose: () => void;
@@ -28,6 +28,17 @@ export default function CreateTaskModal({ onClose, onCreated }: CreateTaskModalP
     const [members, setMembers] = useState<any[]>([]);
     const [selectedMember, setSelectedMember] = useState<any>(null);
     const [searchingMember, setSearchingMember] = useState(false);
+
+    // Initial Note + @Mention State
+    const [initialNote, setInitialNote] = useState('');
+    const [staffList, setStaffList] = useState<Staff[]>([]);
+    const [mentionActive, setMentionActive] = useState(false);
+    const [mentionQuery, setMentionQuery] = useState('');
+
+    // Load staff list for mention autocomplete
+    useEffect(() => {
+        getUsers().then(setStaffList).catch(console.error);
+    }, []);
 
     async function handleAnalyze() {
         if (!text.trim()) return;
@@ -89,6 +100,7 @@ export default function CreateTaskModal({ onClose, onCreated }: CreateTaskModalP
                 sentiment,
                 payload: preview.payload,
                 notes: text,
+                initialNote: initialNote.trim() || undefined,
                 memberId: selectedMember?.id,
                 suggestedReplyBody: suggestedReply,
                 suggestedChannel: suggestedChannel || 'none'
@@ -256,6 +268,61 @@ export default function CreateTaskModal({ onClose, onCreated }: CreateTaskModalP
                                         <option value="POSITIVE">Positive</option>
                                         <option value="NEGATIVE">Negative</option>
                                     </select>
+                                </div>
+                            </div>
+
+                            {/* Initial Note with @Mention */}
+                            <div className="mt-4">
+                                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Initial Note (optional)</label>
+                                <div className="relative">
+                                    {mentionActive && (() => {
+                                        const filtered = staffList.filter(u =>
+                                            u.displayName && u.displayName.toLowerCase().includes(mentionQuery.toLowerCase())
+                                        );
+                                        return filtered.length > 0 ? (
+                                            <div className="absolute bottom-full mb-1 left-0 w-64 max-h-48 overflow-y-auto bg-white border border-gray-200 shadow-lg rounded-md z-50 divide-y divide-gray-100">
+                                                <div className="px-3 py-1.5 text-xs font-semibold text-gray-500 bg-gray-50 sticky top-0">Mention Staff</div>
+                                                {filtered.map(user => (
+                                                    <button
+                                                        key={user.id}
+                                                        className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-blue-50"
+                                                        onClick={() => {
+                                                            const beforeAt = initialNote.lastIndexOf('@');
+                                                            const newNote = initialNote.substring(0, beforeAt) + '@' + user.displayName + ' ';
+                                                            setInitialNote(newNote);
+                                                            setMentionActive(false);
+                                                            setMentionQuery('');
+                                                        }}
+                                                    >
+                                                        <div className="font-medium text-gray-900">{user.displayName}</div>
+                                                        <div className="text-xs text-gray-500">{user.role || 'Staff'}</div>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        ) : null;
+                                    })()}
+                                    <textarea
+                                        className="w-full text-sm p-2 border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                        rows={2}
+                                        placeholder="Add a note... (type @ to mention staff)"
+                                        value={initialNote}
+                                        onChange={e => {
+                                            const val = e.target.value;
+                                            setInitialNote(val);
+                                            const lastAt = val.lastIndexOf('@');
+                                            if (lastAt >= 0) {
+                                                const afterAt = val.substring(lastAt + 1);
+                                                if (!afterAt.includes(' ') && afterAt.length <= 30) {
+                                                    setMentionActive(true);
+                                                    setMentionQuery(afterAt);
+                                                } else {
+                                                    setMentionActive(false);
+                                                }
+                                            } else {
+                                                setMentionActive(false);
+                                            }
+                                        }}
+                                    />
                                 </div>
                             </div>
                         </div>

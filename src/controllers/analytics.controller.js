@@ -89,8 +89,8 @@ async function getAnalytics(req, res, next) {
             bookingsByDay
         ] = await Promise.all([
             // --- KPIs ---
-            Task.count({ where: { wineryId, status: { [Op.in]: ['PENDING_REVIEW', 'APPROVED'] } } }),
-            Task.count({ where: { wineryId, status: { [Op.in]: ['EXECUTED', 'CANCELLED'] }, updatedAt: periodFilter } }),
+            Task.count({ where: { wineryId, status: { [Op.in]: ['PENDING'] } } }),
+            Task.count({ where: { wineryId, status: { [Op.in]: ['ACTIONED', 'REJECTED'] }, updatedAt: periodFilter } }),
             Member.count({ where: { wineryId, createdAt: periodFilter } }),
             Member.count({ where: { wineryId } }),
             Member.count({ where: { wineryId, isWineClubMember: true } }),

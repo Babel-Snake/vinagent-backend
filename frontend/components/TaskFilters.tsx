@@ -12,6 +12,7 @@ interface TaskFiltersProps {
         search: string;
         showOnlyFlagged?: boolean;
         mentionedMe?: boolean;
+        actionedById?: string;
         sortBy?: string;
         dateRangeType?: string;
         dateFrom?: string;
@@ -62,10 +63,9 @@ export default function TaskFilters({ filters, onFilterChange, tasks, users, cur
                         onChange={(e) => handleChange('status', e.target.value)}
                     >
                         <option value="all">All Statuses</option>
-                        <option value="PENDING_REVIEW">Pending Review</option>
-                        <option value="APPROVED">Approved</option>
+                        <option value="PENDING">Pending</option>
+                        <option value="ACTIONED">Actioned</option>
                         <option value="REJECTED">Rejected</option>
-                        <option value="EXECUTED">Executed</option>
                     </select>
                 </div>
 
@@ -144,6 +144,22 @@ export default function TaskFilters({ filters, onFilterChange, tasks, users, cur
                                 <option value="all">All Staff</option>
                                 {currentUserId && <option value="me">Assigned to Me</option>}
                                 <option value="unassigned">Unassigned</option>
+                                {users.map(u => (
+                                    <option key={u.id} value={u.id}>{u.displayName}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Actioned By Filter */}
+                        <div>
+                            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Actioned By</label>
+                            <select
+                                className="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                value={filters.actionedById || 'all'}
+                                onChange={(e) => handleChange('actionedById', e.target.value)}
+                            >
+                                <option value="all">Anyone</option>
+                                {currentUserId && <option value="me">Me</option>}
                                 {users.map(u => (
                                     <option key={u.id} value={u.id}>{u.displayName}</option>
                                 ))}

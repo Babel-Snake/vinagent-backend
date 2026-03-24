@@ -4,12 +4,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { getAnalytics } from '../../../lib/api';
 
 const STATUS_LABELS: Record<string, string> = {
-    PENDING_REVIEW: 'Pending', APPROVED: 'Approved', AWAITING_MEMBER_ACTION: 'Awaiting',
-    REJECTED: 'Rejected', EXECUTED: 'Resolved', CANCELLED: 'Cancelled'
+    PENDING: 'Pending', ACTIONED: 'Actioned', REJECTED: 'Rejected'
 };
 const STATUS_COLORS: Record<string, string> = {
-    PENDING_REVIEW: '#f59e0b', APPROVED: '#3b82f6', AWAITING_MEMBER_ACTION: '#8b5cf6',
-    REJECTED: '#ef4444', EXECUTED: '#10b981', CANCELLED: '#6b7280'
+    PENDING: '#f59e0b', ACTIONED: '#10b981', REJECTED: '#ef4444'
 };
 const CATEGORY_LABELS: Record<string, string> = {
     BOOKING: 'Booking', ORDER: 'Order', ACCOUNT: 'Account', GENERAL: 'General',

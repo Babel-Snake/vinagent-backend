@@ -17,9 +17,15 @@ async function startServer() {
     }
     logger.info('Database connection established successfully.');
 
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       logger.info(`VinAgent API listening on port ${PORT}`);
     });
+
+    // Workaround for Node.js/Windows event loop premature drain when detached or in MinGW
+    setInterval(() => {
+      // Keep-alive tick
+    }, 1000 * 60 * 60 * 24);
+
   } catch (err) {
     console.error('Unable to connect to the database:', err);
     process.exit(1);

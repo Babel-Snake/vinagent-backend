@@ -1,7 +1,7 @@
 const {
     Winery, WineryBrandProfile, WineryBookingsConfig,
     WineryBookingType, WineryProduct, WineryPolicyProfile,
-    WineryFAQItem, WineryIntegrationConfig, WinerySop
+    WineryFAQItem, WineryIntegrationConfig, WinerySop, WineryContact
 } = require('../models');
 const AppError = require('../utils/AppError');
 const {
@@ -22,7 +22,8 @@ exports.getWinery = async (req, res, next) => {
                 { model: WineryPolicyProfile, as: 'policyProfile' },
                 { model: WineryFAQItem, as: 'faqs' },
                 { model: WinerySop, as: 'sops' },
-                { model: WineryIntegrationConfig, as: 'integrationConfig' }
+                { model: WineryIntegrationConfig, as: 'integrationConfig' },
+                { model: WineryContact, as: 'contacts' }
             ]
         });
 
@@ -154,6 +155,33 @@ exports.deleteSop = async (req, res, next) => {
     try {
         const { id } = req.params;
         await WinerySop.destroy({ where: { id, wineryId: req.user.wineryId } });
+        res.json({ success: true });
+    } catch (err) { next(err); }
+};
+
+// --- CRUD: CONTACTS ---
+exports.createContact = async (req, res, next) => {
+    try {
+        const payload = validate(wineryContactSchema, req.body);
+        const contact = await WineryContact.create({ ...payload, wineryId: req.user.wineryId });
+        res.status(201).json({ success: true, data: contact });
+    } catch (err) { next(err); }
+};
+
+exports.updateContact = async (req, res, next) => {
+    try {
+        const payload = validate(wineryContactSchema, req.body);
+        const contact = await WineryContact.findOne({ where: { id: req.params.id, wineryId: req.user.wineryId } });
+        if (!contact) throw new AppError('Contact not found', 404, 'NOT_FOUND');
+        await contact.update(payload);
+        res.json({ success: true, data: contact });
+    } catch (err) { next(err); }
+};
+
+exports.deleteContact = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        await WineryContact.destroy({ where: { id, wineryId: req.user.wineryId } });
         res.json({ success: true });
     } catch (err) { next(err); }
 };

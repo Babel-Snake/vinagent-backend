@@ -148,7 +148,7 @@ async function _executeAddressChange(task, transaction) {
         ? baseBody
         : `${baseBody} ${confirmationUrl}`;
 
-    task.status = 'AWAITING_MEMBER_ACTION';
+    task.status = 'PENDING'; // Still logically pending member response
     task.suggestedReplyBody = replyBody;
     await task.save({ transaction });
 
@@ -194,7 +194,7 @@ async function _executeBooking(task, transaction) {
         logger.info(`Booking created via ${result.provider}`, { reference: result.referenceCode });
 
         // Update Task with Success Info
-        task.status = 'EXECUTED';
+        task.status = 'ACTIONED';
         task.payload = { ...task.payload, bookingReference: result.referenceCode, bookingStatus: result.status };
 
         // Append Reference to Reply if it exists
@@ -208,7 +208,7 @@ async function _executeBooking(task, transaction) {
         await TaskAction.create({
             taskId: task.id,
             userId: task.updatedBy,
-            actionType: 'EXECUTED',
+            actionType: 'ACTIONED',
             details: {
                 action: 'BOOKING_CREATED',
                 provider: result.provider,
@@ -241,13 +241,13 @@ async function _executeOrderUpdate(task, transaction) {
     logger.info('Executing Order Update (Stub)', { taskId: task.id, type: task.type });
 
     // Mark as Executed
-    task.status = 'EXECUTED';
+    task.status = 'ACTIONED';
     await task.save({ transaction });
 
     await TaskAction.create({
         taskId: task.id,
         userId: task.updatedBy,
-        actionType: 'EXECUTED',
+        actionType: 'ACTIONED',
         details: { action: 'ORDER_UPDATE_STUB', note: 'Simulated execution' }
     }, { transaction });
 }

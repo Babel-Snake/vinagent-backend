@@ -46,6 +46,7 @@ export interface TaskAction {
         id: number;
         displayName: string;
         role?: string;
+        updatedAt: string;
     };
 }
 
@@ -102,6 +103,7 @@ export async function fetchTasks(filters: any = {}): Promise<Task[]> {
     if (filters.dateTo) params.append('dateTo', filters.dateTo);
     if (filters.showOnlyFlagged) params.append('showOnlyFlagged', String(filters.showOnlyFlagged));
     if (filters.mentionedMe) params.append('mentionedMe', String(filters.mentionedMe));
+  if (filters.actionedById && filters.actionedById !== 'all') params.append('actionedById', String(filters.actionedById));
 
     const res = await fetch(`${API_BASE}/tasks?${params.toString()}`, {
         headers: {
@@ -172,6 +174,7 @@ export async function getTask(taskId: number): Promise<Task> {
 
 export async function createTask(taskData: Partial<Task> & {
     notes?: string;
+    initialNote?: string;
     memberId?: number;
     suggestedReplyBody?: string;
     suggestedChannel?: string;
@@ -320,7 +323,61 @@ export async function getUsers(): Promise<Staff[]> {
 
 // --- Winery Module ---
 
-// --- Winery Module ---
+export interface WineryContact {
+    id: number;
+    wineryId: number;
+    name: string;
+    role: string;
+    email?: string;
+    phone?: string;
+    layer?: string;
+    notes?: string;
+    isActive: boolean;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface Winery {
+    id: number;
+    name: string;
+    slug: string;
+    description?: string;
+    website?: string;
+    phone?: string;
+    email?: string;
+    address?: string;
+    city?: string;
+    state?: string;
+    zip?: string;
+    country?: string;
+    logoUrl?: string;
+    bannerUrl?: string;
+    createdAt: string;
+    updatedAt: string;
+    policyProfile?: WineryPolicyProfile;
+    integrationConfig?: WineryIntegrationConfig;
+    contacts?: WineryContact[];
+}
+
+export interface WineryPolicyProfile {
+    id: number;
+    wineryId: number;
+    cancellationPolicy?: string;
+    refundPolicy?: string;
+    privacyPolicy?: string;
+    termsOfService?: string;
+    updatedAt: string;
+}
+
+export interface WineryIntegrationConfig {
+    id: number;
+    wineryId: number;
+    stripePublicKey?: string;
+    stripeSecretKey?: string;
+    mailchimpApiKey?: string;
+    mailchimpAudienceId?: string;
+    updatedAt: string;
+}
 
 export async function searchMembers(query: string): Promise<any[]> {
     const res = await fetch(`${API_BASE}/members/search?q=${encodeURIComponent(query)}`, {
@@ -337,12 +394,13 @@ export async function searchMembers(query: string): Promise<any[]> {
     return data.members;
 }
 
-export async function getWineryFull(): Promise<any> {
+export async function getWineryFull(): Promise<Winery> {
     const res = await fetch(`${API_BASE}/winery/full`, {
         headers: { 'Authorization': await getAuthToken() }
     });
     if (!res.ok) throw new Error('Failed to fetch winery profile');
-    return await res.json();
+    const json = await res.json();
+    return json.data;
 }
 
 // Section Updates
@@ -685,5 +743,44 @@ export async function deleteCalendarEvent(id: number): Promise<void> {
     if (!res.ok) {
         throw new Error('Failed to delete calendar event');
     }
+}
+
+// --- WINERY CONTACTS ---
+export async function createWineryContact(data: Partial<WineryContact>): Promise<WineryContact> {
+    const res = await fetch(`${API_BASE}/winery/contacts`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': await getAuthToken()
+        },
+        body: JSON.stringify(data)
+    });
+    if (!res.ok) throw new Error('Failed to create winery contact');
+    const json = await res.json();
+    return json.data;
+}
+
+export async function updateWineryContact(id: number, data: Partial<WineryContact>): Promise<WineryContact> {
+    const res = await fetch(`${API_BASE}/winery/contacts/${id}`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': await getAuthToken()
+        },
+        body: JSON.stringify(data)
+    });
+    if (!res.ok) throw new Error('Failed to update winery contact');
+    const json = await res.json();
+    return json.data;
+}
+
+export async function deleteWineryContact(id: number): Promise<void> {
+    const res = await fetch(`${API_BASE}/winery/contacts/${id}`, {
+        method: 'DELETE',
+        headers: {
+            'Authorization': await getAuthToken()
+        }
+    });
+    if (!res.ok) throw new Error('Failed to delete winery contact');
 }
 

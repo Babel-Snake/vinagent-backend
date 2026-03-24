@@ -19,7 +19,7 @@ const validate = (schema, data) => {
 
 // --- CONSTANTS ---
 const CATEGORIES = ['BOOKING', 'ORDER', 'ACCOUNT', 'GENERAL', 'OPERATIONS', 'INTERNAL', 'SYSTEM'];
-const STATUSES = ['PENDING_REVIEW', 'IN_PROGRESS', 'APPROVED', 'AWAITING_MEMBER_ACTION', 'REJECTED', 'EXECUTED', 'CANCELLED'];
+const STATUSES = ['PENDING', 'ACTIONED', 'REJECTED'];
 const PRIORITIES = ['low', 'normal', 'high'];
 const SENTIMENTS = ['POSITIVE', 'NEUTRAL', 'NEGATIVE'];
 const CUSTOMER_TYPES = ['MEMBER', 'VISITOR', 'UNKNOWN'];
@@ -55,13 +55,9 @@ const genericPayloadSchema = Joi.object({
 // --- STATUS TRANSITION RULES ---
 // Flexible transitions to support manager workflow via status dropdown
 const VALID_STATUS_TRANSITIONS = {
-    'PENDING_REVIEW': ['APPROVED', 'REJECTED', 'CANCELLED', 'IN_PROGRESS', 'EXECUTED'],
-    'IN_PROGRESS': ['PENDING_REVIEW', 'APPROVED', 'EXECUTED', 'CANCELLED'],
-    'APPROVED': ['EXECUTED', 'AWAITING_MEMBER_ACTION', 'CANCELLED', 'PENDING_REVIEW'],
-    'AWAITING_MEMBER_ACTION': ['EXECUTED', 'CANCELLED', 'PENDING_REVIEW'],
-    'REJECTED': ['PENDING_REVIEW', 'CANCELLED'],
-    'EXECUTED': ['PENDING_REVIEW'], // Can reopen if needed
-    'CANCELLED': ['PENDING_REVIEW']
+    'PENDING': ['ACTIONED', 'REJECTED'],
+    'ACTIONED': ['PENDING'], // Can reopen
+    'REJECTED': ['PENDING'], // Can reopen
 };
 
 function validateStatusTransition(currentStatus, newStatus) {
@@ -255,6 +251,16 @@ const updateMemberSchema = createMemberSchema.fork(
     (schema) => schema.optional()
 ).min(1);
 
+const wineryContactSchema = Joi.object({
+    name: Joi.string().required().max(100),
+    role: Joi.string().required().max(100),
+    email: Joi.string().email().allow('', null),
+    phone: Joi.string().max(30).allow('', null),
+    layer: Joi.string().max(50).allow('', null),
+    notes: Joi.string().max(1000).allow('', null),
+    isActive: Joi.boolean().default(true)
+});
+
 module.exports = {
     validate,
     validateStatusTransition,
@@ -270,6 +276,7 @@ module.exports = {
     wineryPolicySchema,
     winerySopSchema,
     wineryIntegrationSchema,
+    wineryContactSchema,
     createMemberSchema,
     updateMemberSchema,
     VALID_STATUS_TRANSITIONS,
