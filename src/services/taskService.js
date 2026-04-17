@@ -1,4 +1,4 @@
-const { Task, WinerySettings, Member, Message, User, TaskAction, Notification } = require('../models');
+const { Task, TaskStep, WinerySettings, Member, Message, User, TaskAction, Notification } = require('../models');
 const { Op } = require('sequelize');
 const executionService = require('./execution.service');
 const logger = require('../config/logger');
@@ -33,6 +33,169 @@ function validatePayloadForActioning(task) {
   return errors;
 }
 
+const ACTIVE_WORKFLOW_WAITING_ON = new Set(['CUSTOMER', 'MANAGER', 'EXTERNAL']);
+const STEP_TERMINAL_STATUSES = new Set(['COMPLETED', 'SKIPPED', 'CANCELLED']);
+
+async function getOrderedTaskSteps(taskId, transaction) {
+  return TaskStep.findAll({
+    where: { taskId },
+    order: [['sortOrder', 'ASC'], ['id', 'ASC']],
+    transaction
+  });
+}
+
+function normalizeTaskStepInput(step, index = 0, fallbackOwnerUserId = null) {
+  return {
+    title: String(step.title || `Step ${index + 1}`).trim().slice(0, 200),
+    description: step.description ? String(step.description).trim().slice(0, 4000) : null,
+    stepType: step.stepType || 'INTERNAL',
+    status: step.status || 'PENDING',
+    waitingOn: step.waitingOn || 'NONE',
+    ownerUserId: Number.isInteger(step.ownerUserId) ? step.ownerUserId : fallbackOwnerUserId,
+    dueAt: step.dueAt ? new Date(step.dueAt) : null,
+    sortOrder: Number.isInteger(step.sortOrder) ? step.sortOrder : index,
+    blockedReason: step.blockedReason ? String(step.blockedReason).trim() : null,
+    completionNotes: step.completionNotes ? String(step.completionNotes).trim() : null,
+    metadata: step.metadata || null
+  };
+}
+
+async function createTaskSteps({ taskId, steps = [], fallbackOwnerUserId, userId, transaction }) {
+  const createdSteps = [];
+
+  for (let index = 0; index < steps.length; index += 1) {
+    const stepData = normalizeTaskStepInput(steps[index], index, fallbackOwnerUserId);
+    const createdStep = await TaskStep.create({
+      taskId,
+      ...stepData,
+      createdBy: userId || null,
+      updatedBy: userId || null,
+      completedAt: stepData.status === 'COMPLETED' ? new Date() : null
+    }, { transaction });
+
+    createdSteps.push(createdStep);
+
+    await auditService.logTaskAction({
+      transaction,
+      taskId,
+      userId,
+      actionType: 'STEP_CREATED',
+      details: {
+        stepId: createdStep.id,
+        title: createdStep.title,
+        status: createdStep.status,
+        waitingOn: createdStep.waitingOn,
+        ownerUserId: createdStep.ownerUserId,
+        sortOrder: createdStep.sortOrder
+      }
+    });
+  }
+
+  return createdSteps;
+}
+
+function buildWorkflowSummary(task, steps) {
+  if (task.status === 'REJECTED') {
+    return {
+      workflowState: 'CANCELLED',
+      waitingOn: 'NONE',
+      nextStepSummary: null,
+      blockedReason: null,
+      dueAt: null,
+      resolvedAt: task.resolvedAt || new Date()
+    };
+  }
+
+  if (!steps || steps.length === 0) {
+    if (task.status === 'ACTIONED') {
+      return {
+        workflowState: 'COMPLETED',
+        waitingOn: 'NONE',
+        nextStepSummary: null,
+        blockedReason: null,
+        dueAt: null,
+        resolvedAt: task.resolvedAt || new Date()
+      };
+    }
+
+    return {
+      workflowState: task.workflowState || 'NOT_STARTED',
+      waitingOn: task.waitingOn || 'NONE',
+      nextStepSummary: task.nextStepSummary || null,
+      blockedReason: null,
+      dueAt: task.dueAt || null,
+      resolvedAt: null
+    };
+  }
+
+  const activeSteps = steps.filter(step => !STEP_TERMINAL_STATUSES.has(step.status));
+
+  if (activeSteps.length === 0) {
+    return {
+      workflowState: 'COMPLETED',
+      waitingOn: 'NONE',
+      nextStepSummary: null,
+      blockedReason: null,
+      dueAt: null,
+      resolvedAt: task.resolvedAt || new Date()
+    };
+  }
+
+  const blockedStep = activeSteps.find(step => step.status === 'BLOCKED');
+  const inProgressStep = activeSteps.find(step => step.status === 'IN_PROGRESS');
+  const nextPendingStep = activeSteps.find(step => step.status === 'PENDING');
+  const focusStep = blockedStep || inProgressStep || nextPendingStep || activeSteps[0];
+
+  let workflowState = 'NOT_STARTED';
+  if (focusStep.status === 'BLOCKED') {
+    workflowState = 'BLOCKED';
+  } else if (focusStep.status === 'IN_PROGRESS') {
+    workflowState = ACTIVE_WORKFLOW_WAITING_ON.has(focusStep.waitingOn) ? 'WAITING' : 'IN_PROGRESS';
+  } else if (ACTIVE_WORKFLOW_WAITING_ON.has(focusStep.waitingOn)) {
+    workflowState = 'WAITING';
+  }
+
+  const nearestDueStep = activeSteps
+    .filter(step => step.dueAt)
+    .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())[0];
+
+  return {
+    workflowState,
+    waitingOn: workflowState === 'BLOCKED' ? (focusStep.waitingOn || 'STAFF') : (focusStep.waitingOn || 'NONE'),
+    nextStepSummary: focusStep.title,
+    blockedReason: workflowState === 'BLOCKED' ? (focusStep.blockedReason || task.blockedReason || null) : null,
+    dueAt: focusStep.dueAt || nearestDueStep?.dueAt || null,
+    resolvedAt: null
+  };
+}
+
+async function syncTaskWorkflow(task, transaction) {
+  const steps = await getOrderedTaskSteps(task.id, transaction);
+  const summary = buildWorkflowSummary(task, steps);
+
+  task.workflowState = summary.workflowState;
+  task.waitingOn = summary.waitingOn;
+  task.nextStepSummary = summary.nextStepSummary;
+  task.blockedReason = summary.blockedReason;
+  task.dueAt = summary.dueAt;
+  task.resolvedAt = summary.resolvedAt;
+
+  await task.save({ transaction });
+  return { task, steps, summary };
+}
+
+function queueSuggestionRefresh(taskId, wineryId) {
+  if (process.env.NODE_ENV === 'test') {
+    return;
+  }
+  setImmediate(() => {
+    aiSuggestionService.generateAiSuggestion(taskId, wineryId, {
+      force: true,
+      includeHistory: true
+    });
+  });
+}
+
 // --- CORE METHODS ---
 
 // --- HELPERS ---
@@ -62,14 +225,18 @@ async function determineAutoAssignee(wineryId, data) {
 /**
  * Creates a new task (manually or via triage).
  */
-async function createTask({ wineryId, userId, data }) {
-  const t = await Task.sequelize.transaction();
+async function createTask({ wineryId, userId, data, source = 'manual', transaction = null }) {
+  const ownTransaction = !transaction;
+  const t = transaction || await Task.sequelize.transaction();
   try {
     const {
       category, subType, customerType, type, memberId, messageId,
       payload, priority, notes, sentiment, assigneeId, parentTaskId,
-      initialNote
+      initialNote, suggestedReplyBody, suggestedChannel, suggestedReplySubject,
+      suggestedAction, suggestedRecipientEmail, suggestedCc, dueAt,
+      resolutionSummary, steps = []
     } = data;
+    const finalAssigneeId = assigneeId || await determineAutoAssignee(wineryId, data);
 
     // 1. Create Task
     const task = await Task.create({
@@ -81,12 +248,22 @@ async function createTask({ wineryId, userId, data }) {
       status: 'PENDING',
       priority: priority || 'normal',
       sentiment: sentiment || 'NEUTRAL',
+      workflowState: 'NOT_STARTED',
+      waitingOn: 'NONE',
       payload: payload || {},
       memberId: memberId || null,
       messageId: messageId || null,
+      suggestedReplyBody: suggestedReplyBody || null,
+      suggestedChannel: suggestedChannel || null,
+      suggestedReplySubject: suggestedReplySubject || null,
+      suggestedAction: suggestedAction || null,
+      suggestedRecipientEmail: suggestedRecipientEmail || null,
+      suggestedCc: suggestedCc || null,
+      dueAt: dueAt || null,
+      resolutionSummary: resolutionSummary || null,
       createdBy: userId,
       updatedBy: userId,
-      assigneeId: assigneeId || await determineAutoAssignee(wineryId, data),
+      assigneeId: finalAssigneeId,
       parentTaskId: parentTaskId || null
     }, { transaction: t });
 
@@ -95,10 +272,12 @@ async function createTask({ wineryId, userId, data }) {
       transaction: t,
       taskId: task.id,
       userId,
-      actionType: 'MANUAL_CREATED',
+      actionType: source === 'manual' ? 'MANUAL_CREATED' : 'CREATED',
       details: {
+        source,
         notes,
-        originalText: payload?.originalText
+        originalText: payload?.originalText,
+        stepCount: Array.isArray(steps) ? steps.length : 0
       }
     });
 
@@ -113,10 +292,21 @@ async function createTask({ wineryId, userId, data }) {
           parentTaskId,
           childTaskId: task.id
         }
+        });
+    }
+
+    // 4. Create structured workflow steps
+    if (Array.isArray(steps) && steps.length > 0) {
+      await createTaskSteps({
+        taskId: task.id,
+        steps,
+        fallbackOwnerUserId: finalAssigneeId,
+        userId,
+        transaction: t
       });
     }
 
-    // 4. Log Initial Note + Process @Mentions (if provided)
+    // 5. Log Initial Note + Process @Mentions (if provided)
     if (initialNote && initialNote.trim()) {
       await auditService.logTaskAction({
         transaction: t,
@@ -135,13 +325,17 @@ async function createTask({ wineryId, userId, data }) {
       });
     }
 
-    await t.commit();
-    logger.info('Task created manually', { taskId: task.id, userId, wineryId });
+    await syncTaskWorkflow(task, t);
+
+    if (ownTransaction) {
+      await t.commit();
+    }
+    logger.info('Task created', { taskId: task.id, userId, wineryId, source });
 
     return task;
 
   } catch (err) {
-    if (!t.finished) await t.rollback();
+    if (ownTransaction && !t.finished) await t.rollback();
     throw err;
   }
 }
@@ -162,7 +356,7 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
       status, payload, priority, notes, suggestedReplyBody,
       category, subType, sentiment, assigneeId, parentTaskId,
       suggestedChannel, suggestedReplySubject, regenerateSuggestedReply,
-      isPrivateNote
+      isPrivateNote, dueAt, resolutionSummary
     } = updates;
 
     // --- LAYER 2: STATUS TRANSITION GUARD ---
@@ -220,6 +414,8 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
     setField('suggestedReplyBody', suggestedReplyBody);
     setField('suggestedChannel', suggestedChannel);
     setField('suggestedReplySubject', suggestedReplySubject);
+    setField('dueAt', dueAt ? new Date(dueAt) : dueAt);
+    setField('resolutionSummary', resolutionSummary);
 
     // Special logic: Linking
     if (parentTaskId !== undefined && parentTaskId !== task.parentTaskId) {
@@ -313,6 +509,8 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
       }
     }
 
+    await syncTaskWorkflow(task, t);
+
     await t.commit();
     logger.info('Task updated', { taskId, userId, changes: Object.keys(changes) });
 
@@ -325,12 +523,7 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
     }
 
     if (noteAdded && !regenerateSuggestedReply) {
-      setImmediate(() => {
-        aiSuggestionService.generateAiSuggestion(task.id, wineryId, {
-          force: true,
-          includeHistory: true
-        });
-      });
+      queueSuggestionRefresh(task.id, wineryId);
     }
 
     if (regenerateRequested) {
@@ -590,6 +783,7 @@ async function getTasksForWinery({ wineryId, userId, userRole, filters = {}, pag
     include: [
       { model: Member, attributes: ['id', 'firstName', 'lastName', 'email', 'phone'] },
       { model: User, as: 'Creator', attributes: ['id', 'displayName', 'role'] },
+      { model: User, as: 'Assignee', attributes: ['id', 'displayName', 'email', 'role'] },
     ],
     order: order,
     limit,
@@ -617,6 +811,14 @@ async function getTaskById({ taskId, wineryId }) {
       { model: Member },
       { model: Message },
       { model: User, as: 'Creator', attributes: ['id', 'displayName'] },
+      { model: User, as: 'Assignee', attributes: ['id', 'displayName', 'email', 'role'] },
+      {
+        model: TaskStep,
+        as: 'TaskSteps',
+        separate: true,
+        order: [['sortOrder', 'ASC'], ['id', 'ASC']],
+        include: [{ model: User, as: 'Owner', attributes: ['id', 'displayName', 'email', 'role'] }]
+      },
       {
         model: TaskAction,
         separate: true,
@@ -643,11 +845,182 @@ async function getTaskById({ taskId, wineryId }) {
   return task;
 }
 
+async function createTaskStep({ taskId, wineryId, userId, data }) {
+  const t = await Task.sequelize.transaction();
+
+  try {
+    const task = await Task.findOne({ where: { id: taskId, wineryId } });
+    if (!task) throw new Error('Task not found');
+
+    const existingSteps = await getOrderedTaskSteps(taskId, t);
+    const normalized = normalizeTaskStepInput(data, existingSteps.length, task.assigneeId || null);
+
+    const step = await TaskStep.create({
+      taskId,
+      ...normalized,
+      createdBy: userId,
+      updatedBy: userId,
+      completedAt: normalized.status === 'COMPLETED' ? new Date() : null
+    }, { transaction: t });
+
+    await auditService.logTaskAction({
+      transaction: t,
+      taskId,
+      userId,
+      actionType: normalized.status === 'COMPLETED' ? 'STEP_COMPLETED' : 'STEP_CREATED',
+      details: {
+        stepId: step.id,
+        title: step.title,
+        status: step.status,
+        waitingOn: step.waitingOn,
+        ownerUserId: step.ownerUserId,
+        sortOrder: step.sortOrder
+      }
+    });
+
+    task.updatedBy = userId;
+    await syncTaskWorkflow(task, t);
+    await t.commit();
+
+    queueSuggestionRefresh(taskId, wineryId);
+    return step;
+  } catch (err) {
+    if (!t.finished) await t.rollback();
+    throw err;
+  }
+}
+
+async function updateTaskStep({ taskId, stepId, wineryId, userId, userRole, updates }) {
+  const t = await Task.sequelize.transaction();
+
+  try {
+    const task = await Task.findOne({ where: { id: taskId, wineryId } });
+    if (!task) throw new Error('Task not found');
+
+    const step = await TaskStep.findOne({ where: { id: stepId, taskId }, transaction: t });
+    if (!step) throw new Error('Task step not found');
+
+    if (updates.ownerUserId !== undefined && updates.ownerUserId !== step.ownerUserId && userRole === 'staff') {
+      const err = new Error('Staff cannot reassign task steps.');
+      err.statusCode = 403;
+      err.code = 'FORBIDDEN';
+      throw err;
+    }
+
+    const changes = {};
+    const oldValues = {};
+    const setStepField = (field, value) => {
+      if (value !== undefined && value !== step[field]) {
+        changes[field] = value;
+        oldValues[field] = step[field];
+        step[field] = value;
+      }
+    };
+
+    setStepField('title', updates.title);
+    setStepField('description', updates.description);
+    setStepField('stepType', updates.stepType);
+    setStepField('status', updates.status);
+    setStepField('waitingOn', updates.waitingOn);
+    setStepField('ownerUserId', updates.ownerUserId);
+    setStepField('sortOrder', updates.sortOrder);
+    setStepField('blockedReason', updates.blockedReason);
+    setStepField('completionNotes', updates.completionNotes);
+    if (updates.dueAt !== undefined) {
+      setStepField('dueAt', updates.dueAt ? new Date(updates.dueAt) : null);
+    }
+    if (updates.metadata !== undefined) {
+      changes.metadata = updates.metadata;
+      oldValues.metadata = step.metadata;
+      step.metadata = updates.metadata;
+    }
+
+    const previousStatus = oldValues.status !== undefined ? oldValues.status : step.status;
+
+    if (updates.status === 'COMPLETED' && previousStatus !== 'COMPLETED') {
+      step.completedAt = new Date();
+      changes.completedAt = step.completedAt;
+    } else if (updates.status === 'COMPLETED') {
+      step.completedAt = step.completedAt || new Date();
+    } else if (updates.status && updates.status !== 'COMPLETED') {
+      step.completedAt = null;
+      changes.completedAt = null;
+    }
+
+    step.updatedBy = userId;
+    await step.save({ transaction: t });
+
+    if (Object.keys(changes).length > 0) {
+      await auditService.logTaskAction({
+        transaction: t,
+        taskId,
+        userId,
+        actionType: changes.status === 'COMPLETED' ? 'STEP_COMPLETED' : 'STEP_UPDATED',
+        details: {
+          stepId: step.id,
+          title: step.title,
+          changes,
+          oldValues
+        }
+      });
+    }
+
+    task.updatedBy = userId;
+    await syncTaskWorkflow(task, t);
+    await t.commit();
+
+    queueSuggestionRefresh(taskId, wineryId);
+    return step;
+  } catch (err) {
+    if (!t.finished) await t.rollback();
+    throw err;
+  }
+}
+
+async function deleteTaskStep({ taskId, stepId, wineryId, userId }) {
+  const t = await Task.sequelize.transaction();
+
+  try {
+    const task = await Task.findOne({ where: { id: taskId, wineryId } });
+    if (!task) throw new Error('Task not found');
+
+    const step = await TaskStep.findOne({ where: { id: stepId, taskId }, transaction: t });
+    if (!step) throw new Error('Task step not found');
+
+    await auditService.logTaskAction({
+      transaction: t,
+      taskId,
+      userId,
+      actionType: 'STEP_DELETED',
+      details: {
+        stepId: step.id,
+        title: step.title,
+        status: step.status
+      }
+    });
+
+    await step.destroy({ transaction: t });
+
+    task.updatedBy = userId;
+    await syncTaskWorkflow(task, t);
+    await t.commit();
+
+    queueSuggestionRefresh(taskId, wineryId);
+    return { deleted: true };
+  } catch (err) {
+    if (!t.finished) await t.rollback();
+    throw err;
+  }
+}
+
 module.exports = {
   createTask,
   updateTask,
   getTasksForWinery,
   getTaskById,
+  createTaskStep,
+  updateTaskStep,
+  deleteTaskStep,
   updateNotePrivacy
 };
 

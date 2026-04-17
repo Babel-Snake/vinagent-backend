@@ -1,7 +1,19 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Task, TaskAction, getTask, updateTask, updateNotePrivacy, Staff, toggleTaskFlag } from '../lib/api';
+import {
+    Task,
+    TaskAction,
+    TaskStep,
+    createTaskStep,
+    deleteTaskStep,
+    getTask,
+    updateTask,
+    updateNotePrivacy,
+    updateTaskStep,
+    Staff,
+    toggleTaskFlag
+} from '../lib/api';
 
 interface TaskCardProps {
     task: Task;
@@ -39,6 +51,13 @@ export default function TaskCard({
     const [historyLoading, setHistoryLoading] = useState(false);
     const [historyError, setHistoryError] = useState('');
     const [taskActions, setTaskActions] = useState<TaskAction[]>(task.TaskActions || []);
+    const [taskSteps, setTaskSteps] = useState<TaskStep[]>(task.TaskSteps || []);
+    const [newStepTitle, setNewStepTitle] = useState('');
+    const [newStepDescription, setNewStepDescription] = useState('');
+    const [newStepType, setNewStepType] = useState('INTERNAL');
+    const [newStepWaitingOn, setNewStepWaitingOn] = useState('STAFF');
+    const [newStepOwnerId, setNewStepOwnerId] = useState<number | ''>(task.assigneeId || '');
+    const [newStepDueAt, setNewStepDueAt] = useState('');
 
     // Mentions state
     const [mentionActive, setMentionActive] = useState(false);
@@ -51,6 +70,15 @@ export default function TaskCard({
             loadHistory();
         }
     }, [autoExpand]);
+
+    useEffect(() => {
+        setReplyEdit(task.suggestedReplyBody || '');
+        setSubjectEdit(task.suggestedReplySubject || '');
+        setChannelEdit(task.suggestedChannel || 'email');
+        setTaskActions(task.TaskActions || []);
+        setTaskSteps(task.TaskSteps || []);
+        setNewStepOwnerId(task.assigneeId || '');
+    }, [task]);
 
     async function handleStatusChange(newStatus: string) {
         setUpdating(true);
@@ -178,6 +206,7 @@ export default function TaskCard({
         try {
             const freshTask = await getTask(task.id);
             setTaskActions(freshTask.TaskActions || []);
+            setTaskSteps(freshTask.TaskSteps || []);
         } catch (err: any) {
             setHistoryError(err.message || 'Failed to load history');
         } finally {
@@ -188,7 +217,13 @@ export default function TaskCard({
     async function handleRegenerateSuggestion() {
         setUpdating(true);
         try {
-            await updateTask(task.id, { regenerateSuggestedReply: true });
+            const refreshedTask = await updateTask(task.id, { regenerateSuggestedReply: true });
+            
+            // Immediately sync the local React state with the newly generated answers
+            setReplyEdit(refreshedTask.suggestedReplyBody || '');
+            setSubjectEdit(refreshedTask.suggestedReplySubject || '');
+            setChannelEdit(refreshedTask.suggestedChannel || 'email');
+
             await loadHistory();
             onRefresh();
         } catch (err: any) {
@@ -202,6 +237,66 @@ export default function TaskCard({
         if (onToggleFlag) {
             onToggleFlag(task.id);
         }
+    }
+
+    async function handleStepUpdate(stepId: number, updates: any) {
+        setUpdating(true);
+        try {
+            await updateTaskStep(task.id, stepId, updates);
+            await loadHistory();
+            onRefresh();
+        } catch (err: any) {
+            alert('Failed to update step: ' + err.message);
+        } finally {
+            setUpdating(false);
+        }
+    }
+
+    async function handleCreateStep() {
+        if (!newStepTitle.trim()) return;
+        setUpdating(true);
+        try {
+            await createTaskStep(task.id, {
+                title: newStepTitle.trim(),
+                description: newStepDescription.trim() || null,
+                stepType: newStepType,
+                waitingOn: newStepWaitingOn,
+                ownerUserId: newStepOwnerId === '' ? null : newStepOwnerId,
+                dueAt: newStepDueAt ? new Date(newStepDueAt).toISOString() : null
+            });
+            setNewStepTitle('');
+            setNewStepDescription('');
+            setNewStepType('INTERNAL');
+            setNewStepWaitingOn('STAFF');
+            setNewStepDueAt('');
+            await loadHistory();
+            onRefresh();
+        } catch (err: any) {
+            alert('Failed to add step: ' + err.message);
+        } finally {
+            setUpdating(false);
+        }
+    }
+
+    async function handleDeleteStep(stepId: number) {
+        setUpdating(true);
+        try {
+            await deleteTaskStep(task.id, stepId);
+            await loadHistory();
+            onRefresh();
+        } catch (err: any) {
+            alert('Failed to delete step: ' + err.message);
+        } finally {
+            setUpdating(false);
+        }
+    }
+
+    function formatDateTimeInput(value?: string | null) {
+        if (!value) return '';
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) return '';
+        const local = new Date(parsed.getTime() - (parsed.getTimezoneOffset() * 60000));
+        return local.toISOString().slice(0, 16);
     }
 
     function renderActionDetails(action: TaskAction) {
@@ -249,6 +344,33 @@ export default function TaskCard({
                     <span className="font-semibold">Assigned to: </span>
                     {toUser ? toUser.displayName : action.details.to}
                     <span className="text-gray-500 ml-2 text-xs">by {assigner}</span>
+                </div>
+            );
+        }
+
+        if (action.actionType === 'STEP_CREATED' || action.actionType === 'STEP_UPDATED' || action.actionType === 'STEP_COMPLETED' || action.actionType === 'STEP_DELETED') {
+            const changes = action.details?.changes || {};
+            return (
+                <div className="mt-2 text-sm bg-indigo-50 border border-indigo-100 rounded p-3 text-indigo-900">
+                    <div className="font-semibold">
+                        {action.actionType === 'STEP_CREATED' && `Created step: ${action.details?.title || 'Untitled step'}`}
+                        {action.actionType === 'STEP_UPDATED' && `Updated step: ${action.details?.title || 'Untitled step'}`}
+                        {action.actionType === 'STEP_COMPLETED' && `Completed step: ${action.details?.title || 'Untitled step'}`}
+                        {action.actionType === 'STEP_DELETED' && `Deleted step: ${action.details?.title || 'Untitled step'}`}
+                    </div>
+                    {Object.keys(changes).length > 0 && (
+                        <div className="mt-2 space-y-1 text-xs">
+                            {Object.entries(changes).map(([key, value]) => (
+                                <div key={key}>
+                                    <span className="font-semibold uppercase text-indigo-700">{key.replace(/_/g, ' ')}:</span>{' '}
+                                    <span>{typeof value === 'object' ? JSON.stringify(value) : String(value)}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    {action.details?.blockedReason && (
+                        <div className="mt-2 text-xs text-indigo-800">Reason: {action.details.blockedReason}</div>
+                    )}
                 </div>
             );
         }
@@ -404,6 +526,239 @@ export default function TaskCard({
                     );
                 })()}
 
+                <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                        <div className="text-xs font-bold uppercase tracking-wider text-slate-500">Workflow</div>
+                        <span className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider
+                            ${task.workflowState === 'NOT_STARTED' ? 'bg-slate-100 text-slate-700 border border-slate-200' : ''}
+                            ${task.workflowState === 'IN_PROGRESS' ? 'bg-blue-100 text-blue-800 border border-blue-200' : ''}
+                            ${task.workflowState === 'WAITING' ? 'bg-amber-100 text-amber-800 border border-amber-200' : ''}
+                            ${task.workflowState === 'BLOCKED' ? 'bg-red-100 text-red-800 border border-red-200' : ''}
+                            ${task.workflowState === 'COMPLETED' ? 'bg-green-100 text-green-800 border border-green-200' : ''}
+                            ${task.workflowState === 'CANCELLED' ? 'bg-gray-200 text-gray-700 border border-gray-300' : ''}
+                        `}>
+                            {task.workflowState ? task.workflowState.replace(/_/g, ' ') : 'NOT STARTED'}
+                        </span>
+                        {task.waitingOn && task.waitingOn !== 'NONE' && (
+                            <span className="px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider bg-white border border-slate-200 text-slate-700">
+                                Waiting On {task.waitingOn}
+                            </span>
+                        )}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                        <div>
+                            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Next Step</div>
+                            <div className="text-slate-900">{task.nextStepSummary || 'No next step recorded yet'}</div>
+                        </div>
+                        <div>
+                            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Due</div>
+                            <div className="text-slate-900">{task.dueAt ? new Date(task.dueAt).toLocaleString() : 'No due date'}</div>
+                        </div>
+                        <div>
+                            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Blocked Reason</div>
+                            <div className="text-slate-900">{task.blockedReason || 'Not blocked'}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="mb-6 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex items-center justify-between gap-3 mb-4">
+                        <div>
+                            <div className="text-xs font-bold uppercase tracking-wider text-slate-500">Workflow Steps</div>
+                            <div className="text-sm text-slate-600">Use structured steps for handoffs, blockers, and staged completion.</div>
+                        </div>
+                    </div>
+
+                    <div className="space-y-3">
+                        {taskSteps
+                            .sort((a, b) => {
+                                if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+                                return a.id - b.id;
+                            })
+                            .map((step, index) => (
+                                <div key={step.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                                    <div className="flex flex-wrap items-center gap-2 mb-2">
+                                        <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Step {index + 1}</span>
+                                        <span className={`px-2 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider
+                                            ${step.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800 border border-yellow-200' : ''}
+                                            ${step.status === 'IN_PROGRESS' ? 'bg-blue-100 text-blue-800 border border-blue-200' : ''}
+                                            ${step.status === 'BLOCKED' ? 'bg-red-100 text-red-800 border border-red-200' : ''}
+                                            ${step.status === 'COMPLETED' ? 'bg-green-100 text-green-800 border border-green-200' : ''}
+                                            ${(step.status === 'SKIPPED' || step.status === 'CANCELLED') ? 'bg-gray-100 text-gray-700 border border-gray-200' : ''}
+                                        `}>
+                                            {step.status.replace(/_/g, ' ')}
+                                        </span>
+                                        <span className="px-2 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider bg-white border border-slate-200 text-slate-700">
+                                            {step.waitingOn}
+                                        </span>
+                                    </div>
+
+                                    <div className="text-sm font-semibold text-slate-900">{step.title}</div>
+                                    {step.description && (
+                                        <div className="mt-1 text-sm text-slate-600 whitespace-pre-wrap">{step.description}</div>
+                                    )}
+
+                                    <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                                        <div>
+                                            <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Owner</label>
+                                            <select
+                                                className="w-full rounded border border-slate-300 bg-white p-2 text-sm"
+                                                value={step.ownerUserId ?? ''}
+                                                disabled={updating || userRole === 'staff'}
+                                                onChange={(e) => handleStepUpdate(step.id, { ownerUserId: e.target.value ? Number(e.target.value) : null })}
+                                            >
+                                                <option value="">Unassigned</option>
+                                                {users.map(user => (
+                                                    <option key={user.id} value={user.id}>{user.displayName}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Waiting On</label>
+                                            <select
+                                                className="w-full rounded border border-slate-300 bg-white p-2 text-sm"
+                                                value={step.waitingOn}
+                                                disabled={updating}
+                                                onChange={(e) => handleStepUpdate(step.id, { waitingOn: e.target.value })}
+                                            >
+                                                {['NONE', 'STAFF', 'CUSTOMER', 'MANAGER', 'EXTERNAL'].map(option => (
+                                                    <option key={option} value={option}>{option}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Due</label>
+                                            <input
+                                                type="datetime-local"
+                                                className="w-full rounded border border-slate-300 bg-white p-2 text-sm"
+                                                value={formatDateTimeInput(step.dueAt)}
+                                                disabled={updating}
+                                                onChange={(e) => handleStepUpdate(step.id, { dueAt: e.target.value ? new Date(e.target.value).toISOString() : null })}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {(step.blockedReason || step.completionNotes) && (
+                                        <div className="mt-3 space-y-1 text-sm">
+                                            {step.blockedReason && (
+                                                <div className="text-red-700"><span className="font-semibold">Blocked:</span> {step.blockedReason}</div>
+                                            )}
+                                            {step.completionNotes && (
+                                                <div className="text-green-700"><span className="font-semibold">Completion Note:</span> {step.completionNotes}</div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            disabled={updating}
+                                            onClick={() => handleStepUpdate(step.id, { status: 'IN_PROGRESS', blockedReason: null })}
+                                            className="px-2.5 py-1.5 rounded bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 disabled:opacity-50"
+                                        >
+                                            Start
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={updating}
+                                            onClick={() => {
+                                                const completionNotes = window.prompt('Optional completion note', step.completionNotes || '') || '';
+                                                handleStepUpdate(step.id, { status: 'COMPLETED', completionNotes, blockedReason: null, waitingOn: 'NONE' });
+                                            }}
+                                            className="px-2.5 py-1.5 rounded bg-green-600 text-white text-xs font-bold hover:bg-green-700 disabled:opacity-50"
+                                        >
+                                            Complete
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={updating}
+                                            onClick={() => {
+                                                const blockedReason = window.prompt('Why is this step blocked?', step.blockedReason || '');
+                                                if (blockedReason !== null) {
+                                                    handleStepUpdate(step.id, { status: 'BLOCKED', blockedReason: blockedReason.trim() || 'Blocked', completionNotes: null });
+                                                }
+                                            }}
+                                            className="px-2.5 py-1.5 rounded bg-red-600 text-white text-xs font-bold hover:bg-red-700 disabled:opacity-50"
+                                        >
+                                            Block
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={updating}
+                                            onClick={() => handleStepUpdate(step.id, { status: 'PENDING', blockedReason: null, completionNotes: null })}
+                                            className="px-2.5 py-1.5 rounded bg-slate-700 text-white text-xs font-bold hover:bg-slate-800 disabled:opacity-50"
+                                        >
+                                            Reopen
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={updating}
+                                            onClick={() => handleDeleteStep(step.id)}
+                                            className="px-2.5 py-1.5 rounded border border-slate-300 bg-white text-slate-700 text-xs font-bold hover:bg-slate-100 disabled:opacity-50"
+                                        >
+                                            Remove
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                    </div>
+
+                    <div className="mt-4 rounded-lg border border-dashed border-slate-300 p-3">
+                        <div className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Add Step</div>
+                        <div className="space-y-3">
+                            <input
+                                type="text"
+                                className="w-full rounded border border-slate-300 p-2 text-sm"
+                                placeholder="Step title"
+                                value={newStepTitle}
+                                onChange={(e) => setNewStepTitle(e.target.value)}
+                            />
+                            <textarea
+                                className="w-full rounded border border-slate-300 p-2 text-sm"
+                                rows={2}
+                                placeholder="What needs to happen in this step?"
+                                value={newStepDescription}
+                                onChange={(e) => setNewStepDescription(e.target.value)}
+                            />
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                                <select className="rounded border border-slate-300 p-2 text-sm" value={newStepType} onChange={(e) => setNewStepType(e.target.value)}>
+                                    {['INTERNAL', 'CUSTOMER_MESSAGE', 'CUSTOMER_WAIT', 'APPROVAL', 'EXTERNAL', 'EXECUTION', 'FOLLOW_UP', 'OTHER'].map(option => (
+                                        <option key={option} value={option}>{option}</option>
+                                    ))}
+                                </select>
+                                <select className="rounded border border-slate-300 p-2 text-sm" value={newStepWaitingOn} onChange={(e) => setNewStepWaitingOn(e.target.value)}>
+                                    {['NONE', 'STAFF', 'CUSTOMER', 'MANAGER', 'EXTERNAL'].map(option => (
+                                        <option key={option} value={option}>{option}</option>
+                                    ))}
+                                </select>
+                                <select className="rounded border border-slate-300 p-2 text-sm" value={newStepOwnerId} onChange={(e) => setNewStepOwnerId(e.target.value ? Number(e.target.value) : '')}>
+                                    <option value="">Unassigned</option>
+                                    {users.map(user => (
+                                        <option key={user.id} value={user.id}>{user.displayName}</option>
+                                    ))}
+                                </select>
+                                <input
+                                    type="datetime-local"
+                                    className="rounded border border-slate-300 p-2 text-sm"
+                                    value={newStepDueAt}
+                                    onChange={(e) => setNewStepDueAt(e.target.value)}
+                                />
+                            </div>
+                            <div className="flex justify-end">
+                                <button
+                                    type="button"
+                                    onClick={handleCreateStep}
+                                    disabled={updating || !newStepTitle.trim()}
+                                    className="px-3 py-2 rounded bg-slate-900 text-white text-sm font-bold hover:bg-slate-800 disabled:opacity-50"
+                                >
+                                    Add Workflow Step
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 {/* Notes/History Section */}
                 <div className="mt-6 border-t border-gray-100 pt-4">
                     <button
@@ -510,8 +865,58 @@ export default function TaskCard({
                             {expandedActions && (
                                 <div className="p-4 bg-white border-t border-blue-100 space-y-3">
                                     <div className="flex justify-end">
-                                        <button onClick={handleRegenerateSuggestion} disabled={updating} className="text-xs text-blue-600 hover:underline">⟳ Regenerate</button>
+                                        <button 
+                                            onClick={handleRegenerateSuggestion} 
+                                            disabled={updating} 
+                                            className={`text-xs text-blue-600 hover:underline ${updating ? 'opacity-50 cursor-not-allowed animate-pulse' : ''}`}
+                                        >
+                                            {updating ? '⟳ Regenerating...' : '⟳ Regenerate'}
+                                        </button>
                                     </div>
+
+                                    {/* Internal Routing Recommendation */}
+                                    {task.suggestedAction && (
+                                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                                            <div className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-1">🧭 Internal Routing Recommendation</div>
+                                            <div className="text-sm text-amber-900">{task.suggestedAction}</div>
+                                        </div>
+                                    )}
+
+                                    {/* Sender, Recipient & CC */}
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-600 uppercase mb-1">📤 From</label>
+                                            <input
+                                                type="text"
+                                                className="w-full text-sm p-2 border border-gray-300 rounded bg-gray-50 text-gray-600"
+                                                value={task.Assignee?.displayName
+                                                    ? `${task.Assignee.displayName}${task.Assignee.email ? ` <${task.Assignee.email}>` : ' (Staff)'}`
+                                                    : 'Winery System'}
+                                                readOnly
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-600 uppercase mb-1">📧 To</label>
+                                            <input
+                                                type="text"
+                                                className="w-full text-sm p-2 border border-gray-300 rounded bg-gray-50 text-gray-600"
+                                                value={task.suggestedRecipientEmail || ''}
+                                                readOnly
+                                                placeholder="No recipient identified"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-600 uppercase mb-1">📋 CC</label>
+                                            <input
+                                                type="text"
+                                                className="w-full text-sm p-2 border border-gray-300 rounded bg-gray-50 text-gray-600"
+                                                value={task.suggestedCc || ''}
+                                                readOnly
+                                                placeholder="No CC suggested"
+                                            />
+                                        </div>
+                                    </div>
+
                                     <div className="flex gap-4 flex-col lg:flex-row">
                                         <div className="flex-1">
                                             <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Message Preview</label>

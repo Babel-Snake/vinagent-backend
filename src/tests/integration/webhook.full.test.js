@@ -1,5 +1,5 @@
 const request = require('supertest');
-const { sequelize, Winery, Member, Message, Task, WinerySettings } = require('../../models');
+const { sequelize, Winery, Member, Message, Task, TaskStep, WinerySettings } = require('../../models');
 
 // Use NODE_ENV=test so app and db use sqlite
 process.env.NODE_ENV = 'test';
@@ -78,6 +78,13 @@ describe('Webhook Full Integration (with SQLite)', () => {
         expect(task).not.toBeNull();
         expect(task.messageId).toBe(message.id);
         expect(task.category).toBe('ORDER'); // Heuristic should catch "order"
+
+        const taskSteps = await TaskStep.findAll({
+            where: { taskId: task.id },
+            order: [['sortOrder', 'ASC']]
+        });
+        expect(taskSteps.length).toBeGreaterThan(0);
+        expect(taskSteps[0].title).toMatch(/Review/i);
     });
 
     it('should handle duplicate SMS idempotently', async () => {

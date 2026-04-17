@@ -3,7 +3,7 @@ const memberActionTokenService = require('./memberActionTokenService');
 const logger = require('../config/logger');
 
 /**
- * Executes the side-effects of an approved task.
+ * Executes follow-up side effects after a task is actioned.
  * @param {Object} task - The task instance (Sequelize model)
  * @param {Object} transaction - Sequelize transaction
  * @returns {Promise<void>}
@@ -35,7 +35,7 @@ async function executeTask(task, transaction, settings) {
     }
 
     // --- GENERIC NOTIFICATION LOGIC ---
-    // If task is APPROVED/EXECUTED and has a suggested reply, send it.
+    // If the task has a suggested reply and a delivery channel, send it.
     if (task.suggestedReplyBody && task.suggestedChannel && task.suggestedChannel !== 'none') {
         const { Member } = require('../models');
         const member = await Member.findByPk(task.memberId, { transaction });
@@ -218,9 +218,9 @@ async function _executeBooking(task, transaction) {
 
     } catch (bookingError) {
         logger.error('Booking Provider Failed', bookingError);
-        // Note: We do NOT throw here if we want to allow the "Approval" to succeed 
+        // Note: We do NOT throw here if we want to allow the task action to succeed
         // even if the automation fails (maybe manual follow-up needed).
-        // OR we throw and rollback the approval?
+        // OR we throw and rollback the action?
         // Let's throw for now so the user knows it failed.
         throw new Error(`Booking Failed: ${bookingError.message}`);
     }
@@ -235,12 +235,12 @@ async function _executeOrderUpdate(task, transaction) {
     // Stub for Order Management System integration
     // E.g. Update order status in Commerce7, or flag for staff follow-up
 
-    // For now, we assume if it's approved, we just mark it EXECUTED 
+    // For now, actioning an order task keeps it ACTIONED
     // and potentially send a notification if suggested.
 
     logger.info('Executing Order Update (Stub)', { taskId: task.id, type: task.type });
 
-    // Mark as Executed
+    // Mark as actioned
     task.status = 'ACTIONED';
     await task.save({ transaction });
 

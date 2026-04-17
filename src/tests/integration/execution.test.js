@@ -6,7 +6,7 @@ process.env.NODE_ENV = 'test';
 
 const request = require('supertest');
 const app = require('../../app');
-const { sequelize, Task, Winery, User, TaskAction, WinerySettings } = require('../../models');
+const { sequelize, Task, Winery, User, TaskAction, WinerySettings, MemberActionToken } = require('../../models');
 
 describe('Task Execution Integration', () => {
     let wineryId, userId, token;
@@ -53,73 +53,73 @@ describe('Task Execution Integration', () => {
         await sequelize.close();
     });
 
-    it('should trigger execution when ORDER task is APPROVED via Service', async () => {
+    it('should trigger stub execution when an ORDER task is actioned', async () => {
         const taskService = require('../../services/taskService');
 
-        // 1. Create Task (ORDER type)
         const task = await Task.create({
             wineryId,
             type: 'ORDER_SHIPPING_DELAY',
             category: 'ORDER',
             subType: 'ORDER_SHIPPING_DELAY',
-            status: 'PENDING_REVIEW',
+            status: 'PENDING',
             payload: { orderId: '123' },
             createdBy: userId
         });
 
-        // 2. Approve Task via Service
         await taskService.updateTask({
             taskId: task.id,
             wineryId,
             userId,
             userRole: 'manager',
-            updates: { status: 'APPROVED' }
+            updates: { status: 'ACTIONED' }
         });
 
-        // 3. Check Task Status - Should be EXECUTED (via stub)
         const updatedTask = await Task.findByPk(task.id);
-        expect(updatedTask.status).toBe('EXECUTED');
+        expect(updatedTask.status).toBe('ACTIONED');
 
-        // 4. Check Audit Log (TaskAction)
         const actions = await TaskAction.findAll({ where: { taskId: task.id } });
-        // Should have: APPROVED + EXECUTED
-        const approvedAction = actions.find(a => a.actionType === 'APPROVED');
-        const executedAction = actions.find(a => a.actionType === 'EXECUTED');
+        const actionedByUser = actions.find(
+            (action) => action.actionType === 'ACTIONED' && action.userId === userId
+        );
+        const executionAction = actions.find(
+            (action) => action.actionType === 'ACTIONED' && action.details?.action === 'ORDER_UPDATE_STUB'
+        );
 
-        expect(approvedAction).toBeDefined();
-        expect(approvedAction.userId).toBe(userId);
-
-        expect(executedAction).toBeDefined();
-        expect(executedAction.details.action).toBe('ORDER_UPDATE_STUB');
+        expect(actionedByUser).toBeDefined();
+        expect(executionAction).toBeDefined();
+        expect(executionAction.details.action).toBe('ORDER_UPDATE_STUB');
     });
 
-    it('should NOT execute if validation fails (ADDRESS_CHANGE without payload)', async () => {
+    it('should keep the task actioned if address automation validation fails', async () => {
         const taskService = require('../../services/taskService');
 
-        // 1. Create Task (Address Change) - Missing Payload fields
         const task = await Task.create({
             wineryId,
             type: 'ADDRESS_CHANGE',
             subType: 'ACCOUNT_ADDRESS_CHANGE',
-            status: 'PENDING_REVIEW',
-            payload: {}, // Invalid - missing required fields
-            memberId: null // Also missing member
+            status: 'PENDING',
+            payload: {},
+            memberId: null
         });
 
-        // 2. Try Approve - Should Fail Validation inside updateTask
-        await expect(taskService.updateTask({
+        await taskService.updateTask({
             taskId: task.id,
             wineryId,
             userId,
             userRole: 'manager',
-            updates: { status: 'APPROVED' }
-        })).rejects.toThrow('Cannot approve');
+            updates: { status: 'ACTIONED' }
+        });
+
+        const updatedTask = await Task.findByPk(task.id);
+        const token = await MemberActionToken.findOne({ where: { taskId: task.id } });
+
+        expect(updatedTask.status).toBe('ACTIONED');
+        expect(token).toBeNull();
     });
 
-    it('should skip execution when secure links are disabled', async () => {
+    it('should skip automation when secure links are disabled', async () => {
         const taskService = require('../../services/taskService');
 
-        // Disable secure links temporarily
         await WinerySettings.update({ enableSecureLinks: false }, { where: { wineryId } });
 
         const task = await Task.create({
@@ -127,7 +127,7 @@ describe('Task Execution Integration', () => {
             type: 'ORDER_SHIPPING_DELAY',
             category: 'ORDER',
             subType: 'ORDER_SHIPPING_DELAY',
-            status: 'PENDING_REVIEW',
+            status: 'PENDING',
             payload: { orderId: '456' },
             createdBy: userId
         });
@@ -137,14 +137,16 @@ describe('Task Execution Integration', () => {
             wineryId,
             userId,
             userRole: 'manager',
-            updates: { status: 'APPROVED' }
+            updates: { status: 'ACTIONED' }
         });
 
-        // Task should stay APPROVED (not EXECUTED) since secure links disabled
         const updatedTask = await Task.findByPk(task.id);
-        expect(updatedTask.status).toBe('APPROVED');
+        expect(updatedTask.status).toBe('ACTIONED');
 
-        // Re-enable for other tests
+        const actions = await TaskAction.findAll({ where: { taskId: task.id } });
+        const executionAction = actions.find((action) => action.details?.action === 'ORDER_UPDATE_STUB');
+        expect(executionAction).toBeUndefined();
+
         await WinerySettings.update({ enableSecureLinks: true }, { where: { wineryId } });
     });
 });

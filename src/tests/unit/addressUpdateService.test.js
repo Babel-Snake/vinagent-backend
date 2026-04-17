@@ -37,7 +37,7 @@ describe('addressUpdateService', () => {
 
             const mockTask = {
                 id: 5001,
-                status: 'AWAITING_MEMBER_ACTION',
+                status: 'PENDING',
                 save: jest.fn().mockResolvedValue(true)
             };
 
@@ -65,12 +65,12 @@ describe('addressUpdateService', () => {
             expect(mockMember.save).toHaveBeenCalled();
             expect(mockMember.addressLine1).toBe('12 Oak Street');
 
-            expect(mockTask.status).toBe('EXECUTED');
+            expect(mockTask.status).toBe('ACTIONED');
             expect(mockTask.save).toHaveBeenCalled();
 
             expect(memberActionTokenService.markTokenUsed).toHaveBeenCalledWith(8001, expect.anything());
             expect(TaskAction.create).toHaveBeenCalledWith(expect.objectContaining({
-                actionType: 'EXECUTED',
+                actionType: 'ACTIONED',
                 taskId: 5001
             }), expect.anything());
         });

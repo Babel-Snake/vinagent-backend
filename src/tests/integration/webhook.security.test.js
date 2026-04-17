@@ -1,4 +1,5 @@
 const request = require('supertest');
+const crypto = require('crypto');
 const app = require('../../app');
 
 // Note: We need to mock the validation middleware to force failures,
@@ -104,10 +105,16 @@ describe('Webhook Security Integration', () => {
 
     it('should accept Retell webhook with valid signature', async () => {
         const app = await getApp();
+        const payload = { event_type: 'call_analyzed' };
+        const signature = crypto
+            .createHmac('sha256', 'mock-retell-secret')
+            .update(JSON.stringify(payload))
+            .digest('hex');
+
         const res = await request(app)
             .post('/api/webhooks/retell')
-            .set('x-retell-signature', 'mock-retell-secret')
-            .send({ event_type: 'call_analyzed' });
+            .set('x-retell-signature', signature)
+            .send(payload);
 
         expect(res.status).toBe(200);
         expect(res.body.success).toBe(true);

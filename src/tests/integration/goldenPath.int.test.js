@@ -10,7 +10,7 @@ jest.mock('../../services/triage.service', () => ({
         type: 'ACCOUNT_ADDRESS_CHANGE',
         category: 'ACCOUNT',
         subType: 'ACCOUNT_ADDRESS_CHANGE',
-        status: 'PENDING_REVIEW',
+        status: 'PENDING',
         priority: 'normal',
         sentiment: 'NEUTRAL',
         payload: {
@@ -123,17 +123,16 @@ describe('Golden Path E2E: Address Change Flow', () => {
             .set('Authorization', 'Bearer mock-token'); // Bypass enabled
 
         expect(taskRes.status).toBe(200);
-        expect(taskRes.body.task.status).toBe('PENDING_REVIEW');
+        expect(taskRes.body.task.status).toBe('PENDING');
         expect(taskRes.body.task.subType).toBe('ACCOUNT_ADDRESS_CHANGE');
 
-        // 3. Approve Task
-        console.log('Step 3: Approving Task');
+        // 3. Action Task
+        console.log('Step 3: Actioning Task');
         const approveRes = await request(app)
             .patch(`/api/tasks/${taskId}`)
             .set('Authorization', 'Bearer mock-token')
             .send({
-                status: 'APPROVED',
-                // Simulate Manager confirming the payload
+                status: 'ACTIONED',
                 payload: {
                     newAddress: {
                         addressLine1: "12 Oak Street",
@@ -146,7 +145,7 @@ describe('Golden Path E2E: Address Change Flow', () => {
             });
 
         expect(approveRes.status).toBe(200);
-        expect(approveRes.body.task.status).toBe('AWAITING_MEMBER_ACTION');
+        expect(approveRes.body.task.status).toBe('PENDING');
 
         // 4. Retrieve Generated Token
         console.log('Step 4: Retrieving Token');
@@ -191,9 +190,9 @@ describe('Golden Path E2E: Address Change Flow', () => {
         expect(updatedMember.addressLine1).toBe('12 Oak Street');
         expect(updatedMember.suburb).toBe('Stirling');
 
-        // 8. Verify Task Executed
+        // 8. Verify Task Actioned
         const finalTask = await Task.findByPk(taskId);
-        expect(finalTask.status).toBe('EXECUTED');
+        expect(finalTask.status).toBe('ACTIONED');
 
         // 9. Verify Token marked used
         const usedToken = await MemberActionToken.findByPk(tokenRecord.id);

@@ -17,6 +17,10 @@ router.put('/integration-config', protect, requireRole(['manager', 'admin']), wi
 router.post('/products', protect, requireRole(['manager', 'admin']), wineryController.createProduct);
 router.delete('/products/:id', protect, requireRole(['manager', 'admin']), wineryController.deleteProduct);
 
+// Booking Types
+router.post('/bookings/types', protect, requireRole(['manager', 'admin']), wineryController.createBookingType);
+router.delete('/bookings/types/:id', protect, requireRole(['manager', 'admin']), wineryController.deleteBookingType);
+
 // FAQs (formerly Policies)
 router.post('/faqs', protect, requireRole(['manager', 'admin']), wineryController.createFAQ);
 router.delete('/faqs/:id', protect, requireRole(['manager', 'admin']), wineryController.deleteFAQ);

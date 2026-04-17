@@ -21,6 +21,7 @@ export default function StaffPage() {
     const [editEmail, setEditEmail] = useState('');
     const [editRole, setEditRole] = useState('staff');
     const [editIsActive, setEditIsActive] = useState(true);
+    const [editResponsibilities, setEditResponsibilities] = useState('');
     const [isSaving, setIsSaving] = useState(false);
 
     // Delete state
@@ -62,6 +63,7 @@ export default function StaffPage() {
         setEditEmail(user.email || '');
         setEditRole(user.role || 'staff');
         setEditIsActive(user.isActive ?? true);
+        setEditResponsibilities(user.responsibilities || '');
         setOpenMenuId(null);
     };
 
@@ -80,7 +82,8 @@ export default function StaffPage() {
                 displayName: editName,
                 email: editEmail,
                 role: editRole,
-                isActive: editIsActive
+                isActive: editIsActive,
+                responsibilities: editResponsibilities
             });
             setUsers(users.map(u => u.id === updated.id ? { ...u, ...updated } : u));
             setEditingUser(null);
@@ -153,6 +156,9 @@ export default function StaffPage() {
                                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Contact
                                 </th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Responsibilities
+                                </th>
                                 <th scope="col" className="relative px-6 py-3">
                                     <span className="sr-only">Actions</span>
                                 </th>
@@ -197,6 +203,9 @@ export default function StaffPage() {
                                         <a href={`mailto:${user.email}`} className="text-blue-600 hover:text-blue-800 hover:underline">
                                             {user.email}
                                         </a>
+                                    </td>
+                                    <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate" title={user.responsibilities || ''}>
+                                        {user.responsibilities || <span className="italic text-gray-300">Not set</span>}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium relative">
                                         <button
@@ -313,6 +322,16 @@ export default function StaffPage() {
                                         </span>
                                     </label>
                                 </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Responsibilities / Coverage</label>
+                                <textarea
+                                    rows={3}
+                                    value={editResponsibilities}
+                                    onChange={e => setEditResponsibilities(e.target.value)}
+                                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:text-sm"
+                                    placeholder="E.g. Handling wine club cancellations, managing shipping logistics..."
+                                />
                             </div>
                             <div className="flex justify-end gap-3 pt-4">
                                 <button

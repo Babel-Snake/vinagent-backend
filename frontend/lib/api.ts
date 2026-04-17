@@ -5,16 +5,26 @@ export interface Task {
     customerType: string;
     type: string; // Legacy
     status: string;
+    workflowState?: string;
+    waitingOn?: string;
+    nextStepSummary?: string;
+    blockedReason?: string;
     sentiment: string;
     priority: string;
     payload: any;
     createdAt: string;
+    dueAt?: string | null;
+    resolutionSummary?: string | null;
+    resolvedAt?: string | null;
     notes?: string;
     assigneeId?: number;
     parentTaskId?: number;
     suggestedReplyBody?: string;
     suggestedChannel?: string;
     suggestedReplySubject?: string;
+    suggestedAction?: string;
+    suggestedRecipientEmail?: string;
+    suggestedCc?: string;
     memberId?: number;
     Member?: {
         id: number;
@@ -26,12 +36,15 @@ export interface Task {
     Assignee?: {
         id: number;
         displayName: string;
+        email?: string;
+        role?: string;
     };
     Creator?: {
         id: number;
         displayName: string;
         role?: string;
     };
+    TaskSteps?: TaskStep[];
     TaskActions?: TaskAction[];
     regenerateSuggestedReply?: boolean;
 }
@@ -50,6 +63,42 @@ export interface TaskAction {
     };
 }
 
+export interface TaskStep {
+    id: number;
+    taskId: number;
+    title: string;
+    description?: string | null;
+    stepType: string;
+    status: string;
+    waitingOn: string;
+    sortOrder: number;
+    ownerUserId?: number | null;
+    dueAt?: string | null;
+    blockedReason?: string | null;
+    completionNotes?: string | null;
+    completedAt?: string | null;
+    Owner?: {
+        id: number;
+        displayName: string;
+        email?: string;
+        role?: string;
+    };
+}
+
+export interface TaskStepInput {
+    title: string;
+    description?: string | null;
+    stepType?: string;
+    status?: string;
+    waitingOn?: string;
+    sortOrder?: number;
+    ownerUserId?: number | null;
+    dueAt?: string | null;
+    blockedReason?: string | null;
+    completionNotes?: string | null;
+    metadata?: any;
+}
+
 export interface AutoclassifyResponse {
     category: string;
     subType: string;
@@ -57,7 +106,12 @@ export interface AutoclassifyResponse {
     sentiment: string;
     payload: any;
     suggestedTitle: string;
+    suggestedReplyBody?: string;
     suggestedChannel?: string;
+    suggestedAssigneeId?: number;
+    suggestedRecipientEmail?: string;
+    suggestedCc?: string;
+    suggestedSteps?: TaskStepInput[];
     suggestedMember?: {
         id: number;
         firstName: string;
@@ -178,6 +232,7 @@ export async function createTask(taskData: Partial<Task> & {
     memberId?: number;
     suggestedReplyBody?: string;
     suggestedChannel?: string;
+    steps?: TaskStepInput[];
 }): Promise<Task> {
     const res = await fetch(`${API_BASE}/tasks`, {
         method: 'POST',
@@ -221,6 +276,7 @@ export interface Staff {
     createdAt: string;
     role?: string;
     isActive?: boolean;
+    responsibilities?: string;
 }
 
 
@@ -243,7 +299,7 @@ export async function createStaff(data: { username: string; password: string; })
     return json.staff;
 }
 
-export async function updateStaff(id: number, data: { displayName?: string; email?: string; role?: string; isActive?: boolean }): Promise<Staff> {
+export async function updateStaff(id: number, data: { displayName?: string; email?: string; role?: string; isActive?: boolean; responsibilities?: string }): Promise<Staff> {
     const res = await fetch(`${API_BASE}/staff/${id}`, {
         method: 'PUT',
         headers: {
@@ -413,13 +469,62 @@ export async function updateBrand(data: any): Promise<any> {
     return await putData('/winery/brand', data);
 }
 export async function updateBookingsConfig(data: any): Promise<any> {
-    return await putData('/winery/bookings/config', data);
+    return await putData('/winery/bookings-config', data);
+}
+
+export async function createTaskStep(taskId: number, data: TaskStepInput): Promise<TaskStep> {
+    const res = await fetch(`${API_BASE}/tasks/${taskId}/steps`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': await getAuthToken()
+        },
+        body: JSON.stringify(data)
+    });
+
+    if (!res.ok) {
+        throw new Error('Failed to create task step');
+    }
+
+    const json = await res.json();
+    return json.step;
+}
+
+export async function updateTaskStep(taskId: number, stepId: number, updates: Partial<TaskStepInput>): Promise<TaskStep> {
+    const res = await fetch(`${API_BASE}/tasks/${taskId}/steps/${stepId}`, {
+        method: 'PATCH',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': await getAuthToken()
+        },
+        body: JSON.stringify(updates)
+    });
+
+    if (!res.ok) {
+        throw new Error('Failed to update task step');
+    }
+
+    const json = await res.json();
+    return json.step;
+}
+
+export async function deleteTaskStep(taskId: number, stepId: number): Promise<void> {
+    const res = await fetch(`${API_BASE}/tasks/${taskId}/steps/${stepId}`, {
+        method: 'DELETE',
+        headers: {
+            'Authorization': await getAuthToken()
+        }
+    });
+
+    if (!res.ok) {
+        throw new Error('Failed to delete task step');
+    }
 }
 export async function updatePolicyProfile(data: any): Promise<any> {
-    return await putData('/winery/policies/profile', data);
+    return await putData('/winery/policy-profile', data);
 }
 export async function updateIntegrationConfig(data: any): Promise<any> {
-    return await putData('/winery/integrations', data);
+    return await putData('/winery/integration-config', data);
 }
 
 // Sub-resource Helpers

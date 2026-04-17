@@ -1,7 +1,7 @@
 process.env.ALLOW_TEST_AUTH_BYPASS = 'true';
 const request = require('supertest');
 const app = require('../../app');
-const { sequelize, Winery, Task, User } = require('../../models');
+const { sequelize, Winery, Task, TaskStep, User } = require('../../models');
 
 describe('Task Routes', () => {
     let winery;
@@ -59,7 +59,7 @@ describe('Task Routes', () => {
             // Seed a task for Winery 1
             await Task.create({
                 type: 'GENERAL_QUERY',
-                status: 'PENDING_REVIEW',
+                status: 'PENDING',
                 wineryId: 1,
                 priority: 'normal'
             });
@@ -116,6 +116,40 @@ describe('Task Routes', () => {
             expect(task.sentiment).toBe('NEGATIVE');
             expect(task.createdBy).toBe(7); // Stub user ID
         });
+
+        it('should create a task with structured workflow steps', async () => {
+            const res = await request(app)
+                .post('/api/tasks')
+                .send({
+                    category: 'GENERAL',
+                    subType: 'GENERAL_ENQUIRY',
+                    priority: 'normal',
+                    steps: [
+                        {
+                            title: 'Review the enquiry',
+                            stepType: 'INTERNAL',
+                            waitingOn: 'STAFF'
+                        },
+                        {
+                            title: 'Send the reply',
+                            stepType: 'CUSTOMER_MESSAGE',
+                            waitingOn: 'STAFF'
+                        }
+                    ]
+                })
+                .set('Authorization', authToken)
+                .expect(201);
+
+            expect(res.body.task.workflowState).toBe('NOT_STARTED');
+            expect(res.body.task.nextStepSummary).toBe('Review the enquiry');
+
+            const createdSteps = await TaskStep.findAll({
+                where: { taskId: res.body.task.id },
+                order: [['sortOrder', 'ASC']]
+            });
+            expect(createdSteps).toHaveLength(2);
+            expect(createdSteps[0].title).toBe('Review the enquiry');
+        });
     });
 
     describe('PATCH /api/tasks/:id', () => {
@@ -123,7 +157,7 @@ describe('Task Routes', () => {
         beforeEach(async () => {
             task = await Task.create({
                 wineryId: winery.id,
-                status: 'PENDING_REVIEW',
+                status: 'PENDING',
                 category: 'GENERAL'
             });
         });
@@ -146,11 +180,10 @@ describe('Task Routes', () => {
             expect(action.userId).toBe(7);
         });
 
-        it('should approve task and trigger execution', async () => {
-            // Create an ORDER type task that can be approved without member
+        it('should action an ORDER task and keep it actioned after stub execution', async () => {
             const orderTask = await Task.create({
                 wineryId: winery.id,
-                status: 'PENDING_REVIEW',
+                status: 'PENDING',
                 category: 'ORDER',
                 type: 'ORDER_SHIPPING_DELAY',
                 subType: 'ORDER_SHIPPING_DELAY',
@@ -160,16 +193,23 @@ describe('Task Routes', () => {
             const res = await request(app)
                 .patch(`/api/tasks/${orderTask.id}`)
                 .send({
-                    status: 'APPROVED'
+                    status: 'ACTIONED'
                 })
                 .set('Authorization', authToken)
                 .expect(200);
 
-            // ORDER tasks should be EXECUTED via stub
-            expect(['APPROVED', 'EXECUTED']).toContain(res.body.task.status);
+            expect(res.body.task.status).toBe('ACTIONED');
+
+            const { TaskAction } = require('../../models');
+            const actions = await TaskAction.findAll({ where: { taskId: orderTask.id } });
+            const executionAction = actions.find(
+                (action) => action.actionType === 'ACTIONED' && action.details?.action === 'ORDER_UPDATE_STUB'
+            );
+
+            expect(executionAction).toBeDefined();
         });
 
-        it('should approve a task and record who did it', async () => {
+        it('should action an address-change task and record who did it', async () => {
             const member = await require('../../models').Member.create({
                 firstName: 'Jane',
                 lastName: 'Doe',
@@ -183,7 +223,7 @@ describe('Task Routes', () => {
 
             const taskToApprove = await Task.create({
                 type: 'ADDRESS_CHANGE',
-                status: 'PENDING_REVIEW',
+                status: 'PENDING',
                 wineryId: winery.id,
                 memberId: member.id,
                 payload: {
@@ -197,15 +237,25 @@ describe('Task Routes', () => {
             const res = await request(app)
                 .patch(`/api/tasks/${taskToApprove.id}`)
                 .set('Authorization', authToken)
-                .send({ status: 'APPROVED' })
+                .send({ status: 'ACTIONED' })
                 .expect(200);
 
-            expect(res.body.task.status).toBe('AWAITING_MEMBER_ACTION');
+            expect(res.body.task.status).toBe('PENDING');
             expect(res.body.task.updatedBy).toBe(7); // Stub user ID
 
-            // Verify DB
             const updated = await Task.findByPk(taskToApprove.id);
-            expect(updated.status).toBe('AWAITING_MEMBER_ACTION');
+            expect(updated.status).toBe('PENDING');
+
+            const { TaskAction } = require('../../models');
+            const actioned = await TaskAction.findOne({
+                where: { taskId: taskToApprove.id, actionType: 'ACTIONED', userId: 7 }
+            });
+            const executionTriggered = await TaskAction.findOne({
+                where: { taskId: taskToApprove.id, actionType: 'EXECUTION_TRIGGERED' }
+            });
+
+            expect(actioned).toBeDefined();
+            expect(executionTriggered).toBeDefined();
         });
 
         it('should execute ADDRESS_CHANGE by creating a secure link token', async () => {
@@ -223,7 +273,7 @@ describe('Task Routes', () => {
 
             const task = await Task.create({
                 type: 'ADDRESS_CHANGE',
-                status: 'PENDING_REVIEW',
+                status: 'PENDING',
                 wineryId: winery.id,
                 memberId: member.id,
                 payload: {
@@ -237,11 +287,11 @@ describe('Task Routes', () => {
             await request(app)
                 .patch(`/api/tasks/${task.id}`)
                 .set('Authorization', authToken)
-                .send({ status: 'APPROVED' })
+                .send({ status: 'ACTIONED' })
                 .expect(200);
 
             const updatedTask = await Task.findByPk(task.id);
-            expect(updatedTask.status).toBe('AWAITING_MEMBER_ACTION');
+            expect(updatedTask.status).toBe('PENDING');
 
             const { MemberActionToken } = require('../../models');
             const token = await MemberActionToken.findOne({ where: { taskId: task.id } });
@@ -250,6 +300,54 @@ describe('Task Routes', () => {
             // Member is not updated until confirmation
             const updatedMember = await require('../../models').Member.findByPk(member.id);
             expect(updatedMember.addressLine1).toBe('1 Old St');
+        });
+    });
+
+    describe('Task Step Routes', () => {
+        let task;
+
+        beforeEach(async () => {
+            task = await Task.create({
+                wineryId: winery.id,
+                status: 'PENDING',
+                category: 'GENERAL'
+            });
+        });
+
+        it('should create, update, and return task steps', async () => {
+            const createRes = await request(app)
+                .post(`/api/tasks/${task.id}/steps`)
+                .set('Authorization', authToken)
+                .send({
+                    title: 'Collect missing detail',
+                    description: 'Need the customer order number before replying.',
+                    stepType: 'CUSTOMER_WAIT',
+                    waitingOn: 'CUSTOMER'
+                })
+                .expect(201);
+
+            expect(createRes.body.step.title).toBe('Collect missing detail');
+
+            const updateRes = await request(app)
+                .patch(`/api/tasks/${task.id}/steps/${createRes.body.step.id}`)
+                .set('Authorization', authToken)
+                .send({
+                    status: 'BLOCKED',
+                    blockedReason: 'Awaiting reply from customer'
+                })
+                .expect(200);
+
+            expect(updateRes.body.step.status).toBe('BLOCKED');
+
+            const taskRes = await request(app)
+                .get(`/api/tasks/${task.id}`)
+                .set('Authorization', authToken)
+                .expect(200);
+
+            expect(taskRes.body.task.workflowState).toBe('BLOCKED');
+            expect(taskRes.body.task.waitingOn).toBe('CUSTOMER');
+            expect(taskRes.body.task.TaskSteps).toHaveLength(1);
+            expect(taskRes.body.task.TaskSteps[0].blockedReason).toBe('Awaiting reply from customer');
         });
     });
 });

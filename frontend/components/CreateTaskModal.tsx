@@ -1,11 +1,41 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { autoclassifyTask, createTask, searchMembers, AutoclassifyResponse, getUsers, Staff } from '../lib/api';
+import {
+    autoclassifyTask,
+    createTask,
+    searchMembers,
+    AutoclassifyResponse,
+    TaskStepInput,
+    getUsers,
+    getWineryFull,
+    Staff
+} from '../lib/api';
 
 interface CreateTaskModalProps {
     onClose: () => void;
     onCreated: () => void;
+}
+
+const CATEGORY_SUBTYPES: Record<string, string[]> = {
+    'BOOKING': ['BOOKING_NEW', 'BOOKING_CHANGE', 'BOOKING_CANCELLATION', 'BOOKING_INQUIRY', 'OTHER'],
+    'ORDER': ['ORDER_NEW', 'ORDER_MODIFICATION', 'ORDER_SHIPPING_DELAY', 'ORDER_STATUS', 'ORDER_REPLACEMENT_REQUEST', 'ORDER_POSTPONE', 'OTHER'],
+    'ACCOUNT': ['ACCOUNT_ADDRESS_CHANGE', 'ACCOUNT_PAYMENT_ISSUE', 'ACCOUNT_LOGIN_ISSUE', 'OTHER'],
+    'OPERATIONS': ['OPERATIONS_SUPPLY_REQUEST', 'OPERATIONS_MAINTENANCE_REQUEST', 'OPERATIONS_ESCALATION', 'OTHER'],
+    'GENERAL': ['GENERAL_ENQUIRY', 'GENERAL_FEEDBACK', 'OTHER'],
+    'INTERNAL': ['INTERNAL_REMINDER', 'INTERNAL_FOLLOWUP', 'OTHER'],
+    'SYSTEM': ['SYSTEM_ALERT', 'OTHER']
+};
+
+const STEP_TYPES = ['INTERNAL', 'CUSTOMER_MESSAGE', 'CUSTOMER_WAIT', 'APPROVAL', 'EXTERNAL', 'EXECUTION', 'FOLLOW_UP', 'OTHER'];
+const WAITING_ON = ['NONE', 'STAFF', 'CUSTOMER', 'MANAGER', 'EXTERNAL'];
+
+function toDateTimeLocalValue(value?: string | null) {
+    if (!value) return '';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '';
+    const local = new Date(parsed.getTime() - (parsed.getTimezoneOffset() * 60000));
+    return local.toISOString().slice(0, 16);
 }
 
 export default function CreateTaskModal({ onClose, onCreated }: CreateTaskModalProps) {
@@ -16,12 +46,16 @@ export default function CreateTaskModal({ onClose, onCreated }: CreateTaskModalP
 
     // Editable State
     const [title, setTitle] = useState('');
+    const [assigneeId, setAssigneeId] = useState<number | ''>('');
     const [category, setCategory] = useState('');
     const [subType, setSubType] = useState('');
     const [priority, setPriority] = useState('');
     const [sentiment, setSentiment] = useState('');
     const [suggestedReply, setSuggestedReply] = useState('');
     const [suggestedChannel, setSuggestedChannel] = useState('');
+    const [recipientEmail, setRecipientEmail] = useState('');
+    const [ccEmail, setCcEmail] = useState('');
+    const [workflowSteps, setWorkflowSteps] = useState<TaskStepInput[]>([]);
 
     // Member Search State
     const [memberQuery, setMemberQuery] = useState('');
@@ -32,12 +66,18 @@ export default function CreateTaskModal({ onClose, onCreated }: CreateTaskModalP
     // Initial Note + @Mention State
     const [initialNote, setInitialNote] = useState('');
     const [staffList, setStaffList] = useState<Staff[]>([]);
+    const [orgContacts, setOrgContacts] = useState<any[]>([]);
     const [mentionActive, setMentionActive] = useState(false);
     const [mentionQuery, setMentionQuery] = useState('');
 
     // Load staff list for mention autocomplete
     useEffect(() => {
         getUsers().then(setStaffList).catch(console.error);
+        getWineryFull().then(winery => {
+            if (winery.contacts) {
+                setOrgContacts(winery.contacts);
+            }
+        }).catch(console.error);
     }, []);
 
     async function handleAnalyze() {
@@ -49,12 +89,16 @@ export default function CreateTaskModal({ onClose, onCreated }: CreateTaskModalP
 
             // Initialize editable state
             setTitle(result.suggestedTitle);
+            setAssigneeId(result.suggestedAssigneeId || '');
             setCategory(result.category);
             setSubType(result.subType);
             setPriority(result.priority);
             setSentiment(result.sentiment);
-            setSuggestedReply(result.payload?.suggestedReplyBody || '');
+            setSuggestedReply(result.suggestedReplyBody || '');
             setSuggestedChannel(result.suggestedChannel || 'sms');
+            setRecipientEmail(result.suggestedRecipientEmail || '');
+            setCcEmail(result.suggestedCc || '');
+            setWorkflowSteps(result.suggestedSteps || []);
 
             // Auto-link member if AI extracted one and none was pre-selected
             if (!selectedMember && result.suggestedMember) {
@@ -101,9 +145,13 @@ export default function CreateTaskModal({ onClose, onCreated }: CreateTaskModalP
                 payload: preview.payload,
                 notes: text,
                 initialNote: initialNote.trim() || undefined,
+                assigneeId: assigneeId === '' ? undefined : assigneeId,
                 memberId: selectedMember?.id,
                 suggestedReplyBody: suggestedReply,
-                suggestedChannel: suggestedChannel || 'none'
+                suggestedChannel: suggestedChannel || 'none',
+                suggestedRecipientEmail: recipientEmail,
+                suggestedCc: ccEmail,
+                steps: workflowSteps
             });
             onCreated();
         } catch (err: any) {
@@ -206,15 +254,66 @@ export default function CreateTaskModal({ onClose, onCreated }: CreateTaskModalP
                                 )}
                             </div>
 
-                            <div className="mb-3">
-                                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Title</label>
-                                <input
-                                    type="text"
-                                    className="w-full text-sm p-2 border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
-                                    value={title}
-                                    onChange={e => setTitle(e.target.value)}
-                                />
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Title</label>
+                                    <input
+                                        type="text"
+                                        className="w-full text-sm p-2 border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                        value={title}
+                                        onChange={e => setTitle(e.target.value)}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Assign To</label>
+                                    <select
+                                        className="w-full text-sm p-2 border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                        value={assigneeId}
+                                        onChange={e => setAssigneeId(e.target.value ? Number(e.target.value) : '')}
+                                    >
+                                        <option value="">Unassigned</option>
+                                        {staffList.map(staff => (
+                                            <option key={staff.id} value={staff.id}>
+                                                {staff.displayName} {staff.role && `(${staff.role})`}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
                             </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Direct To (Email)</label>
+                                    <input
+                                        type="email"
+                                        list="org-emails"
+                                        className="w-full text-sm p-2 border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                        placeholder="customer@example.com"
+                                        value={recipientEmail}
+                                        onChange={e => setRecipientEmail(e.target.value)}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 uppercase mb-1">CC (Email)</label>
+                                    <input
+                                        type="email"
+                                        list="org-emails"
+                                        className="w-full text-sm p-2 border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                        placeholder="manager@example.com"
+                                        value={ccEmail}
+                                        onChange={e => setCcEmail(e.target.value)}
+                                    />
+                                </div>
+                            </div>
+                            
+                            <datalist id="org-emails">
+                                {staffList.map(staff => staff.email && (
+                                    <option key={`staff-${staff.id}`} value={staff.email}>{staff.displayName} (Staff)</option>
+                                ))}
+                                {orgContacts.map(contact => contact.email && (
+                                    <option key={`org-${contact.id}`} value={contact.email}>{contact.name} ({contact.role})</option>
+                                ))}
+                            </datalist>
 
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
@@ -222,7 +321,17 @@ export default function CreateTaskModal({ onClose, onCreated }: CreateTaskModalP
                                     <select
                                         className="w-full text-sm border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
                                         value={category}
-                                        onChange={e => setCategory(e.target.value)}
+                                        onChange={e => {
+                                            const newCategory = e.target.value;
+                                            setCategory(newCategory);
+                                            // Reset subType to the first available option for the new category
+                                            const availableTypes = CATEGORY_SUBTYPES[newCategory] || [];
+                                            if (availableTypes.length > 0) {
+                                                setSubType(availableTypes[0]);
+                                            } else {
+                                                setSubType('');
+                                            }
+                                        }}
                                     >
                                         <option value="BOOKING">Booking</option>
                                         <option value="ORDER">Order</option>
@@ -236,12 +345,24 @@ export default function CreateTaskModal({ onClose, onCreated }: CreateTaskModalP
 
                                 <div>
                                     <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Type</label>
-                                    <input
-                                        type="text"
+                                    <select
                                         className="w-full text-sm border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
                                         value={subType}
                                         onChange={e => setSubType(e.target.value)}
-                                    />
+                                    >
+                                        {(() => {
+                                            const options = [...(CATEGORY_SUBTYPES[category] || [])];
+                                            // Make sure the current value (e.g. from AI) is in the list, if it's unique
+                                            if (subType && !options.includes(subType)) {
+                                                options.unshift(subType);
+                                            }
+                                            return options.length > 0 ? options.map(opt => (
+                                                <option key={opt} value={opt}>{opt}</option>
+                                            )) : (
+                                                <option value={subType}>{subType || 'None'}</option>
+                                            );
+                                        })()}
+                                    </select>
                                 </div>
 
                                 <div>
@@ -323,6 +444,139 @@ export default function CreateTaskModal({ onClose, onCreated }: CreateTaskModalP
                                             }
                                         }}
                                     />
+                                </div>
+                            </div>
+
+                            <div className="mt-4 p-3 bg-white border border-gray-200 rounded">
+                                <div className="flex items-center justify-between mb-3">
+                                    <label className="block text-xs font-bold text-gray-700 uppercase">Workflow Plan</label>
+                                    <button
+                                        type="button"
+                                        onClick={() => setWorkflowSteps(prev => [
+                                            ...prev,
+                                            {
+                                                title: 'New workflow step',
+                                                stepType: 'INTERNAL',
+                                                waitingOn: 'STAFF',
+                                                ownerUserId: assigneeId === '' ? null : assigneeId,
+                                                sortOrder: prev.length
+                                            }
+                                        ])}
+                                        className="text-xs font-medium text-blue-600 hover:text-blue-800"
+                                    >
+                                        + Add Step
+                                    </button>
+                                </div>
+
+                                <div className="space-y-3">
+                                    {workflowSteps.length === 0 && (
+                                        <div className="text-sm text-gray-500">No structured steps yet. Add at least one if this task needs staged work.</div>
+                                    )}
+
+                                    {workflowSteps.map((step, index) => (
+                                        <div key={`${step.title}-${index}`} className="border border-gray-200 rounded-lg p-3 space-y-3">
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div className="text-xs font-bold text-gray-500 uppercase">Step {index + 1}</div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setWorkflowSteps(prev => prev.filter((_, currentIndex) => currentIndex !== index).map((entry, currentIndex) => ({
+                                                        ...entry,
+                                                        sortOrder: currentIndex
+                                                    })))}
+                                                    className="text-xs text-red-600 hover:text-red-800"
+                                                >
+                                                    Remove
+                                                </button>
+                                            </div>
+
+                                            <input
+                                                type="text"
+                                                className="w-full text-sm p-2 border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                                value={step.title}
+                                                onChange={e => setWorkflowSteps(prev => prev.map((entry, currentIndex) => currentIndex === index ? {
+                                                    ...entry,
+                                                    title: e.target.value,
+                                                    sortOrder: index
+                                                } : entry))}
+                                                placeholder="Step title"
+                                            />
+
+                                            <textarea
+                                                className="w-full text-sm p-2 border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                                rows={2}
+                                                value={step.description || ''}
+                                                onChange={e => setWorkflowSteps(prev => prev.map((entry, currentIndex) => currentIndex === index ? {
+                                                    ...entry,
+                                                    description: e.target.value,
+                                                    sortOrder: index
+                                                } : entry))}
+                                                placeholder="What should happen in this step?"
+                                            />
+
+                                            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                                                <div>
+                                                    <label className="block text-[11px] font-bold text-gray-500 uppercase mb-1">Type</label>
+                                                    <select
+                                                        className="w-full text-sm p-2 border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                                        value={step.stepType || 'INTERNAL'}
+                                                        onChange={e => setWorkflowSteps(prev => prev.map((entry, currentIndex) => currentIndex === index ? {
+                                                            ...entry,
+                                                            stepType: e.target.value
+                                                        } : entry))}
+                                                    >
+                                                        {STEP_TYPES.map(option => (
+                                                            <option key={option} value={option}>{option}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[11px] font-bold text-gray-500 uppercase mb-1">Waiting On</label>
+                                                    <select
+                                                        className="w-full text-sm p-2 border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                                        value={step.waitingOn || 'STAFF'}
+                                                        onChange={e => setWorkflowSteps(prev => prev.map((entry, currentIndex) => currentIndex === index ? {
+                                                            ...entry,
+                                                            waitingOn: e.target.value
+                                                        } : entry))}
+                                                    >
+                                                        {WAITING_ON.map(option => (
+                                                            <option key={option} value={option}>{option}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[11px] font-bold text-gray-500 uppercase mb-1">Owner</label>
+                                                    <select
+                                                        className="w-full text-sm p-2 border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                                        value={step.ownerUserId ?? ''}
+                                                        onChange={e => setWorkflowSteps(prev => prev.map((entry, currentIndex) => currentIndex === index ? {
+                                                            ...entry,
+                                                            ownerUserId: e.target.value ? Number(e.target.value) : null
+                                                        } : entry))}
+                                                    >
+                                                        <option value="">Unassigned</option>
+                                                        {staffList.map(staff => (
+                                                            <option key={staff.id} value={staff.id}>
+                                                                {staff.displayName}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[11px] font-bold text-gray-500 uppercase mb-1">Due</label>
+                                                    <input
+                                                        type="datetime-local"
+                                                        className="w-full text-sm p-2 border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                                        value={toDateTimeLocalValue(step.dueAt)}
+                                                        onChange={e => setWorkflowSteps(prev => prev.map((entry, currentIndex) => currentIndex === index ? {
+                                                            ...entry,
+                                                            dueAt: e.target.value ? new Date(e.target.value).toISOString() : null
+                                                        } : entry))}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
                         </div>

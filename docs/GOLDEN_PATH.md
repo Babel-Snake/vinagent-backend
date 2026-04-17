@@ -1,53 +1,46 @@
 # GOLDEN_PATH.md
 
-This document defines the **canonical, end-to-end flow** for VinAgent in its updated architecture using **secure member confirmation links** via SMS, email, or future voice flows.
+This is the current canonical end-to-end flow for the live backend: an inbound member message creates a task, staff action it, the system issues a secure confirmation link, and the member completes the final step.
 
-This replaces the previous direct-update flow. In the new system:
+## 1. Scenario
 
-> **The system never updates customer data directly after approval.**
->
-> Instead, the member receives a secure link/token, confirms or edits their details, and *then* the system applies the change.
+Emma Clarke sends an SMS to Sunrise Ridge Winery:
 
-This improves security, reduces fraud, reduces errors, and creates a cleaner audit trail.
+> "Hi, I've moved. Please update my address to 12 Oak Street, Stirling 5152."
 
-This Golden Path is the reference for:
+The system should:
 
-* API design
-* Test planning
-* Implementation of the first thin slice
-* Onboarding new developers and AI coding agents
+1. ingest the SMS
+2. create a `PENDING` task
+3. create a structured step plan for the address workflow
+4. let staff review and action it
+5. create a secure token and send Emma a link
+6. wait for Emma to confirm
+7. update her address
+8. leave an audit trail of what happened
 
----
+## 2. Seed Data
 
-# 1. Scenario Overview (Secure-Link Version)
+### Winery
 
-**Story:**
-
-* A member, **Emma Clarke**, at **Sunrise Ridge Winery**, has moved house.
-* Emma sends an SMS: *"Hi, I've moved. Please update my address to 12 Oak Street, Stirling 5152."*
-* VinAgent receives the SMS, normalises it into a `Message`, runs triage, and creates an `ADDRESS_CHANGE` `Task`.
-* The winery manager reviews the task and approves it.
-* **Execution now sends Emma a secure link** to confirm her new address.
-* Emma taps the link, sees the form pre-filled, confirms it.
-* VinAgent validates the token, updates Emma’s address, marks the task executed, and sends a final confirmation.
-
-This scenario exercises the full secure flow.
-
----
-
-# 2. Pre-Conditions
-
-## 2.1 Winery
-
-```
+```text
 id: 1
 name: Sunrise Ridge Winery
-timeZone: Australia/Adelaide
+timezone: Australia/Adelaide
+contactPhone: +61123456789
 ```
 
-## 2.2 Member (Old Address)
+### WinerySettings
 
+```text
+wineryId: 1
+enableWineClubModule: true
+enableSecureLinks: true
 ```
+
+### Member
+
+```text
 id: 42
 wineryId: 1
 firstName: Emma
@@ -61,263 +54,167 @@ postcode: 5152
 country: Australia
 ```
 
-## 2.3 User (Manager)
+### Staff User
 
-```
+```text
 id: 7
-email: manager@sunriseridge.example
-wineryId: 1
 role: manager
+wineryId: 1
 ```
 
-## 2.4 Database State
-
-* No related tasks yet.
-* No message yet.
-* No `MemberActionToken` yet.
-
----
-
-# 3. Step 1 – Inbound SMS → Webhook
-
-Emma sends:
-
-> "Hi, I've moved. Please update my address to 12 Oak Street, Stirling 5152."
+## 3. Step 1: SMS Webhook
 
 Twilio posts to:
 
-```
-POST /webhooks/sms
+```http
+POST /api/webhooks/sms
 ```
 
-Minimal normalised payload:
+Payload:
+
+```text
+From=+61412345678
+To=+61123456789
+Body=Hi, I've moved. Please update my address to 12 Oak Street, Stirling 5152.
+MessageSid=SM_GOLDEN_PATH_001
+```
+
+Result:
+
+* the webhook is validated
+* an inbound `Message` is stored
+* member lookup matches Emma
+* triage runs
+
+## 4. Step 2: Triage Creates a Task
+
+Triage classifies the message as an address-change workflow.
+
+Representative task:
 
 ```json
 {
-  "from": "+61412345678",
-  "body": "Hi, I've moved. Please update my address to 12 Oak Street, Stirling 5152.",
-  "providerMessageId": "SM1234567890"
-}
-```
-
-The controller validates → hands off to Message Ingestion.
-
----
-
-# 4. Step 2 – Message Ingestion
-
-## 4.1 Member Lookup
-
-`+61412345678` resolves to `Member.id = 42`.
-
-## 4.2 Create Message
-
-A `Message` row is created:
-
-```
-id: 1001
-wineryId: 1
-memberId: 42
-source: sms
-direction: inbound
-body: "Hi, I've moved..."
-externalId: "SM1234567890"
-receivedAt: 2025-02-03T09:15:00+10:30
-```
-
-Then ingestion invokes triage:
-
-```js
-triageService.triageMessage({ messageId: 1001, memberId: 42, wineryId: 1, body: "Hi, I've moved..." });
-```
-
----
-
-# 5. Step 3 – Triage Engine → Task Creation
-
-## 5.1 Classifying Intent
-
-Rule-based MVP logic identifies keywords: "moved", "update", address-like patterns.
-
-Intent: **ADDRESS_CHANGE**.
-
-## 5.2 Extract Payload
-
-```json
-{
-  "newAddress": {
-    "addressLine1": "12 Oak Street",
-    "suburb": "Stirling",
-    "state": "SA",
-    "postcode": "5152",
-    "country": "Australia"
-  }
-}
-```
-
-## 5.3 Drafted Reply
-
-```json
-{
+  "type": "ACCOUNT_ADDRESS_CHANGE",
+  "category": "ACCOUNT",
+  "subType": "ACCOUNT_ADDRESS_CHANGE",
+  "customerType": "MEMBER",
+  "status": "PENDING",
+  "priority": "normal",
   "suggestedChannel": "sms",
-  "suggestedReplyBody": "Hi Emma, thanks for your message. We'll send you a secure link so you can confirm your new address."
+  "payload": {
+    "newAddress": {
+      "addressLine1": "12 Oak Street",
+      "suburb": "Stirling",
+      "state": "SA",
+      "postcode": "5152",
+      "country": "Australia"
+    }
+  }
 }
 ```
 
-## 5.4 Task Created
+Important current behaviour:
 
-```
-id: 5001
-type: ADDRESS_CHANGE
-status: PENDING_REVIEW
-payload: { newAddress: {...} }
-suggestedChannel: sms
-requiresApproval: true
-createdBy: null (system)
-```
+* webhook-created tasks now go through the shared task service
+* the system writes `TaskAction(CREATED)` for ingestion-created tasks
+* triage may attach an initial `TaskStep` plan to the task
 
-## 5.5 TaskAction (CREATED)
+## 5. Step 3: Staff Review the Queue
 
-```
-actionType: CREATED
-userId: null
-details: { "source": "triage_mvp" }
+The dashboard calls:
+
+```http
+GET /api/tasks?status=PENDING
 ```
 
----
+The manager reviews:
 
-# 6. Step 4 – Manager Reviews Task
+* the member
+* the extracted payload
+* the workflow step plan
+* the suggested reply/channel
+* any notes or assignment needed before actioning
 
-Client calls:
+## 6. Step 4: Manager Actions the Task
 
+The manager sends:
+
+```http
+PATCH /api/tasks/5001
 ```
-GET /tasks?status=PENDING_REVIEW
-```
-
-Manager sees:
-
-* Member summary
-* Extracted address
-* Drafted message
-* Approval button
-
----
-
-# 7. Step 5 – Manager Approves Task
-
-Manager approves with optional edits to the suggested reply:
-
-```
-PATCH /tasks/5001
-{
-  "status": "APPROVED",
-  "payload": { "newAddress": {...} },
-  "suggestedReplyBody": "Hi Emma, thanks for your message. We'll send you a secure link to confirm your new address."
-}
-```
-
-Task is updated → status becomes `APPROVED`.
-
-`TaskAction` records:
-
-```
-actionType: APPROVED
-userId: 7
-```
-
-Execution service is triggered.
-
----
-
-# 8. Step 6 – Execution Stage (Secure Link)
-
-The execution service **does NOT update the address directly**.
-Instead, it:
-
-## 8.1 Creates a MemberActionToken
-
-```
-id: 8001
-type: ADDRESS_CHANGE
-memberId: 42
-wineryId: 1
-taskId: 5001
-channel: sms
-token: <opaque-random-value>
-target: "+61412345678"
-expiresAt: 2025-02-10T09:30:00+10:30
-payload: { newAddress: {...} }
-```
-
-## 8.2 Sends SMS With Secure Link
-
-Outbound message body:
-
-> "Hi Emma, tap this secure link to confirm your new address: [https://vinagent.app/address-update?token=XYZ123](https://vinagent.app/address-update?token=XYZ123)"
-
-Outbound message stored as:
-
-```
-Message.id: 1002
-direction: outbound
-body: "Hi Emma, tap this secure link..."
-externalId: "SM9876543210"
-```
-
-## 8.3 Task Status Update → AWAITING_MEMBER_ACTION
-
-`Task` becomes:
-
-```
-status: AWAITING_MEMBER_ACTION
-```
-
-`TaskAction` recorded:
-
-```
-actionType: EXECUTION_TRIGGERED
-details: { tokenId: 8001, channel: "sms" }
-```
-
----
-
-# 9. Step 7 – Member Opens Secure Link
-
-Emma taps the link.
-
-Browser calls:
-
-```
-GET /address-update/validate?token=XYZ123
-```
-
-Backend:
-
-* Validates token
-* Ensures it is not expired
-* Ensures it is unused
-
-Response:
 
 ```json
 {
-  "member": { "firstName": "Emma" },
-  "proposedAddress": { "addressLine1": "12 Oak Street", "suburb": "Stirling", "state": "SA", "postcode": "5152" }
+  "status": "ACTIONED",
+  "suggestedReplyBody": "Hi Emma, please confirm your address using this secure link."
 }
 ```
 
-Frontend shows a confirmation form.
+Immediate effects:
 
----
+* task update is saved
+* `TaskAction(ACTIONED)` is written with the manager as actor
+* `execution.service` is invoked
 
-# 10. Step 8 – Member Confirms Address
+## 7. Step 5: Execution Creates a Secure Token
 
-Emma submits:
+Because this is an address-change task and secure links are enabled:
 
+1. payload is validated
+2. `MemberActionToken` is created
+3. the secure link is appended to the reply body if needed
+4. the task is moved back to `PENDING`
+5. `TaskAction(EXECUTION_TRIGGERED)` is written
+6. the notification layer sends the SMS/email with the link
+
+Representative token:
+
+```text
+id: 8001
+taskId: 5001
+memberId: 42
+type: ADDRESS_CHANGE
+channel: sms
+target: +61412345678
+usedAt: null
 ```
-POST /address-update/confirm
+
+Representative task state after execution:
+
+```text
+status: PENDING
+workflowState: WAITING
+waitingOn: CUSTOMER
+```
+
+This is intentional. In the current build, `PENDING` can mean "awaiting member follow-up", not just "unreviewed by staff".
+
+## 8. Step 6: Member Validates the Link
+
+Emma opens the public page, which calls:
+
+```http
+GET /api/public/address-update/validate?token=<opaque-token>
+```
+
+The API returns:
+
+* member summary
+* current address
+* proposed address
+* token expiry
+
+## 9. Step 7: Member Confirms the Address
+
+The public form submits:
+
+```http
+POST /api/public/address-update/confirm
+```
+
+```json
 {
-  "token": "XYZ123",
+  "token": "<opaque-token>",
   "newAddress": {
     "addressLine1": "12 Oak Street",
     "suburb": "Stirling",
@@ -328,63 +225,59 @@ POST /address-update/confirm
 }
 ```
 
-Backend:
+Backend effects:
 
-* Validates token again
-* Updates the `Member` record
-* Marks token `usedAt = now`
-* Updates task status → `EXECUTED`
-* Records `TaskAction(EXECUTED)`
+1. token is revalidated
+2. member address fields are updated
+3. token is marked used
+4. linked task is set to `ACTIONED`
+5. `TaskAction(ACTIONED)` is written with:
 
-## 10.1 Member Update
-
+```json
+{
+  "action": "MEMBER_CONFIRMED_ADDRESS",
+  "tokenId": 8001
+}
 ```
-Member.addressLine1 = "12 Oak Street"
-Member.suburb = "Stirling"
-...
+
+## 10. Final State
+
+### Message and Task State
+
+* inbound `Message` exists
+* `Task.status = ACTIONED`
+* `Task.workflowState = COMPLETED` if no active steps remain
+* `TaskAction` trail includes:
+  * `CREATED`
+  * staff `ACTIONED`
+  * `EXECUTION_TRIGGERED`
+  * member-confirmation `ACTIONED`
+
+### Member State
+
+```text
+addressLine1: 12 Oak Street
+suburb: Stirling
+state: SA
+postcode: 5152
+country: Australia
 ```
 
-## 10.2 Final Confirmation SMS
+### Token State
 
-Outbound SMS:
+```text
+usedAt: <timestamp>
+```
 
-> "Hi Emma — your address has been updated. Thanks for confirming!"
+## 11. Why This Matters
 
-Recorded as outbound `Message.id: 1003`.
+This flow is the clearest illustration of the current architecture:
 
----
+* task status is coarse
+* task workflow summary and `TaskStep` carry the current progress view
+* audit events carry the detailed workflow history
+* secure member actions are first-class
+* human action happens before automation
+* the backend is designed around safe, reversible operational steps rather than hidden direct mutation
 
-# 11. Final State Summary
-
-## 11.1 Entities Created
-
-* Message (inbound) – id 1001
-* Task – id 5001
-* TaskAction – CREATED, APPROVED, EXECUTION_TRIGGERED, EXECUTED
-* MemberActionToken – id 8001
-* Message (secure link outbound) – id 1002
-* Message (final confirmation) – id 1003
-
-## 11.2 Entities Updated
-
-* Member address fields
-* Task status transitions:
-  `PENDING_REVIEW → APPROVED → AWAITING_MEMBER_ACTION → EXECUTED`
-
----
-
-# 12. Why This Flow Matters
-
-This secure-link flow ensures:
-
-* **Members control their own sensitive data updates**
-* **Wineries remain protected from fraud**
-* **Staff avoid copying addresses manually**
-* **System maintains a clean, auditable trail**
-* **Architecture works for SMS, email, and future voice flows**
-
-This Golden Path is now the backbone of VinAgent.
-
-Any new feature should follow this general pattern:
-
-> Ingest → Normalise → Triage → Task → Human Review → Secure-Link → Member Confirmation → Update → Audit → Notify
+If a new doc, client, or test assumes `APPROVED`, `AWAITING_MEMBER_ACTION`, or `EXECUTED`, it is describing the old model rather than the current build.

@@ -95,7 +95,7 @@ exports.listStaff = async (req, res, next) => {
             where: {
                 wineryId: requester.wineryId,
             },
-            attributes: ['id', 'displayName', 'email', 'createdAt', 'role', 'isActive']
+            attributes: ['id', 'displayName', 'email', 'createdAt', 'role', 'isActive', 'responsibilities']
         });
 
         res.json({ staff: staffMembers });
@@ -110,7 +110,7 @@ exports.listStaff = async (req, res, next) => {
 exports.updateStaff = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { displayName, email, role, isActive } = req.body;
+        const { displayName, email, role, isActive, responsibilities } = req.body;
         const requester = req.user;
 
         if (!requester.wineryId) {
@@ -152,6 +152,7 @@ exports.updateStaff = async (req, res, next) => {
         if (email !== undefined) staffToUpdate.email = email;
         if (role !== undefined) staffToUpdate.role = role;
         if (isActive !== undefined) staffToUpdate.isActive = isActive;
+        if (responsibilities !== undefined) staffToUpdate.responsibilities = responsibilities;
 
         await staffToUpdate.save();
 
@@ -162,7 +163,8 @@ exports.updateStaff = async (req, res, next) => {
                 displayName: staffToUpdate.displayName,
                 email: staffToUpdate.email,
                 role: staffToUpdate.role,
-                isActive: staffToUpdate.isActive
+                isActive: staffToUpdate.isActive,
+                responsibilities: staffToUpdate.responsibilities
             }
         });
 

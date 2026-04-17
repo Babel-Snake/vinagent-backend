@@ -11,8 +11,11 @@ router.post('/', taskController.createTask);
 router.get('/', taskController.listTasks);
 router.get('/:id', taskController.getTask);
 
-// Updates (including approval) - controller handles role check for status=APPROVED
+// Updates include status changes, notes, assignment, and suggestion refreshes.
 router.patch('/:id', taskController.updateTask);
+router.post('/:id/steps', taskController.createTaskStep);
+router.patch('/:id/steps/:stepId', taskController.updateTaskStep);
+router.delete('/:id/steps/:stepId', taskController.deleteTaskStep);
 
 // Note Privacy Toggle
 router.patch('/:id/notes/:actionId', taskController.updateNotePrivacy);

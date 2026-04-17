@@ -1,15 +1,19 @@
 const taskService = require('../services/taskService');
 const triageService = require('../services/triage.service');
 const AppError = require('../utils/AppError');
-const { validate, createTaskSchema, updateTaskSchema, autoclassifySchema } = require('../utils/validation');
+const {
+    validate,
+    createTaskSchema,
+    updateTaskSchema,
+    taskStepCreateSchema,
+    taskStepUpdateSchema,
+    autoclassifySchema
+} = require('../utils/validation');
 
 async function listTasks(req, res, next) {
     try {
         const { wineryId, role, id: userId } = req.user;
         const { status, type, priority, assignedToMe, category, sentiment, assigneeId, createdById, search, dateFrom, dateTo, sortBy, showOnlyFlagged, mentionedMe, actionedById, page, pageSize } = req.query;
-
-        // DEBUG LOGGING
-        require('fs').appendFileSync('debug-query.txt', new Date().toISOString() + ' - req.query: ' + JSON.stringify(req.query) + '\\n');
 
         const result = await taskService.getTasksForWinery({
             wineryId,
@@ -33,17 +37,10 @@ async function getTask(req, res, next) {
         const { wineryId } = req.user;
         const { id } = req.params;
 
-        require('fs').appendFileSync('debug_controller.log', `[${new Date().toISOString()}] getTask request: id=${id}, user=${req.user.id}, role=${req.user.role}\n`);
-
         const task = await taskService.getTaskById({ taskId: id, wineryId });
-
-        require('fs').appendFileSync('debug_controller.log', `[${new Date().toISOString()}] getTask success: id=${id}, found=${!!task}\n`);
 
         res.json({ task });
     } catch (err) {
-        require('fs').appendFileSync('debug_controller.log', `[${new Date().toISOString()}] getTask error: id=${req.params.id}, error=${err.message}\n${err.stack}\n`);
-        // Service throws generic Error for 404, we can let global handler catch it 
-        // if it has statusCode attached (which it does in service)
         next(err);
     }
 }
@@ -129,11 +126,87 @@ async function updateNotePrivacy(req, res, next) {
     }
 }
 
+async function createTaskStep(req, res, next) {
+    try {
+        const { wineryId, userId } = req.user;
+        const { id } = req.params;
+        const validData = validate(taskStepCreateSchema, req.body);
+
+        const step = await taskService.createTaskStep({
+            taskId: id,
+            wineryId,
+            userId,
+            data: validData
+        });
+
+        res.status(201).json({ step });
+    } catch (err) {
+        if (err.message === 'Task not found') {
+            return next(new AppError('Task not found', 404, 'NOT_FOUND'));
+        }
+        next(err);
+    }
+}
+
+async function updateTaskStep(req, res, next) {
+    try {
+        const { wineryId, userId, role } = req.user;
+        const { id, stepId } = req.params;
+        const validUpdates = validate(taskStepUpdateSchema, req.body);
+
+        const step = await taskService.updateTaskStep({
+            taskId: id,
+            stepId,
+            wineryId,
+            userId,
+            userRole: role,
+            updates: validUpdates
+        });
+
+        res.json({ step });
+    } catch (err) {
+        if (err.message === 'Task not found') {
+            return next(new AppError('Task not found', 404, 'NOT_FOUND'));
+        }
+        if (err.message === 'Task step not found') {
+            return next(new AppError('Task step not found', 404, 'NOT_FOUND'));
+        }
+        next(err);
+    }
+}
+
+async function deleteTaskStep(req, res, next) {
+    try {
+        const { wineryId, userId } = req.user;
+        const { id, stepId } = req.params;
+
+        await taskService.deleteTaskStep({
+            taskId: id,
+            stepId,
+            wineryId,
+            userId
+        });
+
+        res.json({ success: true });
+    } catch (err) {
+        if (err.message === 'Task not found') {
+            return next(new AppError('Task not found', 404, 'NOT_FOUND'));
+        }
+        if (err.message === 'Task step not found') {
+            return next(new AppError('Task step not found', 404, 'NOT_FOUND'));
+        }
+        next(err);
+    }
+}
+
 module.exports = {
     listTasks,
     getTask,
     createTask,
     updateTask,
     autoclassify,
-    updateNotePrivacy
+    updateNotePrivacy,
+    createTaskStep,
+    updateTaskStep,
+    deleteTaskStep
 };

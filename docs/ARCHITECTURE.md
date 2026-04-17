@@ -1,357 +1,265 @@
 # ARCHITECTURE.md
 
-This document describes the high-level architecture of the VinAgent backend. It is designed so that a new developer or an AI coding agent can quickly understand how the system fits together, how data flows, and where new code should live.
-
-The focus here is conceptual structure, not low-level implementation details.
+This document describes the current VinAgent architecture as implemented in the repository today.
 
 ## 1. System Overview
 
-VinAgent is a backend service that:
-
-* Receives inbound messages from external systems (SMS, email, voice)
-* Interprets those messages to understand intent
-* Creates structured Tasks in a database
-* Allows human managers to review and approve those Tasks
-* Executes safe operations (e.g. update address, send confirmations)
-
-At a high level, the system consists of:
-
-* **HTTP API Layer** (Express)
-* **Authentication & Authorization** (Firebase Auth)
-* **Message Ingestion Layer** (Webhooks)
-* **Triage Engine** (Intent + Task creation)
-* **Task Management** (Queue + Status changes)
-* **Execution Layer** (safe DB updates + outbound messages)
-* **Database** (MySQL via Sequelize)
-* **Logging & Observability**
-* **External Integrations** (Twilio, Retell, etc.)
-
-## 2. High-Level Data Flow
-
-A typical end-to-end flow looks like this:
-
-1. **Customer sends a message**
-    * Example: SMS saying "Hi, I need to update my address".
-2. **External provider forwards to VinAgent**
-    * Twilio sends an HTTP POST to `/webhooks/sms` with message details.
-3. **API Layer receives the request**
-    * Express route handler parses the payload.
-    * Basic validation is performed.
-4. **Message Ingestion Layer normalises the message**
-    * Maps raw provider payload to an internal `Message` model.
-    * Links the message to a `Member` and `Winery` when possible.
-5. **Triage Engine processes the message**
-    * Uses rules and/or AI to detect intent (e.g. `ADDRESS_CHANGE`).
-    * Creates a new `Task` with:
-        * Type
-        * Status (e.g. `PENDING_REVIEW`)
-        * References to Member, Winery, and Message.
-6. **Manager reviews Tasks via Dashboard or API**
-    * Frontend (later) calls `GET /tasks`.
-    * Manager decides to approve, edit, or reject.
-7. **Execution Layer performs the action**
-    * On approval, the system:
-        * Applies safe changes in the database (e.g. update address).
-        * Generates outbound communication (SMS/email reply).
-8. **Logging & Auditing**
-    * All steps are logged through the shared logger.
-    * Task status transitions are recorded for audit.
+VinAgent is a winery operations platform built around a task workflow. It receives inbound communications, classifies them, stores them as tasks, lets staff act on them, and performs safe follow-up actions such as secure self-service links or outbound notifications.
 
-This architecture ensures that **AI suggestions always pass through a human-review gate** before any real-world changes occur.
+The main subsystems are:
 
-## 3. Backend Service Layout
+* HTTP API layer (`Express`)
+* Authentication and role checks (`Firebase Auth` + local `User` records)
+* Webhook ingestion (`sms`, `email`, `voice`, `retell`)
+* Triage and AI suggestion services
+* Task management and audit trail
+* Execution layer for safe automations
+* Winery knowledge/configuration services
+* Public token-based self-service flows
+* Dashboard frontend (`frontend/`)
+* MySQL persistence via `Sequelize`
 
-The backend is a single Node.js/Express application, structured into clear layers:
+## 2. Current End-to-End Flow
 
-* **Routes** – Define URL endpoints and map them to controllers.
-* **Controllers** – Handle HTTP specifics (request/response), input validation, error translation.
-* **Services** – Contain business logic (triage, task creation, execution rules).
-* **Models** – Sequelize models that define database tables and relationships.
-* **Middleware** – Shared Express middleware (auth, logging, error handlers).
-* **Utils** – Pure functions and helpers (parsers, formatters, etc.).
+The canonical backend flow is:
 
-Planned directory layout under `/src`:
+1. A member or system sends a message.
+2. A webhook route validates the request and normalizes it into a `Message`.
+3. `triage.service` classifies intent and proposes task metadata.
+4. The backend creates a `Task` and, where available, an initial `TaskStep` plan.
+5. Staff review, annotate, assign, action, or reject the task through `/api/tasks`.
+6. If a task is actioned, `execution.service` may perform best-effort automation.
+7. All staff actions are written to `TaskAction`.
+8. If the task requires a secure member confirmation, a `MemberActionToken` is created and the member completes the action through `/api/public/...`.
 
-```text
-/src
-  /config        # Configuration (DB, logger, environment)
-  /routes        # Route definitions
-  /controllers   # HTTP controllers
-  /services      # Business logic
-  /models        # Sequelize models + index
-  /middleware    # Express middleware
-  /utils         # Helpers and pure functions
-  /tests         # Test files (may mirror src structure)
-```
+## 3. Routing Surface
 
-Controllers should be kept thin; services should hold the core logic.
+The app mounts all API routes under `/api`.
 
-## 4. Core Components
+Current route groups:
 
-### 4.1 Authentication & Authorization
+* `/api/webhooks/*` - inbound provider traffic
+* `/api/public/*` - token-based member self-service
+* `/api/tasks/*` - task list/detail/update flows
+* `/api/tasks/flags/*` - per-user task flags
+* `/api/members/*`
+* `/api/staff/*`
+* `/api/users/*`
+* `/api/winery/*`
+* `/api/notifications/*`
+* `/api/calendar/*`
+* `/api/analytics/*`
 
-* **Technology:** Firebase Authentication
-* **Purpose:** Verify user identity and assign roles (e.g. admin, manager).
+Global middleware currently handles:
 
-**Flow:**
+* request IDs
+* structured request logging
+* Helmet
+* CORS
+* rate limiting
+* centralized error responses
 
-1. Incoming API requests carry a Firebase ID token (e.g. in Authorization header).
-2. A middleware verifies the token with Firebase.
-3. The decoded user info is attached to the request context.
-4. Authorization checks occur in controllers/services as needed.
+## 4. Layering
 
-The backend does not manage passwords directly; it trusts Firebase as the identity provider.
+### 4.1 Controllers
 
-### 4.2 Message Ingestion Layer
+Controllers handle request validation, auth context, and response formatting. They should stay thin.
 
-**Endpoints (examples):**
+Examples:
 
-* `POST /webhooks/sms` – for SMS from Twilio or similar.
-* `POST /webhooks/email` – for email via provider.
-* `POST /webhooks/voice` – for call events from Twilio/Retell.
+* `task.controller.js`
+* `webhook.controller.js`
+* `addressUpdateController.js`
+* `winery.controller.js`
 
-**Responsibilities:**
+### 4.2 Services
 
-* Validate incoming payloads.
-* Normalise provider-specific data into an internal `Message` shape.
-* Store `Message` in DB.
-* Trigger the Triage Engine.
+Services hold the business logic.
 
-This layer should not contain business logic beyond simple validation and mapping.
+Important current services:
 
-### 4.3 Triage Engine
+* `triage.service.js` - classify messages or staff notes
+* `taskService.js` - create/update/list/get tasks
+* `execution.service.js` - run follow-up logic after actioning
+* `addressUpdateService.js` - apply confirmed member address updates
+* `memberActionTokenService.js` - secure token lifecycle
+* `aiSuggestion.service.js` - regenerate suggested replies/actions
+* `winery.service.js` - aggregate winery context for AI
 
-The Triage Engine is responsible for deciding "what this message is about".
+### 4.3 Models
 
-**Inputs:**
-* Normalised `Message` object
-* Optional member/winery context
+Sequelize models define persistence and associations. The central workflow models are:
 
-**Outputs:**
-* A `Task` object created in the database, with:
-    * `type` (e.g. `ADDRESS_CHANGE`, `PAYMENT_ISSUE`, `BOOKING_REQUEST`, `GENERAL_QUERY`)
-    * `status` (e.g. `PENDING_REVIEW`)
-    * `payload` (structured details extracted from the message)
+* `Message`
+* `Task`
+* `TaskStep`
+* `TaskAction`
+* `MemberActionToken`
+* `Member`
+* `User`
+* `Winery`
+* `WinerySettings`
 
-**Implementation details:**
-* Initially: simple rule-based logic (e.g. keyword matching) for MVP.
-* Later: AI-based classification using OpenAI.
+## 5. Current Task Model
 
-The engine itself is encapsulated in a service module so it can be easily replaced or extended.
+The current implementation deliberately uses a coarse task status enum:
 
-### 4.4 Task Management
+* `PENDING`
+* `ACTIONED`
+* `REJECTED`
 
-Tasks are central to VinAgent.
+Important consequence:
 
-**Responsibilities:**
+Task status alone does not describe every stage of work. Fine-grained state now lives in:
 
-* Create Tasks when triage detects an actionable intent.
-* Expose APIs for listing, filtering, and viewing Tasks.
-* Track status transitions (e.g. `PENDING_REVIEW` → `APPROVED` → `EXECUTED`).
-* Record who approved or rejected actions.
+* task workflow summary fields on `Task`
+* ordered `TaskStep` rows
+* `TaskAction`
+* token tables for secure member actions
 
-**Example endpoints:**
+### 5.1 Status Meaning
 
-* `GET /tasks` – list tasks for a winery.
-* `GET /tasks/:id` – get a single task.
-* `PATCH /tasks/:id` – approve, reject, or modify a task.
+* `PENDING` means the task still requires attention, or is waiting on an external/member step.
+* `ACTIONED` means a human or automation has completed the next intended action.
+* `REJECTED` means the task was explicitly declined or closed without action.
 
-Status transitions and actions should be logged for full auditability.
+### 5.2 Status Transition Rules
 
-### 4.5 Execution Layer
+Current allowed transitions:
 
-Once a Task is approved, the Execution Layer:
+* `PENDING -> ACTIONED`
+* `PENDING -> REJECTED`
+* `ACTIONED -> PENDING`
+* `REJECTED -> PENDING`
 
-1. Applies database updates (e.g. change member address).
-2. Triggers outbound messages (SMS/email confirmation) if required.
+Role rules:
 
-This layer should:
-* Implement clear, explicit rules for each task type.
-* Avoid hidden side effects.
-* Handle errors gracefully and log them.
+* staff can action tasks
+* staff cannot reject tasks
+* staff cannot reassign tasks
 
-**Example:**
-`ADDRESS_CHANGE` task → update `Member.address` in DB → send confirmation SMS.
+### 5.3 Workflow Layer
 
-### 4.6 Integration Layer (New)
+Each task can now carry a structured step list through `TaskStep`.
 
-The system uses an **Adapter Pattern** to connect with external Winery Systems (CRM, POS, Reservations).
+The task also stores a derived workflow summary:
 
-**Structure:**
-* `src/services/integrations/booking/`: Adapters for Tock, SevenRooms, etc.
-* `src/services/integrations/crm/`: Adapters for Commerce7, WineDirect, etc.
+* `workflowState`
+* `waitingOn`
+* `nextStepSummary`
+* `blockedReason`
+* `dueAt`
 
-Each integration type has a **Factory** that inspects `WinerySettings` and returns the correct **Provider** instance.
+This gives the system a way to represent staged work without exploding the coarse task status enum.
 
-**Example:**
-* `booking.adapter.js`: Defines `createReservation()`.
-* `providers/tock.js`: Implements Tock API.
-* `services/execution.service.js`: Calls `factory.getProvider(id).createReservation()`.
+## 6. Execution Model
 
-### 4.7 Database Layer
+Actioning a task is not the same as finishing all downstream work.
 
-* **Technology:** MySQL
-* **Access:** Sequelize ORM
+`taskService.updateTask()`:
 
-**Key entities** (see `DOMAIN_MODEL.md` for full detail):
-* User
-* Winery & WinerySettings
-* Member
-* Message
-* Task
-* TaskAction
+1. persists the task update
+2. writes a `TaskAction`
+3. if the new status is `ACTIONED`, calls `execution.service.executeTask(...)`
+4. re-derives the task workflow summary from its steps
 
-**General rules:**
-* Use Sequelize models for all DB access.
-* Avoid raw SQL unless absolutely necessary.
-* Use migrations for schema changes.
+Execution is best-effort. If execution fails validation or the provider logic throws, the status change is not rolled back.
 
-### 4.8 Logging & Observability
+### 6.1 Address Change Flow
 
-A single shared logger is used across the app (e.g. Winston or Pino).
+For `ACCOUNT_ADDRESS_CHANGE` / legacy `ADDRESS_CHANGE` tasks:
 
-**Requirements:**
+1. staff action the task (`ACTIONED`)
+2. `execution.service` validates payload
+3. a `MemberActionToken` is created
+4. the task is set back to `PENDING`
+5. `EXECUTION_TRIGGERED` is logged
+6. a secure link is sent through the selected channel
+7. when the member confirms, `addressUpdateService` updates the member and marks the task `ACTIONED`
 
-* Structured logs (JSON-friendly)
-* Include:
-    * timestamp
-    * log level
-    * request ID (where available)
-    * message
-    * relevant context (task ID, user ID, etc.)
+This is why a secure-link task can look `PENDING` after a manager has already actioned it.
 
-**Do not log:**
-* Full credit card numbers
-* Raw authentication tokens
-* Sensitive PII beyond what is necessary to debug
+### 6.2 Order and Booking Flows
 
-Errors should be logged at `error` level with stack traces. Expected business conditions (e.g. "member not found") should use lower levels (info/warn).
+Current execution paths:
 
-## 5. External Integrations
+* order tasks use a stub execution path and remain `ACTIONED`
+* booking tasks call the configured booking provider and remain `ACTIONED` on success
+* unsupported task types are logged and left without automatic side effects
 
-### 5.1 Twilio (SMS and Voice Routing)
+### 6.3 Feature Flags
 
-**Used for:**
-* Receiving SMS (webhook to `/webhooks/sms`)
-* Receiving call events (webhook to `/webhooks/voice`)
-* Sending outbound SMS (e.g. confirmations, magic links)
+`WinerySettings` controls whether some categories can be auto-triaged or auto-executed.
 
-The backend will:
-* Expose webhook endpoints for Twilio.
-* Validate Twilio signatures (later, for security).
-* Use Twilio SDK or HTTP API for outbound messages.
+Important examples:
 
-**Configuration:**
-* `TWILIO_AUTH_TOKEN`: Required for webhook signature validation (enforced in production).
+* `enableWineClubModule`
+* `enableOrdersModule`
+* `enableBookingModule`
+* `enableSecureLinks`
 
-### 5.2 Retell (Voice AI)
+## 7. AI Architecture
 
-**Used for:**
-* Handling inbound calls with a voice AI agent.
+There are two AI-related paths in the current build:
 
-**Flow:**
-Caller → Twilio → Retell (voice agent) → backend webhooks for events and actions.
+### 7.1 Triage
 
-Backend may receive callbacks for events like "caller asked to update address".
-Details will be defined in `API_SPEC.md` and integration-specific docs later.
+`triage.service` prefers AI classification unless `AI_SKIP=true`. If AI is unavailable, it falls back to deterministic heuristics. Initial step plans are normalized through the centralized workflow-template registry in `taskWorkflowTemplates.js`, so subtype/category defaults stay consistent even when AI output varies.
 
-**Configuration:**
-* `RETELL_WEBHOOK_SECRET`: Required for verifying inbound webhook signatures.
+The triage output includes:
 
-### 5.3 OpenAI (Triage + Drafting)
+* `category`
+* `subType`
+* `customerType`
+* `priority`
+* `sentiment`
+* `payload`
+* `suggestedReplyBody`
+* `suggestedChannel`
+* optional assignee/action hints
+* `suggestedSteps`
 
-**Used for:**
-* Intent classification in the Triage Engine.
-* Drafting suggested replies to members.
+In `NODE_ENV=test`, the AI service now forces the deterministic mock adapter unless `AI_ALLOW_LIVE_TESTS=true`. That keeps integration tests stable even when developer machines have live API keys configured.
 
-**Interaction pattern:**
-* **Context Injection**: The `WineryService.getAiContext(wineryId)` method aggregates all winery data (Brand, Products, Policies) into a single JSON payload.
-* This payload is injected into the **System Prompt** for every OpenAI call.
-* This ensures the AI knows the specific winery's voice, inventory, and rules *before* it answers.
+### 7.2 Reply/Action Suggestions
 
-* A service bridge (`OpenAIAdapter`) handles the API calls.
-* No direct calls to OpenAI from controllers.
+`aiSuggestion.service` can regenerate suggested replies/actions using task context, winery context, task history, member context, and the current ordered step plan.
 
-## 6. Security & Privacy
+## 8. Winery Context
 
-**Key principles:**
+The current backend models winery context as a core winery record plus modular profiles:
 
-1. **Least Privilege**
-   Only necessary data is stored and processed.
+* brand profile
+* bookings config
+* policy profile
+* integration config
+* products
+* FAQs
+* SOPs
+* winery contacts
 
-2. **No Sensitive Data in Logs**
-   Avoid logging any secrets, card numbers, or full personal details.
+This data is used both by the dashboard and by the AI layer.
 
-3. **Separation of Concerns**
-   Authentication handled by Firebase.
-   Payment details handled by Stripe or other PCI-compliant services (later).
+## 9. Security Model
 
-4. **Environment Variables**
-   Secrets (API keys, DB passwords) are stored only in `.env` and never committed.
+Current security controls include:
 
-5. **Compliance-aware Messaging**
-   Outbound messages should respect anti-spam laws.
-   Transactional vs marketing messages are handled differently.
+* Firebase-backed auth for dashboard routes
+* role-based checks in middleware and services
+* provider signature validation for webhooks
+* token-based security for member self-service
+* request correlation IDs and centralized error responses
+* redaction/scrubbing in parts of the ingestion path
 
-More detailed security notes will live in `ENGINEERING_GUIDE.md` and any future `SECURITY_PRIVACY.md` if created.
+## 10. Observed Constraints
 
-## 7. Service Boundaries & Rules
+A few design realities matter when changing the system:
 
-To keep the codebase maintainable and agent-friendly:
+* `Task.type` still exists for backward compatibility, but `category` + `subType` are the preferred classification fields.
+* `Task.status` is not the workflow engine. `TaskStep` + workflow summary fields now carry staged progression.
+* The audit trail is richer than the status model; do not try to reintroduce old fine-grained statuses without checking current services first.
+* Several user-facing behaviours depend on feature flags in `WinerySettings`.
 
-* **Controllers:**
-    * Only handle HTTP concerns.
-    * Use services for real work.
-    * Validate input and produce consistent HTTP responses.
+## 11. Summary
 
-* **Services:**
-    * Contain the main business rules.
-    * Can call other services or models.
-    * Do not know about HTTP specifics.
-
-* **Models:**
-    * Only represent DB tables and relations.
-    * Do not contain business logic beyond simple helpers.
-
-* **Utils:**
-    * Pure, reusable functions.
-
-This separation should be followed consistently and reinforced in `ENGINEERING_GUIDE.md`.
-
-## 8. Thin Vertical Slice Strategy
-
-To validate the architecture and give coding agents concrete examples, the first implemented feature will be a thin end-to-end slice:
-
-1. `POST /webhooks/sms` receives a simple SMS payload.
-2. Ingestion normalises it into a `Message` record.
-3. Triage uses simple rule-based logic to create a `Task` of type `GENERAL_QUERY`.
-4. `GET /tasks` returns the created task.
-
-This slice will:
-* Prove the routing, models, and basic flow.
-* Provide real code patterns for controllers, services, models, and tests.
-
-Once this is working and tested, additional task types and AI-based triage will be layered in.
-
-## 9. Open Questions / To Be Defined
-
-The following details will be fully specified in other docs:
-
-* Exact field definitions and relations for User, Winery, Member, Message, Task, TaskAction (see `DOMAIN_MODEL.md`).
-* Exact request/response shapes and error formats for all endpoints (see `API_SPEC.md`).
-* Exact logging format (fields and structure).
-* Task type enum (full list of supported task types).
-* Detailed integration flows with Twilio, Retell, and OpenAI.
-
-As those documents are created, this architecture file should remain consistent with them.
-
-## 10. Summary
-
-VinAgent is a single backend service built around a clear flow: **Ingest → Triage → Task → Human Review → Execution**.
-
-The architecture emphasises clean layering, strong boundaries, and human-in-the-loop control.
-External systems (Twilio, Retell, OpenAI, Firebase, Stripe later) are all integrated through well-defined service modules.
-
-This document gives the big-picture mental model; detailed contracts live in `DOMAIN_MODEL.md` and `API_SPEC.md`.
-
-New contributors and AI agents should read this file early to understand how all moving parts connect.
+The current VinAgent architecture is best understood as a task-centric workflow engine for winery operations. The simplified status model is intentional, and structured workflow progression now lives in `TaskStep`. If you need exact behaviour, read `taskService`, `execution.service`, and `addressUpdateService` together; that is the live contract the docs and tests should follow.

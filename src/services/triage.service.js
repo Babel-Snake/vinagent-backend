@@ -1,4 +1,4 @@
-const { Task, WinerySettings } = require('../models');
+const { WinerySettings } = require('../models');
 
 /**
  * Analyses a message to determine the intent and basic task properties.
@@ -9,9 +9,44 @@ const { Task, WinerySettings } = require('../models');
  */
 const aiService = require('./ai');
 const logger = require('../config/logger');
+const { STEP_TYPES, WAITING_ON } = require('../utils/validation');
+const { inferStepType, inferWaitingOn, getWorkflowTemplateForTask } = require('./taskWorkflowTemplates');
+const { classifyMessageHeuristically } = require('./taskClassificationHeuristics');
+
+function normalizeSuggestedSteps(rawSteps, context = {}) {
+    const fallback = getWorkflowTemplateForTask(context);
+    const source = Array.isArray(rawSteps) && rawSteps.length > 0 ? rawSteps : fallback;
+
+    return source
+        .slice(0, 10)
+        .map((step, index) => {
+            const stepType = STEP_TYPES.includes(step.stepType) ? step.stepType : inferStepType(context.subType);
+            const waitingOn = WAITING_ON.includes(step.waitingOn) ? step.waitingOn : inferWaitingOn(stepType);
+            let dueAt = null;
+
+            if (step.dueAt) {
+                const parsed = new Date(step.dueAt);
+                if (!Number.isNaN(parsed.getTime())) {
+                    dueAt = parsed.toISOString();
+                }
+            } else if (Number.isFinite(step.dueInHours) && step.dueInHours > 0) {
+                dueAt = new Date(Date.now() + (step.dueInHours * 60 * 60 * 1000)).toISOString();
+            }
+
+            return {
+                title: String(step.title || `Step ${index + 1}`).trim().slice(0, 200),
+                description: step.description ? String(step.description).trim().slice(0, 4000) : null,
+                stepType,
+                waitingOn,
+                ownerUserId: Number.isInteger(step.ownerUserId) ? step.ownerUserId : (context.suggestedAssigneeId || null),
+                dueAt,
+                sortOrder: index
+            };
+        });
+}
 
 async function triageMessage(message, context = {}) {
-    const body = (message.body || '').toLowerCase();
+    const messageBody = String(message.body || '');
 
     // 1. Determine Customer Type
     let customerType = 'UNKNOWN';
@@ -26,7 +61,7 @@ async function triageMessage(message, context = {}) {
         subType: 'GENERAL_ENQUIRY',
         sentiment: 'NEUTRAL',
         priority: 'normal',
-        payload: { summary: body.substring(0, 50) }
+        payload: { summary: messageBody.substring(0, 50) }
     };
 
     const suggestedChannel = message.source === 'email'
@@ -44,12 +79,12 @@ async function triageMessage(message, context = {}) {
             // Merge AI result
             result = { ...result, ...aiResult };
         } catch (err) {
-            logger.warn('AI Triage unavailable/failed', { error: err.message, body: body.substring(0, 50) });
+            logger.warn('AI Triage unavailable/failed', { error: err.message, body: messageBody.substring(0, 50) });
             // 3. Fallback to Heuristics (Legacy Logic)
-            result = fallbackHeuristics(body, customerType);
+            result = classifyMessageHeuristically(messageBody, { ...context, customerType, suggestedChannel });
         }
     } else {
-        result = fallbackHeuristics(body, customerType);
+        result = classifyMessageHeuristically(messageBody, { ...context, customerType, suggestedChannel });
     }
 
     // 4. Feature Flag / Tier Enforcement
@@ -85,6 +120,12 @@ async function triageMessage(message, context = {}) {
 
 
 
+    const suggestedSteps = normalizeSuggestedSteps(result.suggestedSteps, {
+        category: result.category,
+        subType: result.subType,
+        suggestedAssigneeId: result.suggestedAssigneeId || null
+    });
+
     return {
         type: result.subType, // Legacy
         category: result.category,
@@ -102,75 +143,14 @@ async function triageMessage(message, context = {}) {
         requiresApproval: true,
         suggestedTitle: result.suggestedTitle, // Pass through if AI generated
         suggestedReplyBody: result.suggestedReply || null,
-        suggestedChannel
+        suggestedChannel,
+        suggestedAssigneeId: result.suggestedAssigneeId || undefined,
+        suggestedAction: result.suggestedAction || undefined,
+        suggestedRecipientEmail: result.suggestedRecipientEmail || undefined,
+        suggestedCc: result.suggestedCc || undefined,
+        suggestedSteps
     };
 }
-
-// Fallback Rules (The heuristic logic extracted)
-function fallbackHeuristics(body, customerType) {
-    let category = 'GENERAL';
-    let subType = 'GENERAL_ENQUIRY';
-    let priority = 'normal';
-    let sentiment = 'NEUTRAL';
-    let summary = body.substring(0, 50);
-
-    // Heuristic Sentiment Analysis
-    const negativeKeywords = ['angry', 'upset', 'complain', 'bad', 'terrible', 'rude', 'late', 'missing', 'failed'];
-    if (negativeKeywords.some(kw => body.includes(kw))) {
-        sentiment = 'NEGATIVE';
-        priority = 'high';
-    }
-
-    // Extended Keyword Matching
-    // OPERATIONS
-    if (body.includes('out of') || body.includes('need more') || body.includes('supply') || body.includes('printer')) {
-        category = 'OPERATIONS';
-        subType = 'OPERATIONS_SUPPLY_REQUEST';
-    } else if (body.includes('leaking') || body.includes('broken') || body.includes('noise') || body.includes('fix')) {
-        category = 'OPERATIONS';
-        subType = 'OPERATIONS_MAINTENANCE_REQUEST';
-    } else if (body.includes('upset') || body.includes('manager') || body.includes('escalate')) {
-        category = 'OPERATIONS';
-        subType = 'OPERATIONS_ESCALATION';
-        sentiment = 'NEGATIVE';
-    }
-    // ORDER - Wholesale / Large
-    else if (body.includes('wholesale') || body.includes('pallet') || body.includes('trade')) {
-        category = 'ORDER';
-        subType = 'ORDER_WHOLESALE_ENQUIRY';
-    } else if (body.includes('large order') || body.includes('corporate') || body.includes('bulk')) {
-        category = 'ORDER';
-        subType = 'ORDER_LARGE_ORDER_REQUEST';
-    }
-    // ACCOUNT
-    else if (body.includes('address') || body.includes('move')) {
-        category = 'ACCOUNT';
-        subType = 'ACCOUNT_ADDRESS_CHANGE';
-    } else if (body.includes('payment') || body.includes('card') || body.includes('billing')) {
-        category = 'ACCOUNT';
-        subType = 'ACCOUNT_PAYMENT_ISSUE';
-        priority = 'high';
-    } else if (body.includes('login') || body.includes('password') || body.includes('locked')) {
-        category = 'ACCOUNT';
-        subType = 'ACCOUNT_LOGIN_ISSUE';
-    }
-    // BOOKING
-    else if (body.includes('book') || body.includes('tasting') || body.includes('visit')) {
-        category = 'BOOKING';
-        subType = 'BOOKING_NEW';
-    }
-    // ORDER - Standard
-    else if (body.includes('delivery') || body.includes('shipping') || body.includes('track')) {
-        category = 'ORDER';
-        subType = 'ORDER_SHIPPING_DELAY';
-    }
-
-    const suggestedTitle = `${category} - ${subType.replace(/_/g, ' ')}`;
-    return { category, subType, priority, sentiment, payload: { summary }, suggestedTitle };
-}
-
-
-
 
 /**
  * Autoclassifies a staff note into a structured task definition.
@@ -181,7 +161,6 @@ function fallbackHeuristics(body, customerType) {
 async function classifyStaffNote(input) {
     const { text, memberId, wineryId } = input;
     const { Member } = require('../models');
-    const { Op } = require('sequelize');
 
     // Simulate message object for triage
     const message = { body: text };
@@ -215,6 +194,7 @@ async function classifyStaffNote(input) {
         },
         suggestedTitle: classification.suggestedTitle || `${classification.category} - ${classification.subType.replace(/_/g, ' ')}`,
         suggestedAssigneeRole: 'manager', // Logic could be smarter here
+        suggestedSteps: classification.suggestedSteps || [],
         suggestedMember: foundMember ? {
             id: foundMember.id,
             firstName: foundMember.firstName,

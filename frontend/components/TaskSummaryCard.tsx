@@ -45,6 +45,7 @@ export default function TaskSummaryCard({
     };
 
     const summaryText = getSummary();
+    const workflowText = task.nextStepSummary || task.blockedReason || null;
 
     return (
         <div
@@ -87,6 +88,13 @@ export default function TaskSummaryCard({
                             </p>
                         )}
 
+                        {workflowText && (
+                            <div className="mb-3 text-sm text-slate-700">
+                                <span className="font-semibold text-slate-500 uppercase tracking-wider text-[11px] mr-2">Next</span>
+                                {workflowText}
+                            </div>
+                        )}
+
                         {/* Meta Row */}
                         <div className="flex items-center gap-4 text-sm text-gray-500 font-medium mt-2">
                             <span className="flex items-center gap-1.5">
@@ -116,6 +124,17 @@ export default function TaskSummaryCard({
                             `}>
                                 {task.status.replace(/_/g, ' ')}
                             </span>
+                            {task.workflowState && task.workflowState !== 'NOT_STARTED' && (
+                                <span className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider
+                                    ${task.workflowState === 'IN_PROGRESS' ? 'bg-blue-100 text-blue-800 border border-blue-200' : ''}
+                                    ${task.workflowState === 'WAITING' ? 'bg-amber-100 text-amber-800 border border-amber-200' : ''}
+                                    ${task.workflowState === 'BLOCKED' ? 'bg-red-100 text-red-800 border border-red-200' : ''}
+                                    ${task.workflowState === 'COMPLETED' ? 'bg-green-100 text-green-800 border border-green-200' : ''}
+                                    ${task.workflowState === 'CANCELLED' ? 'bg-gray-100 text-gray-700 border border-gray-200' : ''}
+                                `}>
+                                    {task.workflowState.replace(/_/g, ' ')}
+                                </span>
+                            )}
                         </div>
 
                         {/* Category Row */}

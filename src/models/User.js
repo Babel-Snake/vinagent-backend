@@ -6,6 +6,7 @@ module.exports = (sequelize, DataTypes) => {
             User.belongsTo(models.Winery, { foreignKey: 'wineryId' });
             User.hasMany(models.Notification, { foreignKey: 'userId' });
             User.hasMany(models.TaskAction, { foreignKey: 'userId' });
+            User.hasMany(models.TaskStep, { foreignKey: 'ownerUserId', as: 'OwnedTaskSteps' });
         }
     }
 
@@ -36,6 +37,10 @@ module.exports = (sequelize, DataTypes) => {
                 type: DataTypes.ENUM('admin', 'manager', 'staff'),
                 allowNull: false,
                 defaultValue: 'staff'
+            },
+            responsibilities: {
+                type: DataTypes.TEXT,
+                allowNull: true
             },
             wineryId: {
                 type: DataTypes.INTEGER,

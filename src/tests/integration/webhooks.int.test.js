@@ -3,7 +3,6 @@ const request = require('supertest');
 jest.mock('../../models', () => ({
     Message: { create: jest.fn(), findOne: jest.fn() },
     Winery: { findOne: jest.fn() },
-    Task: { create: jest.fn() },
     Member: { findOne: jest.fn() },
     sequelize: {
         transaction: jest.fn(() => ({
@@ -18,6 +17,10 @@ jest.mock('../../services/triage.service', () => ({
     triageMessage: jest.fn()
 }));
 
+jest.mock('../../services/taskService', () => ({
+    createTask: jest.fn()
+}));
+
 jest.mock('twilio', () => ({
     validateRequest: jest.fn(() => true)
 }));
@@ -27,8 +30,9 @@ process.env.EMAIL_WEBHOOK_SECRET = 'secret';
 process.env.TWILIO_AUTH_TOKEN = 'token';
 
 const app = require('../../app');
-const { Winery, Task, Member, Message } = require('../../models');
+const { Winery, Member, Message } = require('../../models');
 const triageService = require('../../services/triage.service');
+const taskService = require('../../services/taskService');
 const twilio = require('twilio');
 
 describe('Webhook routes', () => {
@@ -41,14 +45,14 @@ describe('Webhook routes', () => {
             Winery.findOne.mockResolvedValue({ id: 1 });
             Member.findOne.mockResolvedValue({ id: 2 });
             Message.create.mockResolvedValue({ id: 10 });
-            Task.create.mockResolvedValue({ id: 20 });
+            taskService.createTask.mockResolvedValue({ id: 20 });
             triageService.triageMessage.mockResolvedValue({
                 type: 'GENERAL_QUERY',
                 category: 'GENERAL',
                 subType: 'GENERAL_ENQUIRY',
                 customerType: 'VISITOR',
                 sentiment: 'NEUTRAL',
-                status: 'PENDING_REVIEW',
+                status: 'PENDING',
                 priority: 'normal',
                 payload: {},
                 requiresApproval: true,
@@ -69,14 +73,16 @@ describe('Webhook routes', () => {
             expect(res.status).toBe(200);
             expect(res.body.success).toBe(true);
             expect(res.body.taskId).toBe(20);
-            // Task.create is now called with (data, { transaction })
-            // Check the first argument contains our expected fields
-            expect(Task.create.mock.calls[0][0]).toMatchObject({
-                suggestedChannel: 'email',
+            expect(taskService.createTask).toHaveBeenCalledWith(expect.objectContaining({
                 wineryId: 1,
-                memberId: 2,
-                messageId: 10
-            });
+                userId: null,
+                source: 'system',
+                data: expect.objectContaining({
+                    suggestedChannel: 'email',
+                    memberId: 2,
+                    messageId: 10
+                })
+            }));
         });
 
         it('rejects requests missing the email signature', async () => {
@@ -102,14 +108,14 @@ describe('Webhook routes', () => {
             Winery.findOne.mockResolvedValue({ id: 3 });
             Member.findOne.mockResolvedValue({ id: 4 });
             Message.create.mockResolvedValue({ id: 30 });
-            Task.create.mockResolvedValue({ id: 40 });
+            taskService.createTask.mockResolvedValue({ id: 40 });
             triageService.triageMessage.mockResolvedValue({
                 type: 'GENERAL_QUERY',
                 category: 'GENERAL',
                 subType: 'GENERAL_ENQUIRY',
                 customerType: 'VISITOR',
                 sentiment: 'NEUTRAL',
-                status: 'PENDING_REVIEW',
+                status: 'PENDING',
                 priority: 'normal',
                 payload: {},
                 requiresApproval: true,
@@ -129,13 +135,16 @@ describe('Webhook routes', () => {
 
             expect(res.status).toBe(200);
             expect(res.body.success).toBe(true);
-            // Check first argument to Task.create contains expected fields
-            expect(Task.create.mock.calls[0][0]).toMatchObject({
-                suggestedChannel: 'voice',
+            expect(taskService.createTask).toHaveBeenCalledWith(expect.objectContaining({
                 wineryId: 3,
-                memberId: 4,
-                messageId: 30
-            });
+                userId: null,
+                source: 'system',
+                data: expect.objectContaining({
+                    suggestedChannel: 'voice',
+                    memberId: 4,
+                    messageId: 30
+                })
+            }));
             expect(twilio.validateRequest).toHaveBeenCalled();
         });
 

@@ -1,210 +1,206 @@
 # API_SPEC.md
 
-VinAgent HTTP API specification for the MVP, aligned with the secure-link Golden Path and the current domain model.
+This document describes the current HTTP contract exposed by the VinAgent backend. It reflects the live implementation in `src/routes`, `src/controllers`, and `src/services`.
 
-Stack assumptions:
+Base path:
 
-* Backend: Express.js (Node)
-* Auth: Firebase Authentication (Bearer token for dashboard APIs)
-* DB: MySQL via Sequelize
-
-This spec focuses on the first thin slice:
-
-* Inbound SMS → Message → Task → Human approval → MemberActionToken → Member confirms via link → Address updated → Confirmation.
-
----
+* all application APIs are mounted under `/api`
 
 ## 1. Conventions
 
-* **Base URL (backend)**: `https://api.vinagent.app` (placeholder)
-* **Content Type**: `application/json` for all non-webhook endpoints.
-* **Timestamps**: ISO 8601 strings in UTC or local with offset.
-* **IDs**: Integers in examples, but could be UUIDs internally.
-* **Errors**: Standard JSON error format:
+### 1.1 Authentication
+
+Dashboard APIs require:
+
+```http
+Authorization: Bearer <firebase-id-token>
+```
+
+Public self-service APIs use `MemberActionToken` instead of Firebase auth.
+
+Webhook endpoints use provider-specific signature validation.
+
+### 1.2 Error Shape
+
+Errors are returned as:
 
 ```json
 {
   "error": {
     "code": "SOME_CODE",
     "message": "Human readable message",
-    "details": { "optional": "context" }
+    "details": null,
+    "requestId": "req_123"
   }
 }
 ```
 
----
+## 2. Health
 
-## 2. Authentication
+### 2.1 `GET /`
 
-### 2.1 Dashboard / Internal APIs
+Returns a simple service heartbeat.
 
-* Use Firebase Authentication.
-* Clients send `Authorization: Bearer <firebase-id-token>`.
-* Middleware verifies token and populates `req.user` with:
+### 2.2 `GET /health`
 
-  * `userId`
-  * `wineryId`
-  * `role` (`admin`, `manager`, `staff`)
+Returns a simple service heartbeat.
 
-Requests without valid tokens MUST return:
+### 2.3 `GET /api/health`
 
-```http
-401 Unauthorized
-```
+Returns:
 
 ```json
 {
-  "error": {
-    "code": "UNAUTHENTICATED",
-    "message": "Missing or invalid authentication token"
-  }
+  "status": "ok",
+  "timestamp": "2026-04-16T07:00:00.000Z"
 }
 ```
-
-### 2.2 Webhook Endpoints
-
-* Twilio SMS webhook is not Firebase-authenticated.
-* Validate via Twilio signature or secret token.
-
-If validation fails, return `403 Forbidden`.
-
-### 2.3 Member Self-Service Endpoints
-
-* `/address-update/*` endpoints are secured via `MemberActionToken` `token` query/body param.
-* No additional login required for the MVP.
-
----
 
 ## 3. Webhooks
 
-### 3.1 POST /webhooks/sms
+### 3.1 `POST /api/webhooks/sms`
 
-Inbound SMS from Twilio. Normalises the message and creates a `Message` + `Task`.
+Consumes a Twilio-style inbound SMS payload.
 
-**URL**
+Required fields:
 
-```http
-POST /webhooks/sms
-```
+* `From`
+* `To`
+* `MessageSid`
+* `Body` may be empty
 
-**Auth**
-
-* Twilio signature validation (implementation detail).
-
-**Request (x-www-form-urlencoded, simplified example)**
-
-```text
-From=%2B61412345678
-To=%2B61123456789
-Body=Hi%2C+I%27ve+moved.+Please+update+my+address+to+12+Oak+Street%2C+Stirling+5152.
-MessageSid=SM1234567890
-AccountSid=AC987654321
-```
-
-The controller will:
-
-* Validate required fields.
-* Normalise into internal shape.
-* Call the ingestion service.
-
-**Response (success)**
-
-```http
-200 OK
-```
+Success response:
 
 ```json
 {
-  "status": "ok"
+  "success": true,
+  "taskId": 123
 }
 ```
 
-**Response (validation error)**
-
-```http
-400 Bad Request
-```
+Duplicate webhook response:
 
 ```json
 {
-  "error": {
-    "code": "INVALID_WEBHOOK_PAYLOAD",
-    "message": "Missing required fields"
-  }
+  "success": true,
+  "taskId": null,
+  "duplicate": true
 }
 ```
 
----
+Effects:
 
-## 4. Winery Management APIs
-Endpoints for configuring the winery profile. Protected (Manager/Admin).
+* creates an inbound `Message`
+* classifies the message
+* creates a `Task`
+* may create initial `TaskStep` rows from AI/default workflow planning
 
-### 4.1 GET /api/winery/full
-Returns the complete nested winery object (Profile, Products, Policies, etc.).
+### 3.2 `POST /api/webhooks/email`
 
-### 4.2 PUT /api/winery/*
-Section-based updates.
-* `PUT /api/winery` (Overview)
-* `PUT /api/winery/brand`
-* `PUT /api/winery/bookings/config`
-* `PUT /api/winery/policies/profile`
-* `PUT /api/winery/integrations`
+Consumes an email webhook payload.
 
-### 4.3 Sub-Resources
-Standard CRUD for lists.
-* `POST /api/winery/products`, `DELETE /api/winery/products/:id`
-* `POST /api/winery/bookings/types`, `DELETETypes/:id`
-* `POST /api/winery/faqs`, `DELETE /api/winery/faqs/:id`
+Required fields:
 
----
+* `from`
+* `to`
+* `messageId`
+* `subject` and `text` may be empty
 
-## 5. Task APIs (Dashboard)
+Response shape matches SMS:
 
-These endpoints allow winery staff to review and approve tasks.
-
-### 5.1 GET /tasks
-
-List tasks for the authenticated user’s winery.
-
-**URL**
-
-```http
-GET /tasks
+```json
+{
+  "success": true,
+  "taskId": 123
+}
 ```
 
-**Query Parameters (optional)**
+### 3.3 `POST /api/webhooks/voice`
 
-* `status`: filter by status (`PENDING_REVIEW`, `APPROVED`, `AWAITING_MEMBER_ACTION`, `EXECUTED`, etc.).
-* `type`: filter by type (`ADDRESS_CHANGE`, `GENERAL_QUERY`, ...).
-* `page`: page number (default `1`).
-* `pageSize`: items per page (default `20`, max `100`).
-* `assignedToMe`: boolean (`true`) to filter tasks assigned to the current user (only relevant for managers/admins; staff always limited to their tasks or unassigned).
+Consumes a voice/call webhook payload.
 
-**Headers**
+Required fields:
 
-```http
-Authorization: Bearer <firebase-id-token>
+* `From`
+* `To`
+* `CallSid`
+* optional `RecordingUrl`
+* optional `TranscriptionText`
+
+Success response:
+
+```json
+{
+  "success": true,
+  "taskId": 123
+}
 ```
 
-**Response (200)**
+### 3.4 `POST /api/webhooks/retell`
+
+Consumes Retell callbacks.
+
+Current implementation acknowledges receipt but does not yet create tasks from Retell-specific events.
+
+Response:
+
+```json
+{
+  "success": true,
+  "received": true
+}
+```
+
+## 4. Task APIs
+
+These endpoints are mounted at `/api/tasks`.
+
+### 4.1 `GET /api/tasks`
+
+Returns paginated task results for the authenticated winery.
+
+Supported query params:
+
+* `status`
+* `type`
+* `priority`
+* `assignedToMe`
+* `category`
+* `sentiment`
+* `assigneeId`
+* `createdById`
+* `search`
+* `dateFrom`
+* `dateTo`
+* `sortBy`
+* `showOnlyFlagged`
+* `mentionedMe`
+* `actionedById`
+* `page`
+* `pageSize`
+
+Role behaviour:
+
+* staff only see tasks assigned to them or unassigned tasks
+* managers/admins can query the winery-wide queue
+
+Response:
 
 ```json
 {
   "tasks": [
     {
       "id": 5001,
-      "type": "ADDRESS_CHANGE",
-      "status": "PENDING_REVIEW",
-      "Creator": {
-        "id": 7,
-        "displayName": "Mike Manager",
-        "role": "manager"
-      },
-      "member": {
-        "id": 42,
-        "firstName": "Emma",
-        "lastName": "Clarke"
-      },
+      "type": "ACCOUNT_ADDRESS_CHANGE",
+      "category": "ACCOUNT",
+      "subType": "ACCOUNT_ADDRESS_CHANGE",
+      "customerType": "MEMBER",
+      "status": "PENDING",
+      "workflowState": "WAITING",
+      "waitingOn": "CUSTOMER",
+      "nextStepSummary": "Await member confirmation",
+      "priority": "normal",
+      "sentiment": "NEUTRAL",
       "payload": {
         "newAddress": {
           "addressLine1": "12 Oak Street",
@@ -215,34 +211,97 @@ Authorization: Bearer <firebase-id-token>
         }
       },
       "suggestedChannel": "sms",
-      "suggestedReplyBody": "Hi Emma, thanks for your message. We'll send you a secure link...",
-      "createdAt": "2025-02-03T09:15:02+10:30"
+      "suggestedReplyBody": "Hi Emma, please confirm your address update using this secure link: ...",
+      "Member": {
+        "id": 42,
+        "firstName": "Emma",
+        "lastName": "Clarke",
+        "email": "emma@example.com",
+        "phone": "+61412345678"
+      },
+      "Creator": null,
+      "Assignee": {
+        "id": 7,
+        "displayName": "Mike Manager",
+        "email": "manager@example.com",
+        "role": "manager"
+      },
+      "createdAt": "2026-04-16T07:00:00.000Z",
+      "updatedAt": "2026-04-16T07:05:00.000Z"
     }
   ],
   "pagination": {
     "page": 1,
     "pageSize": 20,
-    "total": 1
+    "total": 1,
+    "totalPages": 1
   }
 }
 ```
 
-Notes:
-* `Creator` may be null for system-generated tasks; clients should display a fallback label like "System".
+### 4.2 `GET /api/tasks/:id`
 
----
+Returns a single task with its related member, message, assignee, creator, ordered `TaskStep` list, and recent `TaskAction` history.
 
----
+Response:
 
-### 4.2 POST /tasks/autoclassify
-Autoclassify a free-text staff note into a structured task.
-
-**URL**
-```http
-POST /tasks/autoclassify
+```json
+{
+  "task": {
+    "id": 5001,
+    "status": "PENDING",
+    "workflowState": "WAITING",
+    "waitingOn": "CUSTOMER",
+    "nextStepSummary": "Await member confirmation",
+    "category": "ACCOUNT",
+    "subType": "ACCOUNT_ADDRESS_CHANGE",
+    "Member": {
+      "id": 42,
+      "firstName": "Emma",
+      "lastName": "Clarke"
+    },
+    "TaskSteps": [
+      {
+        "id": 3001,
+        "title": "Await member confirmation",
+        "stepType": "CUSTOMER_WAIT",
+        "status": "PENDING",
+        "waitingOn": "CUSTOMER",
+        "sortOrder": 2,
+        "ownerUserId": null
+      }
+    ],
+    "TaskActions": [
+      {
+        "id": 1,
+        "actionType": "ACTIONED",
+        "details": {
+          "changes": {
+            "status": "ACTIONED"
+          }
+        },
+        "createdAt": "2026-04-16T07:04:00.000Z"
+      },
+      {
+        "id": 2,
+        "actionType": "EXECUTION_TRIGGERED",
+        "details": {
+          "tokenId": 8001,
+          "channel": "sms"
+        },
+        "createdAt": "2026-04-16T07:04:01.000Z"
+      }
+    ]
+  }
+}
 ```
 
-**Body**
+### 4.3 `POST /api/tasks/autoclassify`
+
+Classifies a free-text staff note into a suggested task structure.
+
+Request:
+
 ```json
 {
   "text": "The printer is out of ink",
@@ -250,148 +309,228 @@ POST /tasks/autoclassify
 }
 ```
 
-**Response (200)**
+Response:
+
 ```json
 {
+  "type": "OPERATIONS_SUPPLY_REQUEST",
   "category": "OPERATIONS",
   "subType": "OPERATIONS_SUPPLY_REQUEST",
+  "customerType": "MEMBER",
   "priority": "normal",
   "sentiment": "NEUTRAL",
-  "payload": { "originalText": "..." },
-  "suggestedTitle": "OPERATIONS - OPERATIONS SUPPLY REQUEST"
-}
-```
-
----
-
-### 4.3 POST /tasks
-Manually create a task (e.g. by internal staff).
-
-**URL**
-```http
-POST /tasks
-```
-
-**Body**
-```json
-{
-  "category": "ACCOUNT",
-  "subType": "ACCOUNT_ADDRESS_CHANGE",
-  "customerType": "MEMBER",
-  "priority": "normal",
-  "payload": { "note": "Member called to update address" },
-  "memberId": 42
-}
-```
-
-**Response (201)**
-Returns the created task.
-
----
-
-### 4.3 GET /tasks/:id
-Fetch one task by ID.
-
-**URL**
-```http
-GET /tasks/:id
-```
-
-**Response (200)**
-```json
-{
-  "id": 5001,
-  "category": "ACCOUNT",
-  "subType": "ACCOUNT_ADDRESS_CHANGE",
-  "customerType": "MEMBER",
-  "status": "PENDING_REVIEW",
-  "Creator": {
-    "id": 7,
-    "displayName": "Mike Manager",
-    "role": "manager"
+  "status": "PENDING",
+  "payload": {
+    "summary": "OPERATIONS - OPERATIONS SUPPLY REQUEST",
+    "originalText": "The printer is out of ink"
   },
-  "member": { "id": 42, "firstName": "Emma" },
-  "payload": { "newAddress": { "addressLine1": "..." } },
-  "createdAt": "2025-02-03T09:15:02+10:30"
+  "suggestedTitle": "OPERATIONS - OPERATIONS SUPPLY REQUEST",
+  "suggestedChannel": "sms",
+  "suggestedSteps": [
+    {
+      "title": "Review the request",
+      "description": "Confirm what needs to happen and who should own it.",
+      "stepType": "INTERNAL",
+      "waitingOn": "STAFF",
+      "ownerUserId": 7,
+      "sortOrder": 0
+    }
+  ],
+  "suggestedAssigneeRole": "manager",
+  "suggestedMember": {
+    "id": 42,
+    "firstName": "Emma",
+    "lastName": "Clarke",
+    "email": "emma@example.com",
+    "phone": "+61412345678"
+  }
 }
 ```
 
----
+### 4.4 `POST /api/tasks`
 
-### 4.4 PATCH /tasks/:id
-Update status, payload, priority, or re-classify.
+Manually creates a task.
 
-**URL**
-```http
-PATCH /tasks/:id
-```
+Request body fields:
 
-**Body (example)**
+* `category` (required)
+* `subType` (required)
+* `customerType`
+* `priority`
+* `sentiment`
+* `payload`
+* `notes`
+* `memberId`
+* `messageId`
+* `assigneeId`
+* `parentTaskId`
+* `dueAt`
+* `resolutionSummary`
+* `steps`
+* `suggestedReplyBody`
+* `suggestedChannel`
+* `suggestedReplySubject`
+* `suggestedAction`
+* `suggestedRecipientEmail`
+* `suggestedCc`
+* `isPrivateNote`
+
+Response:
+
 ```json
 {
-  "status": "APPROVED",
-  "priority": "high",
-  "notes": "Spoke to member, confirmed details.",
-  "payload": { ... }
+  "task": {
+    "id": 5002,
+    "category": "INTERNAL",
+    "subType": "INTERNAL_TASK",
+    "status": "PENDING"
+  }
 }
 ```
 
-**Response (200)**
-Returns updated task.
+Side effects:
 
-## 5. Execution (Internal)
+* logs `MANUAL_CREATED`
+* optionally creates `TaskStep` rows and syncs task workflow summary
+* optionally logs `NOTE_ADDED`
+* optionally logs `LINKED_TASK`
 
-For the MVP, execution can be triggered synchronously after approval from the same server process. We do **not** expose a public HTTP endpoint for execution yet.
+### 4.5 `PATCH /api/tasks/:id`
 
-Conceptually:
+Updates a task.
 
-```js
-// inside taskService.approveTask
-if (newStatus === 'APPROVED') {
-  executionService.executeTask(taskId);
+Supported fields:
+
+* `status`
+* `priority`
+* `category`
+* `subType`
+* `sentiment`
+* `payload`
+* `notes`
+* `suggestedReplyBody`
+* `suggestedChannel`
+* `suggestedReplySubject`
+* `assigneeId`
+* `parentTaskId`
+* `dueAt`
+* `resolutionSummary`
+* `regenerateSuggestedReply`
+* `isPrivateNote`
+
+Current status rules:
+
+* `PENDING -> ACTIONED`
+* `PENDING -> REJECTED`
+* `ACTIONED -> PENDING`
+* `REJECTED -> PENDING`
+
+Current role rules:
+
+* staff cannot reject tasks
+* staff cannot reassign tasks
+
+Example request:
+
+```json
+{
+  "status": "ACTIONED",
+  "notes": "Reviewed and sent to member for confirmation",
+  "suggestedReplyBody": "Hi Emma, please confirm your address using this secure link."
 }
 ```
 
-`executionService.executeTask(taskId)` will:
+Response:
 
-* Create a `MemberActionToken`.
-* Send an outbound message using the chosen channel.
-* Update the task status to `AWAITING_MEMBER_ACTION`.
-* Create a `TaskAction` of type `EXECUTION_TRIGGERED`.
-
-If we later need a separate endpoint or job queue, we can add:
-
-```http
-POST /tasks/:id/execute
+```json
+{
+  "task": {
+    "id": 5001,
+    "status": "PENDING"
+  }
+}
 ```
 
-for internal/admin usage, but this is **not needed** for the first thin slice.
+Important execution behaviour:
 
----
+* actioning may trigger `execution.service`
+* address-change tasks typically come back as `PENDING` because a secure member action is now outstanding
+* order tasks generally stay `ACTIONED`
+* if execution fails validation, the status change is not rolled back
 
-## 6. Member Self-Service: Address Update
+### 4.6 `POST /api/tasks/:id/steps`
 
-These endpoints are called by the frontend that renders when a member clicks the secure link.
+Creates a structured workflow step inside a task.
 
-### 6.1 GET /address-update/validate
+Supported fields:
 
-Validate an address update token and return current/proposed address data.
+* `title` (required)
+* `description`
+* `stepType`
+* `status`
+* `waitingOn`
+* `ownerUserId`
+* `dueAt`
+* `sortOrder`
+* `blockedReason`
+* `completionNotes`
+* `metadata`
 
-**URL**
+### 4.7 `PATCH /api/tasks/:id/steps/:stepId`
 
-```http
-GET /api/public/address-update/validate
+Updates a workflow step.
+
+Common use cases:
+
+* hand off a step by changing `ownerUserId`
+* mark a step `IN_PROGRESS`
+* mark a step `BLOCKED` with `blockedReason`
+* mark a step `COMPLETED` with `completionNotes`
+
+Role rule:
+
+* staff cannot reassign task steps to a different owner
+
+### 4.8 `DELETE /api/tasks/:id/steps/:stepId`
+
+Deletes a workflow step and re-syncs task workflow summary.
+
+### 4.9 `PATCH /api/tasks/:id/notes/:actionId`
+
+Toggles note privacy for a `NOTE_ADDED` audit entry.
+
+Request:
+
+```json
+{
+  "isPrivate": true
+}
 ```
 
-**Query Parameters**
+Response:
 
-* `token` (string, required): the opaque `MemberActionToken.token` value.
+```json
+{
+  "action": {
+    "id": 91,
+    "actionType": "NOTE_ADDED",
+    "details": {
+      "note": "Call member again tomorrow",
+      "isPrivate": true
+    }
+  }
+}
+```
 
-**Auth**
+## 5. Public Address Update APIs
 
-* Secured by the token itself. No Firebase.
+Mounted under `/api/public`.
 
-**Response (200)**
+### 5.1 `GET /api/public/address-update/validate?token=...`
+
+Validates a token and returns current/proposed address data.
+
+Response:
 
 ```json
 {
@@ -402,6 +541,7 @@ GET /api/public/address-update/validate
   },
   "currentAddress": {
     "addressLine1": "5 River Road",
+    "addressLine2": null,
     "suburb": "Crafers",
     "state": "SA",
     "postcode": "5152",
@@ -413,45 +553,27 @@ GET /api/public/address-update/validate
     "state": "SA",
     "postcode": "5152",
     "country": "Australia"
-  }
+  },
+  "expiresAt": "2026-04-23T07:00:00.000Z"
 }
 ```
 
-**Response (400 / 404)**
+Error cases:
 
-Examples:
+* missing token -> `INVALID_TOKEN`
+* unknown token -> `TOKEN_NOT_FOUND`
+* expired token -> `TOKEN_EXPIRED`
+* already used token -> `TOKEN_ALREADY_USED`
 
-* Token missing → `400` `INVALID_TOKEN`.
-* Token not found → `404` `TOKEN_NOT_FOUND`.
-* Token expired → `400` `TOKEN_EXPIRED`.
-* Token already used → `400` `TOKEN_ALREADY_USED`.
+### 5.2 `POST /api/public/address-update/confirm`
 
-```json
-{
-  "error": {
-    "code": "TOKEN_EXPIRED",
-    "message": "This link has expired. Please request a new one."
-  }
-}
-```
+Confirms and applies the address change.
 
----
-
-### 6.2 POST /address-update/confirm
-
-Confirm (and optionally edit) the new address using a valid token.
-
-**URL**
-
-```http
-POST /api/public/address-update/confirm
-```
-
-**Body**
+Request:
 
 ```json
 {
-  "token": "XYZ123",
+  "token": "opaque-token",
   "newAddress": {
     "addressLine1": "12 Oak Street",
     "suburb": "Stirling",
@@ -462,21 +584,12 @@ POST /api/public/address-update/confirm
 }
 ```
 
-Rules:
-
-* Validate token as in `/validate`.
-* Validate `newAddress` fields.
-* Update `Member` record.
-* Mark `MemberActionToken.usedAt`.
-* Update `Task.status` → `EXECUTED`.
-* Create `TaskAction(EXECUTED)`.
-* Optionally send a final confirmation message (SMS or email) to the member.
-
-**Response (200)**
+Response:
 
 ```json
 {
   "status": "ok",
+  "message": "Address updated successfully",
   "member": {
     "id": 42,
     "firstName": "Emma",
@@ -492,116 +605,77 @@ Rules:
 }
 ```
 
-**Response (errors)**
+Side effects:
 
-Similar to `/address-update/validate` for token issues, plus:
+* updates `Member`
+* sets `MemberActionToken.usedAt`
+* sets linked `Task.status` to `ACTIONED`
+* writes `TaskAction(ACTIONED)` with `details.action = MEMBER_CONFIRMED_ADDRESS`
+
+## 6. Winery APIs
+
+Mounted under `/api/winery`.
+
+All current winery endpoints require manager/admin auth.
+
+### 6.1 `GET /api/winery/full`
+
+Returns:
 
 ```json
 {
-  "error": {
-    "code": "INVALID_ADDRESS",
-    "message": "Postcode is required"
+  "success": true,
+  "data": {
+    "id": 1,
+    "name": "Sunrise Ridge Winery",
+    "brandProfile": {},
+    "bookingsConfig": {},
+    "products": [],
+    "policyProfile": {},
+    "faqs": [],
+    "sops": [],
+    "integrationConfig": {},
+    "contacts": []
   }
 }
 ```
 
----
+### 6.2 Section updates
 
-## 7. Optional Supporting APIs (MVP-Adjacent)
+Current update endpoints:
 
-These are useful but not strictly required for the first thin slice. They can be added as needed.
+* `PUT /api/winery`
+* `PUT /api/winery/brand`
+* `PUT /api/winery/bookings-config`
+* `PUT /api/winery/policy-profile`
+* `PUT /api/winery/integration-config`
 
-### 7.1 GET /members/:id
-
-Return member details for internal UI.
-
-```http
-GET /members/:id
-Authorization: Bearer <firebase-id-token>
-```
-
-Response (example):
+All return:
 
 ```json
 {
-  "id": 42,
-  "firstName": "Emma",
-  "lastName": "Clarke",
-  "email": "emma.clarke@example.com",
-  "phone": "+61412345678",
-  "addressLine1": "12 Oak Street",
-  "suburb": "Stirling",
-  "state": "SA",
-  "postcode": "5152",
-  "country": "Australia"
+  "success": true,
+  "data": {}
 }
 ```
 
-### 7.2 GET /messages/:id
+### 6.3 CRUD sub-resources
 
-Return a single message (for context in the UI).
+Currently exposed:
 
-```http
-GET /messages/:id
-Authorization: Bearer <firebase-id-token>
-```
+* `POST /api/winery/products`
+* `DELETE /api/winery/products/:id`
+* `POST /api/winery/bookings/types`
+* `DELETE /api/winery/bookings/types/:id`
+* `POST /api/winery/faqs`
+* `DELETE /api/winery/faqs/:id`
+* `POST /api/winery/sops`
+* `PUT /api/winery/sops/:id`
+* `DELETE /api/winery/sops/:id`
+* `POST /api/winery/contacts`
+* `PUT /api/winery/contacts/:id`
+* `DELETE /api/winery/contacts/:id`
 
-Response:
+## 7. Notes on Truth
 
-```json
-{
-  "id": 1001,
-  "direction": "inbound",
-  "source": "sms",
-  "body": "Hi, I've moved. Please update my address...",
-  "createdAt": "2025-02-03T09:15:02+10:30"
-}
-```
-
----
-
-## 8. Status and Type Enums (Reference)
-
-These enums should match the `DOMAIN_MODEL.md`.
-
-### 8.1 Task Types (initial)
-
-* `GENERAL_QUERY`
-* `ADDRESS_CHANGE`
-* `PAYMENT_ISSUE`
-* `BOOKING_REQUEST`
-* `DELIVERY_ISSUE`
-
-### 8.2 Task Statuses
-
-* `PENDING_REVIEW`
-* `APPROVED`
-* `AWAITING_MEMBER_ACTION`
-* `REJECTED`
-* `EXECUTED`
-* `CANCELLED`
-
-### 8.3 MemberActionToken Types
-
-* `ADDRESS_CHANGE`
-* (Future) `PAYMENT_METHOD_UPDATE`
-* (Future) `PREFERENCE_UPDATE`
-
-### 8.4 MemberActionToken Channels
-
-* `sms`
-* `email`
-* `voice` (future)
-
----
-
-## 9. Notes for Implementation & Tests
-
-* Every endpoint here should have accompanying Jest tests:
-
-  * Unit tests for controllers and services.
-  * Integration tests for the full SMS → Task → Token → Confirm flow.
-* All logging should avoid PII as per `DOMAIN_MODEL.md`.
-* Error codes should be consistent and predictable to make it easy for the frontend (and AI agents) to handle them.
-
-This API spec is intentionally narrow and focused on the first vertical slice. New endpoints should be added in separate sections, keeping the same patterns and error structures.
+The task lifecycle in the current implementation is not the older `APPROVED / EXECUTED / AWAITING_MEMBER_ACTION` model. If you are updating clients, tests, or docs, use the current `PENDING / ACTIONED / REJECTED` contract plus audit events and tokens as the authoritative model.

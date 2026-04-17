@@ -1,10 +1,10 @@
-const { Task, Member, TaskAction, User } = require('../models');
+const { Task, Member, TaskAction, TaskStep, User } = require('../models');
 const logger = require('../config/logger');
 
 /**
  * Async AI Generation Trigger
  * Fetches context and calls AI Service to draft a reply.
- * Updates task with suggestedReplyBody.
+ * Updates task with suggestedReplyBody, suggestedAction, and optionally auto-assigns.
  */
 async function generateAiSuggestion(taskId, wineryId, options = {}) {
     const { force = false, includeHistory = false } = options;
@@ -14,7 +14,15 @@ async function generateAiSuggestion(taskId, wineryId, options = {}) {
         const AiService = require('./ai');
         const task = await Task.findOne({
             where: { id: taskId, wineryId },
-            include: [{ model: Member }]
+            include: [
+                { model: Member },
+                {
+                    model: TaskStep,
+                    as: 'TaskSteps',
+                    required: false,
+                    include: [{ model: User, as: 'Owner', attributes: ['id', 'displayName', 'role'] }]
+                }
+            ]
         });
 
         if (!task) {
@@ -41,6 +49,24 @@ async function generateAiSuggestion(taskId, wineryId, options = {}) {
             || task.payload?.summary
             || task.notes
             || `${task.category} - ${task.subType}`;
+
+        const stepLines = (task.TaskSteps || [])
+            .sort((a, b) => {
+                if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+                return a.id - b.id;
+            })
+            .map((step, index) => {
+                const owner = step.Owner?.displayName || 'Unassigned';
+                const dueAt = step.dueAt ? `, due ${new Date(step.dueAt).toISOString()}` : '';
+                const blocked = step.blockedReason ? `, blocked: ${step.blockedReason}` : '';
+                return `${index + 1}. [${step.status}] ${step.title} (${step.stepType}) owner=${owner}, waitingOn=${step.waitingOn}${dueAt}${blocked}`;
+            });
+
+        const workflowBlock = [
+            `Workflow State: ${task.workflowState || 'NOT_STARTED'}`,
+            `Waiting On: ${task.waitingOn || 'NONE'}`,
+            `Next Step: ${task.nextStepSummary || 'None recorded'}`
+        ].join('\n');
 
         let historyBlock = '';
         if (includeHistory) {
@@ -81,7 +107,7 @@ async function generateAiSuggestion(taskId, wineryId, options = {}) {
             }
         }
 
-        const prompt = `Task Category: ${task.category}\nTask Type: ${task.subType}\nCurrent Status: ${task.status}\nOriginal Request: "${originalText}"${historyBlock}\n\nGenerate the next best customer-facing response given the full context above.`;
+        const prompt = `Task Category: ${task.category}\nTask Type: ${task.subType}\nCurrent Status: ${task.status}\n${workflowBlock}\nOriginal Request: "${originalText}"${stepLines.length > 0 ? `\nCurrent Workflow Steps:\n${stepLines.join('\n')}` : ''}${historyBlock}\n\nGenerate the next best customer-facing response given the full context above.`;
 
         logger.info('[AI SUGGESTION] Calling AI Service', { taskId, prompt: prompt.substring(0, 100) });
 
@@ -98,6 +124,24 @@ async function generateAiSuggestion(taskId, wineryId, options = {}) {
         if (aiResult && aiResult.suggestedReply) {
             task.suggestedReplyBody = aiResult.suggestedReply;
 
+            // Save internal routing recommendation
+            if (aiResult.suggestedAction) {
+                task.suggestedAction = aiResult.suggestedAction;
+            }
+
+            // Auto-assign if AI suggested a specific staff member and task is unassigned
+            if (aiResult.suggestedAssigneeId && !task.assigneeId) {
+                task.assigneeId = aiResult.suggestedAssigneeId;
+            }
+
+            // Save suggested recipient and CC
+            if (aiResult.suggestedRecipientEmail) {
+                task.suggestedRecipientEmail = aiResult.suggestedRecipientEmail;
+            }
+            if (aiResult.suggestedCc) {
+                task.suggestedCc = aiResult.suggestedCc;
+            }
+
             // Generate subject for email channel
             if ((task.suggestedChannel === 'email' || context.suggestedChannel === 'email') && !task.suggestedReplySubject) {
                 task.suggestedReplySubject = aiResult.suggestedTitle
@@ -105,7 +149,7 @@ async function generateAiSuggestion(taskId, wineryId, options = {}) {
             }
 
             await task.save();
-            logger.info('[AI SUGGESTION] Successfully saved reply to task', { taskId, hasSubject: !!task.suggestedReplySubject });
+            logger.info('[AI SUGGESTION] Successfully saved reply to task', { taskId, hasSubject: !!task.suggestedReplySubject, hasSuggestedAction: !!task.suggestedAction, assigneeId: task.assigneeId });
         } else {
             // Log error but also set a placeholder so UI knows it failed
             logger.error('[AI SUGGESTION] AI did not return suggestedReply', { taskId, aiResult });

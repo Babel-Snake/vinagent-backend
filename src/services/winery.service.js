@@ -1,7 +1,8 @@
 const { 
     Winery, WineryBrandProfile, WineryBookingsConfig, 
     WineryBookingType, WineryProduct, WineryPolicyProfile, 
-    WineryFAQItem, WineryIntegrationConfig, WinerySettings 
+    WineryFAQItem, WineryIntegrationConfig, WinerySettings,
+    WineryContact, User
 } = require('../models');
 
 /**
@@ -17,16 +18,38 @@ exports.getAiContext = async (wineryId) => {
             { model: WineryProduct, as: 'products', where: { isActive: true }, required: false },
             { model: WineryPolicyProfile, as: 'policyProfile' },
             { model: WineryFAQItem, as: 'faqs', where: { isActive: true }, required: false },
-            { model: WinerySettings, as: 'settings' } // Legacy settings
+            { model: WinerySettings, as: 'settings' },
+            { model: WineryContact, as: 'contacts', where: { isActive: true }, required: false }
         ]
     });
 
     if (!winery) return null;
 
-    // Transform into a clean, prose-ready object if needed, 
-    // but raw JSON is usually fine for LLMs if keys are descriptive.
-    // We might want to strip IDs or timestamps to save tokens.
-    
+    // Load active system users (staff) for this winery
+    const staffUsers = await User.findAll({
+        where: { wineryId, isActive: true },
+        attributes: ['id', 'displayName', 'email', 'role', 'responsibilities']
+    });
+
+    // Build the org chart with resolved manager names
+    const contacts = winery.contacts || [];
+    const organisationMap = contacts.map(c => {
+        let reportsToName = null;
+        if (c.reportsToId) {
+            const mgr = contacts.find(x => x.id === c.reportsToId);
+            reportsToName = mgr ? mgr.name : null;
+        }
+        return {
+            name: c.name,
+            role: c.role,
+            layer: c.layer,
+            email: c.email || null,
+            phone: c.phone || null,
+            responsibilities: c.responsibilities || null,
+            reportsTo: reportsToName
+        };
+    });
+
     return {
         identity: {
             name: winery.name,
@@ -56,7 +79,7 @@ exports.getAiContext = async (wineryId) => {
         } : null,
         bookings: winery.bookingsConfig ? {
             policy: winery.bookingsConfig,
-            experiences: winery.bookingTypes // List of active types
+            experiences: winery.bookingTypes
         } : null,
         inventory: winery.products ? winery.products.map(p => ({
             name: p.name,
@@ -70,6 +93,14 @@ exports.getAiContext = async (wineryId) => {
         policies: {
             profile: winery.policyProfile,
             faqs: winery.faqs ? winery.faqs.map(f => ({ q: f.question, a: f.answer })) : []
-        }
+        },
+        organisation: organisationMap,
+        staff: staffUsers.map(u => ({
+            id: u.id,
+            name: u.displayName,
+            email: u.email,
+            role: u.role,
+            responsibilities: u.responsibilities || null
+        }))
     };
 };

@@ -1,247 +1,124 @@
 # VinAgent
 
-**VinAgent** is an AI-powered "Digital Concierge" for winery clubs. It sits between a winery's communication channels (phone, SMS, email) and its existing systems, helping staff manage member admin, tasting enquiries, and common requests with less stress and less manual work.
+VinAgent is an AI-assisted operations platform for winery teams. The current build centers on one core loop:
 
-Instead of staff spending Monday mornings digging through emails and missed calls, VinAgent:
+`inbound message -> triage -> task -> human action -> optional automation / secure member follow-up -> audit trail`
 
-* Receives messages and calls
-* Understands what the customer wants
-* Creates tasks and drafted replies
-* Lets a human manager approve or edit those tasks
-* Executes safe changes (like updating an address)
+The repository now contains both:
 
-The goal is **"Monday Morning Peace"** for cellar door and wine club managers.
+* an Express backend in `src/`
+* a Next.js dashboard in `frontend/`
 
----
+The backend is the main source of truth for workflow behaviour.
 
-## 1. Project Status
+## Current Product Shape
 
-* **Stage:** Early development / MVP
-* **Focus:** Backend service (API + logic) for triage, tasks, and integrations
-* **Primary user:** Winery staff (managers, admin, wine club coordinators)
-* **Future plan:** Web dashboard frontend + deeper integrations (e.g. Commerce7, WineDirect)
+VinAgent ingests SMS, email, and voice events, turns them into structured tasks, drafts suggested replies/actions, and lets winery staff manage the work through a shared task system.
 
----
+The current task model has two layers:
 
-## 2. High-Level Features (Planned MVP)
+* coarse business outcome on `Task.status`
+* structured operational progression through `TaskStep`
 
-### 2.1 Message Ingestion
+The task status enum is still intentionally coarse:
 
-* Accept inbound messages from:
+* `PENDING`
+* `ACTIONED`
+* `REJECTED`
 
-  * SMS (via Twilio or similar)
-  * Email (via webhook / mail processor)
-  * Voice calls (via Retell / Twilio webhooks)
+More detailed workflow state is now represented through:
 
-### 2.2 Triage Engine
+* `Task.workflowState` and related summary fields
+* ordered `TaskStep` records inside the task
+* `TaskAction` records for the immutable audit trail
+* `MemberActionToken` records for secure self-service flows
 
-* Analyse each message to decide what it is about (intent)
-* Examples:
+Initial step plans are now sourced from a centralized workflow-template registry in `src/services/taskWorkflowTemplates.js`. AI can still propose steps, but the backend always has deterministic subtype/category templates to fall back on.
 
-  * Address change
-  * Payment problem
-  * Tasting booking request
-  * General question
+Example: an address-change task starts `PENDING`, triage proposes a step plan, a manager actions it, the system creates a secure token and sends the member a link, the task returns to `PENDING` while the workflow is `WAITING`, and becomes `ACTIONED` again once the member confirms.
 
-### 2.3 Task System
-
-* Convert each message into a structured **Task**
-* Store tasks in the database with:
-
-  * Type
-  * Status
-  * Linked member / winery
-  * Original message context
-
-### 2.4 Human-in-the-Loop Workflow
-
-* Manager views a list of tasks
-* Approves or edits the suggested action
-* System then executes safe tasks (e.g. update address, send confirmation message)
-
-### 2.5 Logging & Observability
-
-* Structured logging for requests and task actions
-* Tracing of what was changed and when
-
-Future phases will expand this with proactive features like delivery monitoring, weather-based shipping holds, and VIP detection.
-
----
-
-## 3. Tech Stack
-
-### Backend
-
-* **Node.js** (LTS)
-* **Express** for the HTTP API
-* **Sequelize** as ORM
-* **MySQL** as primary database
-
-### Auth
-
-* **Firebase Authentication** for user identity and access control
-
-### Testing
-
-* **Jest** as the main test runner
-
-### Logging
-
-* A shared logger (e.g. Winston or Pino), configured centrally and used everywhere
-
-### Agentic Coding
-
-* The project is designed to work well with:
-
-  * OpenAI Codex / GPT-based coding agents
-  * GitHub Copilot
-
-The codebase is structured to give agents clear rules and tests so they can safely generate code.
-
----
-
-## 4. Repository Structure (High-Level)
-
-Planned structure (may evolve):
+## Repository Layout
 
 ```text
-/ (root)
-  README.md
-  package.json
-  jest.config.js
-  .eslintrc.cjs (or similar)
-  .prettierrc
-  .env.example
-  /docs
-    SETUP_BEGINNER.md
-    ARCHITECTURE.md
-    ENGINEERING_GUIDE.md
-    AGENT_GUIDE.md
-    COMPONENTS.md
-    TEST_PLAN.md
-    DOMAIN_MODEL.md
-    API_SPEC.md
-    GOLDEN_PATH.md
-  /src
-    /config
-    /controllers
-    /services
-    /models
-    /routes
-    /middleware
-    /utils
-    /tests
+/
+  docs/          Project docs and contracts
+  frontend/      Dashboard and public flows
+  scripts/       Local utilities
+  src/           Express API, models, services, tests
 ```
 
-See `docs/ENGINEERING_GUIDE.md` for the exact rules on where new files live.
+Key backend areas:
 
----
+* `src/routes` - route surface under `/api`
+* `src/controllers` - HTTP orchestration
+* `src/services` - business logic
+* `src/models` - Sequelize models
+* `src/tests` - unit and integration coverage
 
-## 5. Getting Started
+## Getting Started
 
-If you are new to the project, start here:
+1. Install dependencies:
 
-1. Read `docs/SETUP_BEGINNER.md` and complete the environment setup.
-2. Run the development server and confirm `/health` works.
-3. Read `docs/ARCHITECTURE.md` to understand the big picture.
-4. Read `docs/COMPONENTS.md` to see how the system is broken down.
+```bash
+npm install
+```
 
-For day-to-day coding rules, see `docs/ENGINEERING_GUIDE.md`.
+2. Copy environment variables from `.env.example` to `.env` and fill in local values.
 
-For AI agents (Codex, Copilot, etc.), see `docs/AGENT_GUIDE.md`.
+3. Create the database and run migrations:
 
----
+```bash
+npx sequelize db:migrate
+```
 
-## 6. Development Philosophy
+4. Run the test suite:
 
-The project follows a few simple principles:
+```bash
+npm test
+```
 
-1. **Human-in-the-loop by design**
+5. Start the API:
 
-   * AI suggests; humans approve.
+```bash
+npm run dev
+```
 
-2. **Test-driven slices**
+Health endpoints:
 
-   * Each new feature starts with test cases.
-   * Thin vertical slices are preferred over large rewrites.
+* `GET /`
+* `GET /health`
+* `GET /api/health`
 
-3. **Clear boundaries**
+## Useful Scripts
 
-   * Controllers handle HTTP.
-   * Services hold business logic.
-   * Models handle persistence.
+```bash
+npm test
+npm run test:unit
+npm run test:int
+npm run lint
+npm run format
+```
 
-4. **No silent failures**
+## Core Docs
 
-   * Errors are logged clearly.
-   * Failing tests are treated as blockers.
+Start here if you need the current backend contract:
 
-5. **Privacy and safety**
+* `docs/ARCHITECTURE.md`
+* `docs/DOMAIN_MODEL.md`
+* `docs/API_SPEC.md`
+* `docs/TASK_WORKFLOW_PLAN.md`
+* `docs/GOLDEN_PATH.md`
+* `docs/TEST_PLAN.md`
 
-   * Do not log sensitive data (e.g. full card numbers, auth tokens).
-   * Follow security notes in `docs/ARCHITECTURE.md` and `docs/ENGINEERING_GUIDE.md`.
+Supporting references:
 
----
+* `docs/COMPONENTS.md`
+* `docs/AUDIT_LOGGING.md`
+* `docs/SETUP_BEGINNER.md`
+* `docs/ROADMAP.md`
 
-## 7. Tests
+## Development Notes
 
-* Run all tests:
+The implementation now uses a simplified task status model plus a structured workflow-step layer. In tests, the AI service defaults to a deterministic mock adapter even if `OPENAI_API_KEY` is present. Only opt into live AI during tests when `AI_ALLOW_LIVE_TESTS=true`.
 
-  ```bash
-  npm test
-  ```
-* Run tests in watch mode:
-
-  ```bash
-  npm run test:watch
-  ```
-
-See `docs/TEST_PLAN.md` for:
-
-* What should be tested
-* Types of tests (unit, integration, E2E)
-* How to add new test cases
-
----
-
-## 8. Contributing (Humans and Agents)
-
-### For Human Contributors
-
-* Follow `docs/SETUP_BEGINNER.md` to set up your environment.
-* Read `docs/ENGINEERING_GUIDE.md` before writing code.
-* Keep PRs small and focused on one component or feature.
-
-### For AI Agents (Codex, etc.)
-
-* Always read `docs/AGENT_GUIDE.md` before generating code.
-* Respect existing folder structure and naming conventions.
-* Update or create tests for all new behaviour.
-* Avoid introducing new dependencies unless necessary.
-
----
-
-## 9. Roadmap (Short Version)
-
-1. **Phase 0:** Documentation + repo bootstrap
-2. **Phase 1:** Thin vertical slice (SMS webhook → Task → List tasks)
-3. **Phase 2:** Full triage engine + multi-channel ingestion
-4. **Phase 3:** Integrations (Twilio, Retell, email provider)
-5. **Phase 4:** Dashboard API
-6. **Phase 5:** Deployment + monitoring
-
-For the detailed plan, see `docs/VinAgent Project Master Plan` (or equivalent master planning document).
-
----
-
-## 10. Contact
-
-This is currently a solo-founder project in active development.
-
-If you are reading this as a collaborator, agent, or future maintainer:
-
-* Start with the docs.
-* Keep changes small.
-* Let the tests guide you.
-
-Welcome to VinAgent.
+When in doubt, prefer the live backend implementation over older wording in historical docs, and keep docs/tests aligned to the running code.

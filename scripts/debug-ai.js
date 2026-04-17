@@ -1,7 +1,7 @@
 require('dotenv').config();
 const aiService = require('../src/services/ai');
 
-const input = "I need to change my address to 123 Fake St, Springfield. My name is Homer Simpson.";
+const input = "member Sim User is asking if we run tours of the vineyard as he is interested in doing one. His email is sim@example.com.";
 
 console.log("--- AI Debug Script ---");
 console.log(`AI_SKIP: ${process.env.AI_SKIP}`);
@@ -17,12 +17,14 @@ async function run() {
         const result = await aiService.classify(input, {
             wineryId: 1,
             member: {
-                firstName: 'Homer',
-                lastName: 'Simpson',
-                email: 'homer@example.com',
-                tier: 'Gold'
+                firstName: 'Sim',
+                lastName: 'User',
+                email: 'sim@example.com',
+                phone: '0412345678',
+                tier: 'Standard',
+                notes: 'No specific notes.'
             },
-            suggestedChannel: 'sms'
+            suggestedChannel: 'email'
         });
 
         const duration = Date.now() - start;
@@ -30,16 +32,30 @@ async function run() {
         console.log("\n--- AI Result ---");
         console.log(JSON.stringify(result, null, 2));
 
-        if (result.suggestedTitle) {
-            console.log("\n[PASS] 'suggestedTitle' is present.");
+        // Check reasoning
+        if (result.reasoning) {
+            console.log("\n[PASS] 'reasoning' block is present.");
+            if (result.reasoning['5_policy_and_product_validation']) {
+                console.log("[PASS] Policy validation step exists:", result.reasoning['5_policy_and_product_validation']);
+            } else {
+                console.log("[FAIL] Policy validation step is MISSING from reasoning.");
+            }
         } else {
-            console.log("\n[FAIL] 'suggestedTitle' is MISSING.");
+            console.log("\n[FAIL] 'reasoning' block is MISSING.");
         }
 
-        if (result.suggestedReply && result.suggestedReply.includes('Homer')) {
-            console.log("[PASS] 'suggestedReply' addresses member by name.");
+        // Check reply doesn't offer tours
+        if (result.suggestedReply && result.suggestedReply.toLowerCase().includes('biosecurity')) {
+            console.log("[PASS] Reply correctly mentions biosecurity policy.");
         } else {
-            console.log("[WARN] 'suggestedReply' might not be using member context.");
+            console.log("[WARN] Reply may not reference the biosecurity policy.");
+        }
+
+        if (result.suggestedRecipientEmail) {
+            console.log(`[INFO] Recipient Email: ${result.suggestedRecipientEmail}`);
+        }
+        if (result.suggestedAssigneeId) {
+            console.log(`[INFO] Suggested Assignee ID: ${result.suggestedAssigneeId}`);
         }
 
     } catch (e) {

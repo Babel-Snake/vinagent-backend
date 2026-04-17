@@ -12,6 +12,7 @@ module.exports = (sequelize, DataTypes) => {
       Task.belongsTo(models.Task, { foreignKey: 'parentTaskId', as: 'ParentTask' });
       Task.hasMany(models.Task, { foreignKey: 'parentTaskId', as: 'SubTasks' });
       Task.hasMany(models.TaskAction, { foreignKey: 'taskId' });
+      Task.hasMany(models.TaskStep, { foreignKey: 'taskId', as: 'TaskSteps' });
     }
   }
 
@@ -48,6 +49,28 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         defaultValue: 'PENDING'
       },
+      workflowState: {
+        type: DataTypes.ENUM(
+          'NOT_STARTED',
+          'IN_PROGRESS',
+          'WAITING',
+          'BLOCKED',
+          'COMPLETED',
+          'CANCELLED'
+        ),
+        allowNull: false,
+        defaultValue: 'NOT_STARTED'
+      },
+      waitingOn: {
+        type: DataTypes.ENUM('NONE', 'STAFF', 'CUSTOMER', 'MANAGER', 'EXTERNAL'),
+        allowNull: false,
+        defaultValue: 'NONE'
+      },
+      nextStepSummary: { type: DataTypes.STRING, allowNull: true },
+      blockedReason: { type: DataTypes.TEXT, allowNull: true },
+      dueAt: { type: DataTypes.DATE, allowNull: true },
+      resolutionSummary: { type: DataTypes.TEXT, allowNull: true },
+      resolvedAt: { type: DataTypes.DATE, allowNull: true },
       payload: { type: DataTypes.JSON, allowNull: true },
       suggestedChannel: {
         type: DataTypes.ENUM('sms', 'email', 'voice', 'none'),
@@ -55,6 +78,9 @@ module.exports = (sequelize, DataTypes) => {
       },
       suggestedReplySubject: { type: DataTypes.STRING, allowNull: true },
       suggestedReplyBody: { type: DataTypes.TEXT, allowNull: true },
+      suggestedAction: { type: DataTypes.TEXT, allowNull: true },
+      suggestedRecipientEmail: { type: DataTypes.STRING, allowNull: true },
+      suggestedCc: { type: DataTypes.STRING, allowNull: true },
       requiresApproval: { type: DataTypes.BOOLEAN, defaultValue: true },
       priority: {
         type: DataTypes.ENUM('low', 'normal', 'high'),

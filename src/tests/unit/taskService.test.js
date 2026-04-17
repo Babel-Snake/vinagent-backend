@@ -17,6 +17,11 @@ jest.mock('../../models', () => ({
             }))
         }
     },
+    TaskStep: {
+        findAll: jest.fn(),
+        findOne: jest.fn(),
+        create: jest.fn()
+    },
     TaskAction: {
         create: jest.fn()
     },
@@ -25,6 +30,14 @@ jest.mock('../../models', () => ({
     },
     WinerySettings: {
         findOne: jest.fn()
+    },
+    User: {
+        findOne: jest.fn(),
+        findByPk: jest.fn(),
+        findAll: jest.fn()
+    },
+    Notification: {
+        create: jest.fn()
     }
 }));
 
@@ -42,19 +55,20 @@ jest.mock('../../services/audit.service', () => ({
     logTaskAction: jest.fn()
 }));
 
-const { Task, TaskAction, WinerySettings } = require('../../models');
+const { Task, TaskAction, TaskStep, WinerySettings } = require('../../models');
 const executionService = require('../../services/execution.service');
 
 describe('TaskService Unit Tests', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        TaskStep.findAll.mockResolvedValue([]);
     });
 
     describe('updateTask', () => {
         const mockTask = {
             id: 1,
-            status: 'PENDING_REVIEW',
+            status: 'PENDING',
             type: 'ADDRESS_CHANGE',
             subType: 'ACCOUNT_ADDRESS_CHANGE',
             wineryId: 100,
@@ -81,7 +95,7 @@ describe('TaskService Unit Tests', () => {
 
             await expect(taskService.updateTask({
                 ...defaultParams,
-                updates: { status: 'APPROVED' }
+                updates: { status: 'ACTIONED' }
             })).rejects.toThrow('Task not found');
         });
 
@@ -102,23 +116,26 @@ describe('TaskService Unit Tests', () => {
             expect(task.save).toHaveBeenCalled();
         });
 
-        it('should block transition to APPROVED if payload validation fails', async () => {
-            // Mock task with ADDRESS_CHANGE but invalid/empty payload
+        it('should keep the status change when execution fails after actioning', async () => {
             const invalidTask = {
                 ...mockTask,
-                payload: {}, // Missing required fields
-                type: 'ADDRESS_CHANGE',
-                save: jest.fn()
+                payload: {},
+                save: jest.fn().mockResolvedValue(true),
+                changed: jest.fn().mockReturnValue(['status'])
             };
             Task.findOne.mockResolvedValue(invalidTask);
+            executionService.executeTask.mockRejectedValue(new Error('execution failed'));
 
-            await expect(taskService.updateTask({
+            const result = await taskService.updateTask({
                 ...defaultParams,
-                updates: { status: 'APPROVED' }
-            })).rejects.toThrow('Cannot approve');
+                updates: { status: 'ACTIONED' }
+            });
+
+            expect(invalidTask.save).toHaveBeenCalled();
+            expect(result.status).toBe('ACTIONED');
         });
 
-        it('should allow transition to APPROVED if payload valid', async () => {
+        it('should allow transition to ACTIONED if payload is valid', async () => {
             const validTask = {
                 ...mockTask,
                 payload: { addressLine1: '123 Fake St', suburb: 'Test', postcode: '5000' },
@@ -132,20 +149,22 @@ describe('TaskService Unit Tests', () => {
 
             const result = await taskService.updateTask({
                 ...defaultParams,
-                updates: { status: 'APPROVED' }
+                updates: { status: 'ACTIONED' }
             });
 
             expect(validTask.save).toHaveBeenCalled();
+            expect(executionService.executeTask).toHaveBeenCalled();
+            expect(result.status).toBe('ACTIONED');
         });
 
-        it('should prevent staff from approving tasks', async () => {
+        it('should prevent staff from rejecting tasks', async () => {
             Task.findOne.mockResolvedValue({ ...mockTask });
 
             await expect(taskService.updateTask({
                 ...defaultParams,
                 userRole: 'staff',
-                updates: { status: 'APPROVED' }
-            })).rejects.toThrow('Staff cannot approve');
+                updates: { status: 'REJECTED' }
+            })).rejects.toThrow('Staff cannot reject tasks');
         });
     });
 
@@ -153,7 +172,7 @@ describe('TaskService Unit Tests', () => {
         it('should return paginated tasks', async () => {
             Task.findAndCountAll.mockResolvedValue({
                 count: 1,
-                rows: [{ id: 1, status: 'PENDING_REVIEW' }]
+                rows: [{ id: 1, status: 'PENDING' }]
             });
 
             const result = await taskService.getTasksForWinery({

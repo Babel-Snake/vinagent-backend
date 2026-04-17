@@ -21,7 +21,11 @@ module.exports = (sequelize, DataTypes) => {
                     'MANUAL_CREATED',
                     'MANUAL_UPDATE',
                     'ASSIGNED',
-                    'LINKED_TASK'
+                    'LINKED_TASK',
+                    'STEP_CREATED',
+                    'STEP_UPDATED',
+                    'STEP_COMPLETED',
+                    'STEP_DELETED'
                 ),
                 allowNull: false
             },

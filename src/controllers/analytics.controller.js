@@ -193,7 +193,12 @@ async function getAnalytics(req, res, next) {
         const staffMetrics = await Promise.all(
             tasksByStaff.map(async (s) => {
                 const resolved = await Task.count({
-                    where: { wineryId, assigneeId: s.assigneeId, status: 'EXECUTED', createdAt: periodFilter }
+                    where: {
+                        wineryId,
+                        assigneeId: s.assigneeId,
+                        status: { [Op.in]: ['ACTIONED', 'REJECTED'] },
+                        createdAt: periodFilter
+                    }
                 });
                 return {
                     name: s.Assignee?.displayName || 'Unknown',

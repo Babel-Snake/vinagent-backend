@@ -21,7 +21,7 @@ It is written for both **human developers** and **AI coding agents**.
 
 All backend code lives under `/src`.
 
-Planned structure:
+Current structure:
 
 ```text
 /src
@@ -58,7 +58,7 @@ Planned structure:
 Examples:
 
 * `src/controllers/task.controller.js`
-* `src/services/task.service.js`
+* `src/services/taskService.js`
 * `src/models/Task.js`
 * `src/routes/task.routes.js`
 * `src/tests/task.controller.test.js`
@@ -118,7 +118,7 @@ Example pattern:
 
 ```js
 // src/controllers/task.controller.js
-const taskService = require('../services/task.service');
+const taskService = require('../services/taskService');
 
 async function listTasks(req, res, next) {
   try {
@@ -151,7 +151,7 @@ Services **should not**:
 Example pattern:
 
 ```js
-// src/services/task.service.js
+// src/services/taskService.js
 const { Task } = require('../models');
 
 async function getTasksForWinery(wineryId) {
@@ -193,11 +193,11 @@ Example:
 // src/routes/task.routes.js
 const express = require('express');
 const taskController = require('../controllers/task.controller');
-const authMiddleware = require('../middleware/auth.middleware');
+const { authMiddleware } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
-router.use(authMiddleware.requireAuth);
+router.use(authMiddleware);
 router.get('/', taskController.listTasks);
 
 module.exports = router;
@@ -207,7 +207,7 @@ module.exports = router;
 
 Common middleware types:
 
-* Auth (`auth.middleware.js`)
+* Auth (`authMiddleware.js`)
 * Request logging
 * Error handling
 
@@ -313,10 +313,16 @@ Log only what is needed to debug and audit.
   ```bash
   npm test
   ```
-* Watch mode:
+* Unit only:
 
   ```bash
-  npm run test:watch
+  npm run test:unit
+  ```
+
+* Integration only:
+
+  ```bash
+  npm run test:int
   ```
 
 ### 8.5 For AI Agents

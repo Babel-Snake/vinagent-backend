@@ -1,5 +1,6 @@
-const { Message, Winery, Task, Member, sequelize } = require('../models');
+const { Message, Winery, Member, sequelize } = require('../models');
 const triageService = require('../services/triage.service');
+const taskService = require('../services/taskService');
 const logger = require('../config/logger');
 const AppError = require('../utils/AppError');
 const { redact, scrubPII } = require('../utils/sanitizer');
@@ -67,23 +68,19 @@ async function handleSms(req, res, next) {
         telemetry.recordTriage('sms', triageResult.category, Date.now() - triageStart);
 
         // 5. Create Task (Atomic)
-        const task = await Task.create({
-            type: triageResult.type,
-            category: triageResult.category,
-            subType: triageResult.subType,
-            customerType: triageResult.customerType,
-            sentiment: triageResult.sentiment,
-            status: triageResult.status,
-            priority: triageResult.priority,
-            payload: triageResult.payload,
-            requiresApproval: triageResult.requiresApproval,
+        const task = await taskService.createTask({
             wineryId: winery.id,
-            memberId: member ? member.id : null,
-            messageId: message.id,
-            suggestedChannel: triageResult.suggestedChannel || 'sms',
-            suggestedReplyBody: triageResult.suggestedReplyBody,
-            suggestedReplySubject: triageResult.suggestedReplySubject
-        }, { transaction: t });
+            userId: null,
+            source: 'system',
+            transaction: t,
+            data: {
+                ...triageResult,
+                memberId: member ? member.id : null,
+                messageId: message.id,
+                suggestedChannel: triageResult.suggestedChannel || 'sms',
+                steps: triageResult.suggestedSteps || []
+            }
+        });
 
         await t.commit();
 
@@ -147,23 +144,19 @@ async function handleEmail(req, res, next) {
         const triageResult = await triageService.triageMessage({ body: text || subject || '', source: 'email' }, { winery, member });
         telemetry.recordTriage('email', triageResult.category, Date.now() - triageStart);
 
-        const task = await Task.create({
-            type: triageResult.type,
-            category: triageResult.category,
-            subType: triageResult.subType,
-            customerType: triageResult.customerType,
-            sentiment: triageResult.sentiment,
-            status: triageResult.status,
-            priority: triageResult.priority,
-            payload: triageResult.payload,
-            requiresApproval: triageResult.requiresApproval,
+        const task = await taskService.createTask({
             wineryId: winery.id,
-            memberId: member ? member.id : null,
-            messageId: message.id,
-            suggestedChannel: triageResult.suggestedChannel || 'email',
-            suggestedReplyBody: triageResult.suggestedReplyBody,
-            suggestedReplySubject: triageResult.suggestedReplySubject
-        }, { transaction: t });
+            userId: null,
+            source: 'system',
+            transaction: t,
+            data: {
+                ...triageResult,
+                memberId: member ? member.id : null,
+                messageId: message.id,
+                suggestedChannel: triageResult.suggestedChannel || 'email',
+                steps: triageResult.suggestedSteps || []
+            }
+        });
 
         await t.commit();
 
@@ -227,23 +220,19 @@ async function handleVoice(req, res, next) {
         const triageResult = await triageService.triageMessage({ body: messageBody, source: 'voice' }, { winery, member });
         telemetry.recordTriage('voice', triageResult.category, Date.now() - triageStart);
 
-        const task = await Task.create({
-            type: triageResult.type,
-            category: triageResult.category,
-            subType: triageResult.subType,
-            customerType: triageResult.customerType,
-            sentiment: triageResult.sentiment,
-            status: triageResult.status,
-            priority: triageResult.priority,
-            payload: triageResult.payload,
-            requiresApproval: triageResult.requiresApproval,
+        const task = await taskService.createTask({
             wineryId: winery.id,
-            memberId: member ? member.id : null,
-            messageId: message.id,
-            suggestedChannel: triageResult.suggestedChannel || 'voice',
-            suggestedReplyBody: triageResult.suggestedReplyBody,
-            suggestedReplySubject: triageResult.suggestedReplySubject
-        }, { transaction: t });
+            userId: null,
+            source: 'system',
+            transaction: t,
+            data: {
+                ...triageResult,
+                memberId: member ? member.id : null,
+                messageId: message.id,
+                suggestedChannel: triageResult.suggestedChannel || 'voice',
+                steps: triageResult.suggestedSteps || []
+            }
+        });
 
         await t.commit();
 

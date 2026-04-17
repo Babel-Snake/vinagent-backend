@@ -1,16 +1,23 @@
 const OpenAIAdapter = require('./openai.adapter');
 
 const logger = require('../../config/logger');
+const { classifyMessageHeuristically } = require('../taskClassificationHeuristics');
 
 // Factory to get the configured provider
 function getAIService() {
     const provider = process.env.AI_PROVIDER || 'openai';
-    const apiKey = process.env.OPENAI_API_KEY; // Extend for other providers later
+    const apiKey = process.env.OPENAI_API_KEY;
     const model = process.env.AI_MODEL || 'gpt-4o-mini';
     const skip = process.env.AI_SKIP === 'true';
+    const forceMockInTests = process.env.NODE_ENV === 'test' && process.env.AI_ALLOW_LIVE_TESTS !== 'true';
+
+    if (forceMockInTests) {
+        logger.info('AI Service using deterministic Mock Adapter in test mode.');
+        return new MockAdapter();
+    }
 
     if (skip || !apiKey) {
-        logger.warn(skip ? 'AI Service explicitly skipped via AI_SKIP.' : '⚠️ No API Key found for AI Service. Using Mock Adapter.');
+        logger.warn(skip ? 'AI Service explicitly skipped via AI_SKIP.' : 'No API key found for AI Service. Using Mock Adapter.');
         return new MockAdapter();
     }
 
@@ -23,19 +30,15 @@ function getAIService() {
     }
 }
 
-// Simple Mock Adapter for dev/test without keys
 class MockAdapter {
-    async classify(text) {
-        return {
-            category: 'GENERAL',
-            subType: 'GENERAL_ENQUIRY',
-            sentiment: 'NEUTRAL',
-            priority: 'normal',
-            summary: 'AI Service Mock: ' + text.substring(0, 50),
-            suggestedTitle: 'Mock Task'
-        };
+    async classify(text, context = {}) {
+        return classifyMessageHeuristically(text, context);
     }
-    async generate() { return "Mock response"; }
+
+    async generate(prompt, context = {}) {
+        const result = await this.classify(prompt, context);
+        return result.suggestedReply || 'Thanks for reaching out. The team will follow up shortly.';
+    }
 }
 
 module.exports = getAIService();

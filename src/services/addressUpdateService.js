@@ -23,7 +23,6 @@ async function confirmAddress({ token, newAddress }) {
   }
 
   // 2. Get address from payload or override
-  // 2. Get address from payload or override
   const payload = tokenRecord.payload || {};
   const tokenAddress = payload.newAddress || payload;
   const addressToApply = newAddress || tokenAddress || {};
@@ -54,7 +53,7 @@ async function confirmAddress({ token, newAddress }) {
     // 5. Mark token as used
     await memberActionTokenService.markTokenUsed(tokenRecord.id, t);
 
-    // 6. Update Task status to EXECUTED (if linked)
+    // 6. Update Task status to ACTIONED (if linked)
     if (task) {
       task.status = 'ACTIONED';
       await task.save({ transaction: t });

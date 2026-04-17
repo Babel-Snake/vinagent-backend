@@ -24,6 +24,10 @@ const PRIORITIES = ['low', 'normal', 'high'];
 const SENTIMENTS = ['POSITIVE', 'NEUTRAL', 'NEGATIVE'];
 const CUSTOMER_TYPES = ['MEMBER', 'VISITOR', 'UNKNOWN'];
 const CHANNELS = ['sms', 'email', 'voice', 'none'];
+const WORKFLOW_STATES = ['NOT_STARTED', 'IN_PROGRESS', 'WAITING', 'BLOCKED', 'COMPLETED', 'CANCELLED'];
+const WAITING_ON = ['NONE', 'STAFF', 'CUSTOMER', 'MANAGER', 'EXTERNAL'];
+const STEP_TYPES = ['INTERNAL', 'CUSTOMER_MESSAGE', 'CUSTOMER_WAIT', 'APPROVAL', 'EXTERNAL', 'EXECUTION', 'FOLLOW_UP', 'OTHER'];
+const STEP_STATUSES = ['PENDING', 'IN_PROGRESS', 'BLOCKED', 'COMPLETED', 'SKIPPED', 'CANCELLED'];
 
 // --- PAYLOAD SUB-SCHEMAS (Whitelisted Fields) ---
 const addressPayloadSchema = Joi.object({
@@ -51,6 +55,34 @@ const genericPayloadSchema = Joi.object({
     originalText: Joi.string().max(2000),
     note: Joi.string().max(2000)
 }).unknown(true); // Allow extra fields for flexibility
+
+const taskStepCreateSchema = Joi.object({
+    title: Joi.string().required().max(200),
+    description: Joi.string().max(4000).allow('', null),
+    stepType: Joi.string().valid(...STEP_TYPES).default('INTERNAL'),
+    status: Joi.string().valid(...STEP_STATUSES).default('PENDING'),
+    waitingOn: Joi.string().valid(...WAITING_ON).default('NONE'),
+    ownerUserId: Joi.number().integer().positive().allow(null),
+    dueAt: Joi.date().iso().allow(null),
+    sortOrder: Joi.number().integer().min(0).optional(),
+    blockedReason: Joi.string().max(2000).allow('', null),
+    completionNotes: Joi.string().max(2000).allow('', null),
+    metadata: Joi.object().unknown(true).optional()
+});
+
+const taskStepUpdateSchema = Joi.object({
+    title: Joi.string().max(200),
+    description: Joi.string().max(4000).allow('', null),
+    stepType: Joi.string().valid(...STEP_TYPES),
+    status: Joi.string().valid(...STEP_STATUSES),
+    waitingOn: Joi.string().valid(...WAITING_ON),
+    ownerUserId: Joi.number().integer().positive().allow(null),
+    dueAt: Joi.date().iso().allow(null),
+    sortOrder: Joi.number().integer().min(0),
+    blockedReason: Joi.string().max(2000).allow('', null),
+    completionNotes: Joi.string().max(2000).allow('', null),
+    metadata: Joi.object().unknown(true).optional()
+}).min(1);
 
 // --- STATUS TRANSITION RULES ---
 // Flexible transitions to support manager workflow via status dropdown
@@ -84,10 +116,16 @@ const createTaskSchema = Joi.object({
     messageId: Joi.number().integer().positive().allow(null),
     assigneeId: Joi.number().integer().positive().allow(null),
     parentTaskId: Joi.number().integer().positive().allow(null),
+    dueAt: Joi.date().iso().allow(null),
+    resolutionSummary: Joi.string().max(2000).allow('', null),
+    steps: Joi.array().items(taskStepCreateSchema).max(20).optional(),
     // Suggested Reply Fields
     suggestedReplyBody: Joi.string().max(2000).allow(''),
     suggestedChannel: Joi.string().valid(...CHANNELS),
     suggestedReplySubject: Joi.string().max(200).allow(''),
+    suggestedAction: Joi.string().max(4000).allow('', null),
+    suggestedRecipientEmail: Joi.string().email().allow('', null),
+    suggestedCc: Joi.string().max(1000).allow('', null),
     isPrivateNote: Joi.boolean().default(false)
 });
 
@@ -112,6 +150,8 @@ const updateTaskSchema = Joi.object({
     suggestedReplySubject: Joi.string().max(200).allow(''),
     assigneeId: Joi.number().integer().positive().allow(null),
     parentTaskId: Joi.number().integer().positive().allow(null),
+    dueAt: Joi.date().iso().allow(null),
+    resolutionSummary: Joi.string().max(2000).allow('', null),
     regenerateSuggestedReply: Joi.boolean(),
     isPrivateNote: Joi.boolean()
 }).min(1);
@@ -268,6 +308,8 @@ module.exports = {
     validateStatusTransition,
     createTaskSchema,
     updateTaskSchema,
+    taskStepCreateSchema,
+    taskStepUpdateSchema,
     updateTaskNoteSchema,
     autoclassifySchema,
     smsWebhookSchema,
@@ -283,5 +325,9 @@ module.exports = {
     updateMemberSchema,
     VALID_STATUS_TRANSITIONS,
     CATEGORIES,
-    STATUSES
+    STATUSES,
+    WORKFLOW_STATES,
+    WAITING_ON,
+    STEP_TYPES,
+    STEP_STATUSES
 };

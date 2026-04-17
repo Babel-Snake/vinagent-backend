@@ -1,658 +1,280 @@
 # TEST_PLAN.md
 
-Comprehensive test plan for VinAgent MVP, aligned with:
+This document describes the current testing strategy for the live VinAgent backend.
 
-* `DOMAIN_MODEL.md`
-* `GOLDEN_PATH.md` (secure-link address change flow)
-* `API_SPEC.md`
+It is aligned to the current implementation, which uses:
 
-The goal is to:
+* task statuses: `PENDING`, `ACTIONED`, `REJECTED`
+* task workflow summary fields on `Task`
+* `TaskStep` for structured progress
+* `TaskAction` for detailed audit history
+* `MemberActionToken` for secure member self-service
 
-* Ensure the first thin slice (address change via SMS + secure link) is robust.
-* Provide clear structure so AI coding agents and human devs can implement and extend tests consistently.
+## 1. Testing Goals
 
-Stack assumptions:
+The backend test suite should prove that:
 
-* Node.js + Express
-* Sequelize + MySQL
-* Firebase Auth for dashboard APIs
-* Jest for tests (with supertest for HTTP integration tests)
-* Podman/Docker-based test DB for integration tests
+1. inbound messages become tasks correctly
+2. task operations follow the current status model
+3. structured task steps correctly drive workflow summary
+4. execution side effects are safe and predictable
+5. public token-based flows work end to end
+6. auth, permissions, and webhook signatures are enforced
 
----
+## 2. Test Layers
 
-## 1. Test Strategy Overview
+### 2.1 Unit Tests
 
-We will test at three main levels:
+Use unit tests for:
 
-1. **Unit tests** – Small, isolated functions and services.
+* classification heuristics and AI fallbacks
+* centralized workflow template selection
+* status transition guards
+* role restrictions
+* workflow summary derivation from task steps
+* token creation/validation rules
+* address-confirmation behaviour
+* execution branching by task type
 
-   * Triage logic
-   * Execution service
-   * Token creation/validation helpers
+### 2.2 Integration Tests
 
-2. **Integration tests** – HTTP + DB interactions.
+Use integration tests for:
 
-   * `POST /webhooks/sms` → Message + Task creation
-   * `GET /tasks`, `GET /tasks/:id` (with auth)
-   * `PATCH /tasks/:id` → triggers execution
-   * `GET /address-update/validate` & `POST /address-update/confirm`
+* webhook ingestion
+* task list/detail/update APIs
+* address-update public APIs
+* execution side effects with a real test DB
+* security middleware
 
-3. **End-to-End golden path** – Simulate the full story.
+### 2.3 Golden Path
 
-   * Inbound SMS → triage → task → approval → token → member confirm → member updated → final confirmation.
+Maintain at least one end-to-end integration test for the full address-change flow:
 
-Non-functional checks:
+`SMS -> task -> manager action -> secure token -> member confirm -> member updated`
 
-* Auth & authorization (Firebase + token-based)
-* Data validation and error handling
-* Logging behaviour (no PII)
+## 3. Current Contract to Test
 
-Each test area below includes:
+### 3.1 Task Lifecycle
 
-* Purpose
-* Key test cases
-* Example inputs/outputs
+Tests should assume:
 
----
+* new tasks start as `PENDING`
+* managers/staff can move `PENDING -> ACTIONED`
+* managers/admins can move `PENDING -> REJECTED`
+* actioned or rejected tasks can be reopened to `PENDING`
 
-## 2. Unit Tests
+Do not write tests against the retired status set:
 
-### 2.1 Triage Service
+* `PENDING_REVIEW`
+* `APPROVED`
+* `AWAITING_MEMBER_ACTION`
+* `EXECUTED`
 
-**Module:** `triageService`
+### 3.2 Address-Change Semantics
 
-**Purpose:** Given a `Message`, classify intent and produce a `Task` payload suggestion.
+Tests should reflect the actual flow:
 
-**Key behaviours:**
+1. task starts `PENDING`
+2. staff action it
+3. execution creates `MemberActionToken`
+4. task returns to `PENDING` while waiting for member confirmation
+5. member confirms
+6. task becomes `ACTIONED`
 
-* Recognise address change intents.
-* Extract structured address data.
-* Choose a reasonable suggested channel and reply stub.
+### 3.3 Execution Semantics
 
-**Test cases:**
+Tests should reflect the current best-effort execution model:
 
-1. **Address Change – Clear Pattern**
+* actioning a task may trigger execution
+* if execution validation fails, the status change is not rolled back
+* if secure links are disabled, address automation is skipped and the task stays `ACTIONED`
 
-   * Input body: "Hi, I've moved. Please update my address to 12 Oak Street, Stirling 5152."
-   * Expected:
+## 4. High-Value Unit Tests
 
-     * `type = ADDRESS_CHANGE`
-     * `payload.newAddress.addressLine1 = "12 Oak Street"`
-     * `payload.newAddress.suburb = "Stirling"`
-     * `payload.newAddress.postcode = "5152"`
-     * `suggestedChannel = sms`
+### 4.1 `triage.service`
 
-2. **Address Change – Missing Postcode**
+Cover:
 
-   * Input body: "I moved to 12 Oak Street, Stirling."
-   * Expected:
+* address-change classification
+* order / booking / operations classification
+* feature-flag downgrades through `WinerySettings`
+* fallback heuristic behaviour when AI is skipped/unavailable
 
-     * `type = ADDRESS_CHANGE`
-     * `payload.newAddress.postcode` may be `null` or missing
-     * Triage still creates a payload but may mark it as incomplete (e.g. `payload.metadata.missingFields = ["postcode"]`).
+### 4.1a `taskWorkflowTemplates`
 
-3. **Non-Address Query**
+Cover:
 
-   * Input body: "What time do you open on Saturday?"
-   * Expected:
+* subtype-specific step templates
+* category fallback templates
+* explicit wait-state ownership like customer wait steps with no owner
+* inferred step metadata defaults
 
-     * `type = GENERAL_QUERY`
-     * No `newAddress` in payload
+### 4.2 `taskService`
 
-4. **Multiple Intents – MVP Behaviour**
+Cover:
 
-   * Input body: "I've moved and also my payment card changed."
-   * MVP behaviour (simple):
+* manual task creation logs `MANUAL_CREATED`
+* valid status transitions
+* invalid status transitions are rejected
+* staff cannot reject tasks
+* staff cannot reassign tasks
+* step creation/update/delete sync workflow summary correctly
+* actioning triggers execution
+* execution failures do not roll back the saved status change
 
-     * Either pick one dominant intent (e.g. `ADDRESS_CHANGE`), or
-     * Tag as `GENERAL_QUERY` with a note in payload.
-   * Ensure logic is predictable and documented.
+### 4.2a `services/ai`
 
-5. **Safety – Empty Body**
+Cover:
 
-   * Input body: `""` or whitespace
-   * Expected:
+* test mode uses deterministic mock AI even when `OPENAI_API_KEY` is present
+* live adapter is only used in tests when `AI_ALLOW_LIVE_TESTS=true`
+* mock AI returns stable classification, reply, and workflow-step suggestions
 
-     * Error or fallback to `GENERAL_QUERY` with `payload.issue = "UNPARSABLE"`.
+### 4.3 `execution.service`
 
----
+Cover:
 
-### 2.2 Task Service
+* address-change tasks create `MemberActionToken`
+* address-change tasks are reset to `PENDING` after token creation
+* order tasks remain `ACTIONED` and log `ORDER_UPDATE_STUB`
+* secure-links-disabled paths skip token creation
+* invalid payloads fail safely
 
-**Module:** `taskService`
+### 4.4 `memberActionTokenService`
 
-**Purpose:** Create and update tasks, enforce status transitions, record actions.
+Cover:
 
-**Key behaviours:**
+* token creation
+* token expiry
+* not-found handling
+* already-used handling
+* mark-used semantics
 
-* Enforce allowed transitions.
-* Attach correct `TaskAction` entries.
+### 4.5 `addressUpdateService`
 
-**Test cases:**
+Cover:
 
-1. **Create Task From Triage**
+* valid token updates member data
+* token is marked used
+* linked task becomes `ACTIONED`
+* audit entry contains `MEMBER_CONFIRMED_ADDRESS`
+* missing address / missing member errors
 
-   * Input: triage result (type, payload, suggestedChannel).
-   * Expected:
+## 5. High-Value Integration Tests
 
-     * `Task` created with `status = PENDING_REVIEW`.
-     * `TaskAction(CREATED)` created with correct details.
+### 5.1 Webhook Intake
 
-2. **Approve Valid Transition**
+For SMS, email, and voice:
 
-   * From `PENDING_REVIEW` to `APPROVED`.
-   * Expected:
+* valid webhook creates inbound `Message`
+* valid webhook creates `Task`
+* valid webhook creates initial workflow steps from AI or template planning
+* duplicate provider ID returns a duplicate acknowledgement
+* unknown destination errors cleanly
 
-     * `Task.status = APPROVED`.
-     * `TaskAction(APPROVED)` recorded with correct `userId`.
+### 5.2 Webhook Security
 
-3. **Reject Valid Transition**
+Cover:
 
-   * From `PENDING_REVIEW` to `REJECTED`.
-   * Expected:
+* SMS rejected without Twilio signature
+* voice rejected without Twilio signature
+* email rejected without signature
+* Retell rejected without valid HMAC
 
-     * `Task.status = REJECTED`.
-     * `TaskAction(REJECTED)` recorded with reason in `details`.
+### 5.3 Task API
 
-4. **Invalid Transition**
+Cover:
 
-   * From `EXECUTED` to `APPROVED`.
-   * Expected:
+* `GET /api/tasks`
+* `GET /api/tasks/:id`
+* `POST /api/tasks/autoclassify`
+* `POST /api/tasks`
+* `PATCH /api/tasks/:id`
+* `POST /api/tasks/:id/steps`
+* `PATCH /api/tasks/:id/steps/:stepId`
+* `DELETE /api/tasks/:id/steps/:stepId`
+* `PATCH /api/tasks/:id/notes/:actionId`
 
-     * Throw error (e.g. `INVALID_TASK_STATUS_TRANSITION`).
+Important assertions:
 
-5. **Payload Update on Approve**
+* winery scoping is enforced
+* staff queue scoping is enforced
+* assignment writes `ASSIGNED`
+* notes write `NOTE_ADDED`
+* actioning writes `ACTIONED`
+* rejecting writes `REJECTED`
+* step edits write `STEP_*` audit events
 
-   * Manager modifies `payload.newAddress` before approval.
-   * Expected:
+### 5.4 Public Address Update
 
-     * `Task.payload` updated.
-     * `TaskAction(APPROVED)` includes diff or note in `details` (optional but nice to track).
+Cover:
 
----
+* validate token success
+* validate token error cases
+* confirm token success
+* replay protection
+* linked task/member updates
 
-### 2.3 Execution Service
+## 6. Golden Path Test
 
-**Module:** `executionService`
+The golden path test should assert:
 
-**Purpose:** After a task is approved, handle execution:
+1. inbound SMS creates a `PENDING` address-change task
+2. manager actioning creates a token and leaves the task `PENDING`
+3. the public validate endpoint returns current/proposed address state
+4. member confirmation updates the member
+5. the token is marked used
+6. the task ends `ACTIONED`
 
-* Create `MemberActionToken`.
-* Send outbound message with link.
-* Update task status.
-* Record `TaskAction`.
+Recommended audit assertions:
 
-**Test cases:**
+* one staff `ACTIONED`
+* one `EXECUTION_TRIGGERED`
+* one member-confirmation `ACTIONED`
 
-1. **Execution for ADDRESS_CHANGE (SMS Channel)**
+## 7. Non-Functional Checks
 
-   * Given `Task` with:
+### 7.1 Logging and PII
 
-     * `type = ADDRESS_CHANGE`
-     * `status = APPROVED`
-     * `suggestedChannel = sms`
-   * Expected:
+Where practical, tests should verify that:
 
-     * `MemberActionToken` created with `type = ADDRESS_CHANGE`, `channel = sms`, `memberId`, `wineryId`, `taskId`.
-     * Token has `expiresAt` in the future.
-     * SMS service called once with body containing a URL containing the token.
-     * `Task.status = AWAITING_MEMBER_ACTION`.
-     * `TaskAction(EXECUTION_TRIGGERED)` recorded.
+* raw tokens are not logged
+* logs prefer IDs over full addresses or full message bodies
 
-2. **Execution – No Member**
+### 7.2 Pagination and Search
 
-   * Task has no `memberId` (e.g. message not matched to a member).
-   * Expected:
+Cover:
 
-     * Execution fails gracefully with error (e.g. `TASK_HAS_NO_MEMBER`).
-     * Task status stays `APPROVED`.
+* `page` / `pageSize`
+* `search`
+* `mentionedMe`
+* `showOnlyFlagged`
+* `actionedById`
 
-3. **Execution – Unsupported Type**
+### 7.3 Role and Winery Boundaries
 
-   * Unknown `Task.type`.
-   * Expected:
+Cover:
 
-     * Error `UNSUPPORTED_TASK_TYPE`.
+* missing auth -> `401`
+* wrong winery access blocked
+* staff restrictions on reject/reassign
 
-4. **Execution – Email Channel (Future-proof)**
+## 8. Current Suite Layout
 
-   * `suggestedChannel = email`.
-   * Expected:
+The current repo already contains a mix of unit and integration suites under:
 
-     * `MemberActionToken.channel = email`.
-     * Email service called instead of SMS.
-
----
-
-### 2.4 MemberActionToken Service
-
-**Module:** `memberActionTokenService`
-
-**Purpose:**
-
-* Create secure tokens.
-* Validate and consume tokens.
-
-**Test cases:**
-
-1. **Create Token – Basic**
-
-   * Input: `memberId`, `wineryId`, `taskId`, `type`, `channel`, `target`.
-   * Expected:
-
-     * Token string is random, opaque, and non-empty.
-     * Record persisted with correct foreign keys.
-     * `expiresAt` = now + configured TTL.
-
-2. **Validate Token – Happy Path**
-
-   * Token exists, not expired, unused.
-   * Expected:
-
-     * Returns linked `Member`, `Task`, and payload.
-
-3. **Validate Token – Not Found**
-
-   * Unknown token.
-   * Expected:
-
-     * Error `TOKEN_NOT_FOUND`.
-
-4. **Validate Token – Expired**
-
-   * `expiresAt` < now.
-   * Expected:
-
-     * Error `TOKEN_EXPIRED`.
-
-5. **Validate Token – Already Used**
-
-   * `usedAt` not null.
-   * Expected:
-
-     * Error `TOKEN_ALREADY_USED`.
-
-6. **Consume Token – Marks usedAt**
-
-   * After successful address update, consuming token sets `usedAt`.
-
----
-
-### 2.5 Address Update Service
-
-**Module:** `addressUpdateService`
-
-**Purpose:**
-
-* Given a validated token and new address, update the `Member` and associated `Task`.
-
-**Test cases:**
-
-1. **Happy Path**
-
-   * Valid token + valid address.
-   * Expected:
-
-     * Member address fields updated.
-     * Token `usedAt` set.
-     * Task status → `EXECUTED`.
-     * `TaskAction(EXECUTED)` created.
-
-2. **Invalid Address Data**
-
-   * Missing required fields (e.g. no `postcode`).
-   * Expected:
-
-     * Error `INVALID_ADDRESS`.
-     * No changes to Member/Token/Task.
-
-3. **Concurrency – Double Submit**
-
-   * Simulate two confirmations using the same token.
-   * Expected:
-
-     * First call succeeds.
-     * Second call fails with `TOKEN_ALREADY_USED`.
-
----
-
-## 3. Integration Tests (HTTP + DB)
-
-Integration tests use supertest against the Express app + a real test DB (via Podman). They test:
-
-* Routing
-* Controllers
-* Services
-* DB interactions
-* Auth middleware
-
-### 3.1 Inbound SMS Webhook → Message & Task
-
-**Scenario:** `POST /webhooks/sms` with valid Twilio payload.
-
-**Steps:**
-
-1. Seed DB with winery (id 1) and member (id 42 with phone).
-2. Call `POST /webhooks/sms` with realistic Twilio payload.
-3. Assert:
-
-   * `Message` row created (inbound, sms).
-   * `Task` row created with `type = ADDRESS_CHANGE`, `status = PENDING_REVIEW`.
-   * `TaskAction(CREATED)` created.
-
-**Variations:**
-
-* Phone not matched to a member → Task still created but `memberId = null` (or flow defined accordingly).
-* Missing `Body` → `400 INVALID_WEBHOOK_PAYLOAD`.
-
----
-
-### 3.2 GET /tasks (Auth + Filtering)
-
-**Scenario:** Manager lists `PENDING_REVIEW` tasks.
-
-**Steps:**
-
-1. Seed DB:
-
-   * `User` with role `manager`, `wineryId = 1`.
-   * Several tasks with varying statuses and wineryIds.
-2. Call `GET /tasks?status=PENDING_REVIEW` with valid Firebase token.
-3. Assert:
-
-   * Only tasks for `wineryId = 1`.
-   * Only tasks with status `PENDING_REVIEW`.
-   * Pagination info present.
-
-**Auth Edge Cases:**
-
-* No token → `401 UNAUTHENTICATED`.
-* Token for user with different winery → returns only that winery’s tasks.
-
----
-
-### 3.3 PATCH /tasks/:id (Approve)
-
-**Scenario:** Manager approves an address-change task.
-
-**Steps:**
-
-1. Seed DB with:
-
-   * `Task` id 5001, status `PENDING_REVIEW`, valid payload.
-   * `User` manager for same winery.
-2. Call `PATCH /tasks/5001` with body to set `status = APPROVED` and updated reply.
-3. Assert:
-
-   * `Task.status = APPROVED`.
-   * `Task.payload` updated.
-   * `TaskAction(APPROVED)` created with correct `userId`.
-
-**Invalid Cases:**
-
-* Wrong winery user tries to approve → `403 FORBIDDEN`.
-* Invalid status transition → `400 INVALID_TASK_STATUS_TRANSITION`.
-
----
-
-### 3.4 Approve → Execution (Token + Outbound Message)
-
-**Scenario:** Approving a task triggers execution.
-
-**Steps:**
-
-1. Seed DB with APPROVABLE task.
-2. Stub/mocks for SMS provider (so no real SMS).
-3. Call `PATCH /tasks/5001` as above.
-4. Assert:
-
-   * `MemberActionToken` created (`type = ADDRESS_CHANGE`, `channel = sms`).
-   * Outbound SMS function called once with body containing URL.
-   * Outbound `Message` row created (direction outbound).
-   * `Task.status = AWAITING_MEMBER_ACTION`.
-   * `TaskAction(EXECUTION_TRIGGERED)` recorded.
-
----
-
-### 3.5 GET /address-update/validate
-
-**Scenario:** Member clicks secure link.
-
-**Steps:**
-
-1. Seed DB with:
-
-   * `Member`, `Task`, and `MemberActionToken` (unused, not expired).
-2. Call `GET /address-update/validate?token=XYZ123`.
-3. Assert:
-
-   * `200 OK`.
-   * Response includes `member` (no sensitive extras), `currentAddress`, `proposedAddress`.
-
-**Edge Cases:**
-
-* Token missing → `400 INVALID_TOKEN`.
-* Token not found → `404 TOKEN_NOT_FOUND`.
-* Token expired → `400 TOKEN_EXPIRED`.
-* Token already used → `400 TOKEN_ALREADY_USED`.
-
----
-
-### 3.6 POST /address-update/confirm
-
-**Scenario:** Member confirms address.
-
-**Steps:**
-
-1. Seed DB as above with unused token.
-2. Call `POST /address-update/confirm` with valid `token` and `newAddress`.
-3. Assert:
-
-   * `200 OK` + `status: ok`.
-   * `Member` address updated.
-   * Token `usedAt` set.
-   * `Task.status = EXECUTED`.
-   * `TaskAction(EXECUTED)` created.
-   * Optionally: outbound confirmation message created.
-
-**Edge Cases:**
-
-* Invalid address → `400 INVALID_ADDRESS`, no updates.
-* Second call with same token → `400 TOKEN_ALREADY_USED`.
-
----
-
-## 4. End-to-End Golden Path Test
-
-This is the most important integration test. It simulates the full flow described in `GOLDEN_PATH.md`.
-
-### 4.1 Scenario: Full Address Change Flow
-
-**Steps:**
-
-1. Seed DB with `Winery`, `Member`, `User (manager)`.
-2. `POST /webhooks/sms` with Emma’s message.
-3. `GET /tasks?status=PENDING_REVIEW` as manager, assert one task.
-4. `PATCH /tasks/:id` to approve.
-5. Inspect DB:
-
-   * `MemberActionToken` exists.
-   * `Task.status = AWAITING_MEMBER_ACTION`.
-6. Simulate member clicking link:
-
-   * `GET /address-update/validate?token=...`.
-   * Assert fields correct.
-7. Member confirms:
-
-   * `POST /address-update/confirm` with token + address.
-8. Final assertions:
-
-   * Member’s address updated.
-   * Token `usedAt` set.
-   * Task `EXECUTED`.
-   * `TaskAction` trail: `CREATED`, `APPROVED`, `EXECUTION_TRIGGERED`, `EXECUTED`.
-   * Optional: outbound confirmation message.
-
-This test should be run regularly and treated as a primary health indicator for the system.
-
----
-
-## 5. Negative & Security-Focused Tests
-
-### 5.1 Auth & Permissions
-
-1. **Missing Auth for Dashboard Endpoints**
-
-   * `GET /tasks` without token → `401`.
-   * `PATCH /tasks/:id` without token → `401`.
-
-2. **Wrong Winery User**
-
-   * User from `wineryId = 2` tries to access `Task` for `wineryId = 1`.
-   * `GET /tasks/:id` → `404` or `403` (decide and keep consistent).
-   * `PATCH /tasks/:id` → `403 FORBIDDEN`.
-
-3. **Role-Based**
-
-   * If you differentiate `staff` vs `manager`, ensure only allowed roles can approve tasks.
-
----
-
-### 5.2 Token Abuse
-
-1. **Tampered Token**
-
-   * Random string that does not exist → `TOKEN_NOT_FOUND`.
-
-2. **Replay Attack**
-
-   * Use same token twice on `/confirm`.
-   * Second call must fail with `TOKEN_ALREADY_USED`.
-
-3. **Cross-Winery Token Misuse**
-
-   * Ensure token cannot be used to access/modify a different winery or member.
-
----
-
-### 5.3 Data Validation
-
-1. **Invalid Address Formats**
-
-   * Non-string fields where strings are expected.
-   * Missing essential fields (e.g. `addressLine1`, `suburb`, `state`, `postcode`).
-
-2. **Oversized Input**
-
-   * Very long strings for address fields.
-   * Ensure they are either truncated or rejected.
-
----
-
-## 6. Logging & PII Tests
-
-Even though this is harder to test automatically, we can:
-
-* Add tests that inspect logger calls via a mock logger.
-* Assert that:
-
-  * Logs include IDs and high-level context.
-  * Logs do **not** include full message bodies, full addresses, or raw token strings.
-
-Example test:
-
-* Trigger a flow (e.g. create token).
-* Inspect logger mock calls.
-* Ensure only `tokenId`, not `token`, appears.
-
----
-
-## 7. Test Organisation & Naming
-
-**Suggested Jest folder structure:**
-
-```
-/tests
-  /unit
-    triageService.test.ts
-    taskService.test.ts
-    executionService.test.ts
-    memberActionTokenService.test.ts
-    addressUpdateService.test.ts
-  /integration
-    smsWebhook.int.test.ts
-    tasksApi.int.test.ts
-    addressUpdateApi.int.test.ts
-    goldenPath.int.test.ts
+```text
+src/tests/unit
+src/tests/integration
 ```
 
-Naming conventions:
+When adding new coverage, keep file names aligned with the existing pattern:
 
-* Unit tests: `*.test.ts`
-* Integration tests: `*.int.test.ts`
+* unit: `*.test.js`
+* integration: `*.int.test.js` or existing `*.test.js` under `integration`
 
-Each test file should:
+## 9. Maintenance Rule
 
-* Use clear `describe` blocks per method/endpoint.
-* Use explicit `it('should ...')` descriptions that map back to the cases in this plan.
+If implementation, docs, and tests disagree, first verify the live backend behaviour in code. Then update docs and tests together so they continue to describe the same contract.
 
----
-
-### 2.6 Winery Settings & Tier Logic
-
-**Module:** `triageService` / `WinerySettings`
-
-**Purpose:** Ensure features are gated by tier configuration.
-
-**Test cases:**
-
-1. **Basic Tier Downgrade**
-   * Winery has `enableWineClubModule: false`.
-   * Input: "Change my address".
-   * Expected: `category=GENERAL`, `subType=GENERAL_ENQUIRY`.
-
-2. **Advanced Tier Preservation**
-   * Winery has `enableWineClubModule: true`.
-   * Input: "Change my address".
-   * Expected: `category=ACCOUNT`, `subType=ACCOUNT_ADDRESS_CHANGE`.
-
----
-
-## 3. Integration Tests (HTTP + DB)
-
-### 3.1 Inbound SMS Webhook → Message & Task
-...
-
-### 3.2 Manual Task Operations
-**Scenario:** Staff manually creates a task.
-
-1. `POST /api/tasks` with `category=INTERNAL`, `note="Call back later"`.
-2. Assert `Task` created with `PENDING_REVIEW`.
-3. Assert `TaskAction(MANUAL_CREATED)`.
-
-### 3.3 PATCH Task & Tier Execution
-**Scenario:** Approving a task respects feature flags.
-
-1. Winery has `enableSecureLinks: false`.
-2. `PATCH /tasks/:id` to APPROVED.
-3. Assert Task is APPROVED but `MemberActionToken` is **NOT** created (Execution skipped).
-
-
-Once the MVP slice is stable, extend this test plan to cover:
-
-* Booking requests (`BOOKING_REQUEST` type)
-* Payment issues (`PAYMENT_ISSUE` type)
-* Email-based links (`channel = email`)
-* Voice/IVR flows (`channel = voice`)
-* Member order history and preference-based suggestions (`MemberOrder`, `OrderItem`)
-
-For each new feature, mirror this structure:
-
-* Unit tests for new services.
-* Integration tests for new endpoints.
-* One or more Golden Path-style end-to-end tests.
-
----
-
-This test plan is intended to be concrete enough for direct implementation by AI coding agents and human developers, while staying readable and maintainable as the project grows.
+For normal CI and local test runs, prefer deterministic mock AI. Treat live-AI test runs as an explicit opt-in diagnostic path, not the default contract.
