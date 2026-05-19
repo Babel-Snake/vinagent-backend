@@ -29,6 +29,9 @@ coverage/
 dist/
 build/
 
+# Local uploaded files
+uploads/
+
 # Sequelize / DB
 *.sqlite
 

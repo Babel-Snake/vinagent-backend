@@ -2,29 +2,29 @@
 
 This roadmap reflects the current state of the project rather than the original bootstrap plan.
 
-## 1. Immediate Priority: Contract Coherence
+## 1. Immediate Priority: Product Learning From Live Usage
 
 Goal:
 
-Keep the implementation, tests, and docs describing the same product.
+Use the now-coherent task workflow to learn from real winery operations.
 
 Current focus areas:
 
 * keep the simplified task status model (`PENDING`, `ACTIONED`, `REJECTED`) as the source of truth
-* document detailed workflow state through `TaskAction` and `MemberActionToken`
-* prevent old `APPROVED / EXECUTED / AWAITING_MEMBER_ACTION` assumptions from returning
+* use operational analytics to watch wait states, blockers, response latency, handoffs, identity-review load, and follow-up automation conversion
+* turn confirmed task outcomes into richer customer lifecycle state
 
 ## 2. Backend Coherence Pass
 
 Goal:
 
-Remove remaining mismatches around the live backend behaviour.
+Keep the backend, frontend, tests, and docs aligned as the workflow system grows.
 
 Important candidates:
 
-* frontend/backend route naming mismatches for winery config endpoints
-* analytics/reporting code that still assumes retired statuses
-* debug-file writes left in controller paths
+* exact workflow-state duration tracking for future SLA reporting
+* continued test coverage for analytics and follow-up automation edge cases
+* provider-specific execution failure and retry reporting
 
 ## 3. Workflow Hardening
 
@@ -70,6 +70,7 @@ Current product surfaces already in the repo:
 
 Likely next steps:
 
+* customer lifecycle promotion rules from confirmed bookings, orders, and repeated engagement
 * deeper booking integration
 * better order/CRM integration
 * richer SOP/contact usage in AI workflows

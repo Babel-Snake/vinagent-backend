@@ -156,7 +156,9 @@ function classifyMessageHeuristically(text, context = {}) {
         suggestedAction: buildHeuristicAction(subType),
         suggestedReply: buildHeuristicReply({ category, subType, context }),
         suggestedAssigneeId: null,
-        suggestedRecipientEmail: context.member?.email || null,
+        suggestedRecipientEmail: context.suggestedChannel === 'email'
+            ? context.member?.email || context.requesterEmail || context.manualIntake?.requesterEmail || null
+            : null,
         suggestedCc: null,
         suggestedSteps: getWorkflowTemplateForTask({ category, subType, suggestedAssigneeId: null })
     };

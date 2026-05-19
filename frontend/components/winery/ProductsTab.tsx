@@ -1,49 +1,54 @@
 'use client';
 
 import { useState } from 'react';
-import { createProduct, deleteProduct } from '../../lib/api';
+import { createProduct, updateProduct, deleteProduct } from '../../lib/api';
+
+const emptyProductForm = {
+    name: '',
+    category: 'Red',
+    vintage: '',
+    price: '',
+    stockStatus: 'IN_STOCK',
+    tastingNotes: '',
+    keySellingPoints: '',
+    pairingSuggestions: '',
+    awards: ''
+};
+
+const productCategories = ['Red', 'White', 'Sparkling', 'Rose', 'Fortified', 'Merchandise', 'Event'];
+const stockStatuses = [
+    { value: 'IN_STOCK', label: 'In Stock' },
+    { value: 'LOW_STOCK', label: 'Low Stock' },
+    { value: 'OUT_OF_STOCK', label: 'Out of Stock' }
+];
 
 export function ProductsTab({ winery, onUpdate }: { winery: any, onUpdate: () => void }) {
     const products = winery.products || [];
-    const [newProduct, setNewProduct] = useState({
-        name: '',
-        category: 'Red',
-        vintage: '',
-        price: '',
-        stockStatus: 'IN_STOCK',
-        tastingNotes: '',
-        keySellingPoints: '', // Comma separated for input convenience
-        pairingSuggestions: '',
-        awards: ''
-    });
+    const [newProduct, setNewProduct] = useState(emptyProductForm);
+    const [editingProductId, setEditingProductId] = useState<number | null>(null);
+    const [editingProduct, setEditingProduct] = useState(emptyProductForm);
     const [loading, setLoading] = useState(false);
+    const [savingEdit, setSavingEdit] = useState(false);
+
+    const keySellingPointsToInput = (value: any) => {
+        if (Array.isArray(value)) return value.join(', ');
+        return value || '';
+    };
+
+    const buildPayload = (product: typeof emptyProductForm) => ({
+        ...product,
+        price: parseFloat(product.price) || 0,
+        keySellingPoints: product.keySellingPoints
+            ? product.keySellingPoints.split(',').map(s => s.trim()).filter(Boolean)
+            : []
+    });
 
     const handleCreate = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
         try {
-            // Process selling points
-            const pointsArray = newProduct.keySellingPoints
-                ? newProduct.keySellingPoints.split(',').map(s => s.trim()).filter(Boolean)
-                : [];
-
-            await createProduct({
-                ...newProduct,
-                price: parseFloat(newProduct.price) || 0,
-                keySellingPoints: pointsArray
-            });
-
-            setNewProduct({
-                name: '',
-                category: 'Red',
-                vintage: '',
-                price: '',
-                stockStatus: 'IN_STOCK',
-                tastingNotes: '',
-                keySellingPoints: '',
-                pairingSuggestions: '',
-                awards: ''
-            });
+            await createProduct(buildPayload(newProduct));
+            setNewProduct(emptyProductForm);
             onUpdate();
         } catch (e) {
             alert('Failed to add product');
@@ -56,9 +61,44 @@ export function ProductsTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
         if (!confirm('Are you sure you want to delete this product?')) return;
         try {
             await deleteProduct(id);
+            if (editingProductId === id) handleCancelEdit();
             onUpdate();
         } catch (e) {
             alert('Failed to delete product');
+        }
+    };
+
+    const handleEdit = (product: any) => {
+        setEditingProductId(product.id);
+        setEditingProduct({
+            name: product.name || '',
+            category: product.category || 'Red',
+            vintage: product.vintage || '',
+            price: product.price !== undefined && product.price !== null ? String(product.price) : '',
+            stockStatus: product.stockStatus || 'IN_STOCK',
+            tastingNotes: product.tastingNotes || '',
+            keySellingPoints: keySellingPointsToInput(product.keySellingPoints),
+            pairingSuggestions: product.pairingSuggestions || '',
+            awards: product.awards || ''
+        });
+    };
+
+    const handleCancelEdit = () => {
+        setEditingProductId(null);
+        setEditingProduct(emptyProductForm);
+    };
+
+    const handleUpdate = async (e: React.FormEvent, id: number) => {
+        e.preventDefault();
+        setSavingEdit(true);
+        try {
+            await updateProduct(id, buildPayload(editingProduct));
+            handleCancelEdit();
+            onUpdate();
+        } catch (e) {
+            alert('Failed to update product');
+        } finally {
+            setSavingEdit(false);
         }
     };
 
@@ -81,20 +121,76 @@ export function ProductsTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
                         </thead>
                         <tbody className="divide-y divide-gray-200 bg-white">
                             {products.map((product: any) => (
-                                <tr key={product.id}>
-                                    <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">{product.name}</td>
-                                    <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{product.vintage || '-'}</td>
-                                    <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{product.category}</td>
-                                    <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">${product.price}</td>
-                                    <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                                        <span className={`inline-flex rounded-full px-2 text-xs font-semibold leading-5 ${product.stockStatus === 'IN_STOCK' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                                            {product.stockStatus}
-                                        </span>
-                                    </td>
-                                    <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
-                                        <button onClick={() => handleDelete(product.id)} className="text-red-600 hover:text-red-900">Delete</button>
-                                    </td>
-                                </tr>
+                                editingProductId === product.id ? (
+                                    <tr key={product.id}>
+                                        <td colSpan={6} className="bg-gray-50 px-4 py-5 sm:px-6">
+                                            <form onSubmit={(e) => handleUpdate(e, product.id)} className="grid grid-cols-1 gap-y-5 gap-x-4 sm:grid-cols-6">
+                                                <div className="sm:col-span-3">
+                                                    <label className="block text-sm font-medium text-gray-700">Name</label>
+                                                    <input type="text" required value={editingProduct.name} onChange={e => setEditingProduct({ ...editingProduct, name: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" />
+                                                </div>
+                                                <div className="sm:col-span-1">
+                                                    <label className="block text-sm font-medium text-gray-700">Vintage</label>
+                                                    <input type="text" value={editingProduct.vintage} onChange={e => setEditingProduct({ ...editingProduct, vintage: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" />
+                                                </div>
+                                                <div className="sm:col-span-2">
+                                                    <label className="block text-sm font-medium text-gray-700">Category</label>
+                                                    <select value={editingProduct.category} onChange={e => setEditingProduct({ ...editingProduct, category: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2">
+                                                        {productCategories.map(category => <option key={category}>{category}</option>)}
+                                                    </select>
+                                                </div>
+                                                <div className="sm:col-span-1">
+                                                    <label className="block text-sm font-medium text-gray-700">Price</label>
+                                                    <input type="number" step="0.01" value={editingProduct.price} onChange={e => setEditingProduct({ ...editingProduct, price: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" />
+                                                </div>
+                                                <div className="sm:col-span-2">
+                                                    <label className="block text-sm font-medium text-gray-700">Status</label>
+                                                    <select value={editingProduct.stockStatus} onChange={e => setEditingProduct({ ...editingProduct, stockStatus: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2">
+                                                        {stockStatuses.map(status => <option key={status.value} value={status.value}>{status.label}</option>)}
+                                                    </select>
+                                                </div>
+                                                <div className="sm:col-span-3">
+                                                    <label className="block text-sm font-medium text-gray-700">Tasting Notes</label>
+                                                    <input type="text" value={editingProduct.tastingNotes} onChange={e => setEditingProduct({ ...editingProduct, tastingNotes: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" />
+                                                </div>
+                                                <div className="sm:col-span-6">
+                                                    <label className="block text-sm font-medium text-gray-700">Selling Points (Comma separated)</label>
+                                                    <input type="text" value={editingProduct.keySellingPoints} onChange={e => setEditingProduct({ ...editingProduct, keySellingPoints: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" />
+                                                </div>
+                                                <div className="sm:col-span-6">
+                                                    <label className="block text-sm font-medium text-gray-700">Awards/Accolades</label>
+                                                    <input type="text" value={editingProduct.awards} onChange={e => setEditingProduct({ ...editingProduct, awards: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" />
+                                                </div>
+                                                <div className="sm:col-span-6">
+                                                    <label className="block text-sm font-medium text-gray-700">Pairing Suggestions</label>
+                                                    <input type="text" value={editingProduct.pairingSuggestions} onChange={e => setEditingProduct({ ...editingProduct, pairingSuggestions: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" />
+                                                </div>
+                                                <div className="sm:col-span-6 flex justify-end gap-3">
+                                                    <button type="button" onClick={handleCancelEdit} className="inline-flex justify-center rounded-md border border-gray-300 bg-white py-2 px-4 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50">Cancel</button>
+                                                    <button type="submit" disabled={savingEdit} className="inline-flex justify-center rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:bg-gray-400">
+                                                        {savingEdit ? 'Saving...' : 'Save Product'}
+                                                    </button>
+                                                </div>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    <tr key={product.id}>
+                                        <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">{product.name}</td>
+                                        <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{product.vintage || '-'}</td>
+                                        <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{product.category}</td>
+                                        <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">${product.price}</td>
+                                        <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                                            <span className={`inline-flex rounded-full px-2 text-xs font-semibold leading-5 ${product.stockStatus === 'IN_STOCK' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                                {product.stockStatus}
+                                            </span>
+                                        </td>
+                                        <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
+                                            <button onClick={() => handleEdit(product)} className="mr-4 text-indigo-600 hover:text-indigo-900">Edit</button>
+                                            <button onClick={() => handleDelete(product.id)} className="text-red-600 hover:text-red-900">Delete</button>
+                                        </td>
+                                    </tr>
+                                )
                             ))}
                             {products.length === 0 && <tr><td colSpan={6} className="py-8 text-center text-sm text-gray-500">No products added yet.</td></tr>}
                         </tbody>
@@ -118,13 +214,7 @@ export function ProductsTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
                     <div className="sm:col-span-2">
                         <label className="block text-sm font-medium text-gray-700">Category</label>
                         <select value={newProduct.category} onChange={e => setNewProduct({ ...newProduct, category: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2">
-                            <option>Red</option>
-                            <option>White</option>
-                            <option>Sparkling</option>
-                            <option>Rose</option>
-                            <option>Fortified</option>
-                            <option>Merchandise</option>
-                            <option>Event</option>
+                            {productCategories.map(category => <option key={category}>{category}</option>)}
                         </select>
                     </div>
 
@@ -136,9 +226,7 @@ export function ProductsTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
                     <div className="sm:col-span-2">
                         <label className="block text-sm font-medium text-gray-700">Status</label>
                         <select value={newProduct.stockStatus} onChange={e => setNewProduct({ ...newProduct, stockStatus: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2">
-                            <option value="IN_STOCK">In Stock</option>
-                            <option value="LOW_STOCK">Low Stock</option>
-                            <option value="OUT_OF_STOCK">Out of Stock</option>
+                            {stockStatuses.map(status => <option key={status.value} value={status.value}>{status.label}</option>)}
                         </select>
                     </div>
 

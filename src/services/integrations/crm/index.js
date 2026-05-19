@@ -19,6 +19,8 @@ class CrmIntegrationFactory {
                 return new MockCrmProvider(config);
             case 'commerce7':
                 throw new Error('Commerce7 provider not yet implemented');
+            case 'winedirect':
+                throw new Error('WineDirect provider not yet implemented');
             default:
                 console.warn(`Unknown CRM provider '${providerName}', falling back to Mock.`);
                 return new MockCrmProvider(config);

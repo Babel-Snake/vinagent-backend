@@ -31,15 +31,17 @@ export default function CalendarPage() {
         load();
     }, []);
 
-    if (loading) return <div className="p-8 text-center text-gray-500">Loading calendar...</div>;
+    if (loading) return <div className="p-8 text-center text-[var(--muted)]">Loading calendar...</div>;
 
     if (!user) return <div className="p-8 text-center text-red-500">Error loading user profile.</div>;
 
     return (
-        <div className="p-6">
-            <div className="flex justify-between items-center mb-6">
-                <h1 className="text-2xl font-bold text-gray-900">Calendar</h1>
-                {/* Add filters if needed later */}
+        <div className="page-shell">
+            <div className="page-header">
+                <div>
+                    <h1 className="text-2xl font-bold text-[#1c231f]">Calendar</h1>
+                    <p className="page-kicker">Scheduled reminders, task deadlines, meetings, and winery events.</p>
+                </div>
             </div>
 
             <CalendarView

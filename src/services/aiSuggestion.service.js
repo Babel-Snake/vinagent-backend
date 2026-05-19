@@ -1,5 +1,44 @@
-const { Task, Member, TaskAction, TaskStep, User } = require('../models');
+const { Task, Member, Message, TaskAction, TaskStep, User } = require('../models');
 const logger = require('../config/logger');
+
+function resolveContactForChannel(task, channel) {
+    const manualIntake = task.payload?.manualIntake || {};
+    const email = task.suggestedRecipientEmail
+        || task.Member?.email
+        || manualIntake.requesterEmail
+        || null;
+    const phone = task.Member?.phone
+        || manualIntake.requesterPhone
+        || null;
+    const requiredContact = channel === 'email'
+        ? 'email'
+        : channel === 'sms' || channel === 'voice'
+            ? 'phone'
+            : 'none';
+    const hasRequiredContact = requiredContact === 'email'
+        ? Boolean(email)
+        : requiredContact === 'phone'
+            ? Boolean(phone)
+            : true;
+
+    return {
+        email,
+        phone,
+        requiredContact,
+        hasRequiredContact
+    };
+}
+
+function stripIrrelevantEmailWarning(action, channel, contact) {
+    if (!action || !['sms', 'voice'].includes(channel) || !contact.phone) {
+        return action;
+    }
+
+    return String(action)
+        .replace(/Contact details missing\.?\s*Please locate the customer's email before sending the drafted reply\.?/gi, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+}
 
 /**
  * Async AI Generation Trigger
@@ -16,6 +55,14 @@ async function generateAiSuggestion(taskId, wineryId, options = {}) {
             where: { id: taskId, wineryId },
             include: [
                 { model: Member },
+                {
+                    model: Message,
+                    as: 'Messages',
+                    required: false,
+                    separate: true,
+                    order: [['receivedAt', 'ASC'], ['id', 'ASC']],
+                    limit: 20
+                },
                 {
                     model: TaskStep,
                     as: 'TaskSteps',
@@ -36,11 +83,20 @@ async function generateAiSuggestion(taskId, wineryId, options = {}) {
             return;
         }
 
+        const manualIntake = task.payload?.manualIntake || {};
+        const responseChannel = task.suggestedChannel || 'email';
+        const responseContact = resolveContactForChannel(task, responseChannel);
+
         // Build context for AI
         const context = {
             wineryId,
             member: task.Member,
-            suggestedChannel: task.suggestedChannel || 'email'
+            suggestedChannel: responseChannel,
+            manualIntake,
+            requesterName: manualIntake.requesterName || null,
+            requesterEmail: manualIntake.requesterEmail || null,
+            requesterPhone: manualIntake.requesterPhone || null,
+            contact: responseContact
         };
 
         // Extract the original text from various possible locations
@@ -67,6 +123,27 @@ async function generateAiSuggestion(taskId, wineryId, options = {}) {
             `Waiting On: ${task.waitingOn || 'NONE'}`,
             `Next Step: ${task.nextStepSummary || 'None recorded'}`
         ].join('\n');
+
+        const outcomeLines = [];
+        if (task.resolvedAs) outcomeLines.push(`Resolved As: ${task.resolvedAs}`);
+        if (task.resolutionType) outcomeLines.push(`Resolution Type: ${task.resolutionType}`);
+        if (task.customerOutcome) outcomeLines.push(`Customer Outcome: ${task.customerOutcome}`);
+        if (task.resolutionSummary) outcomeLines.push(`Resolution Summary: ${task.resolutionSummary}`);
+        if (task.followUpRequired) {
+            outcomeLines.push(`Follow-up Required: yes${task.followUpDueAt ? `, due ${new Date(task.followUpDueAt).toISOString()}` : ''}`);
+            if (task.followUpSummary) {
+                outcomeLines.push(`Follow-up Summary: ${task.followUpSummary}`);
+            }
+        }
+
+        const messageLines = (task.Messages || [])
+            .map((message, index) => {
+                const timestamp = message.receivedAt || message.createdAt;
+                const subject = message.subject ? ` subject="${message.subject}"` : '';
+                const body = (message.body || '').replace(/\s+/g, ' ').trim();
+                const preview = body.length > 280 ? `${body.slice(0, 277)}...` : body;
+                return `${index + 1}. [${message.direction}] ${message.source}${subject} at ${new Date(timestamp).toISOString()} :: ${preview || '[no body]'}`;
+            });
 
         let historyBlock = '';
         if (includeHistory) {
@@ -107,7 +184,7 @@ async function generateAiSuggestion(taskId, wineryId, options = {}) {
             }
         }
 
-        const prompt = `Task Category: ${task.category}\nTask Type: ${task.subType}\nCurrent Status: ${task.status}\n${workflowBlock}\nOriginal Request: "${originalText}"${stepLines.length > 0 ? `\nCurrent Workflow Steps:\n${stepLines.join('\n')}` : ''}${historyBlock}\n\nGenerate the next best customer-facing response given the full context above.`;
+        const prompt = `Task Category: ${task.category}\nTask Type: ${task.subType}\nCurrent Status: ${task.status}\n${workflowBlock}${outcomeLines.length > 0 ? `\nRecorded Outcome:\n${outcomeLines.join('\n')}` : ''}\nOriginal Request: "${originalText}"${messageLines.length > 0 ? `\nTask Communication Timeline:\n${messageLines.join('\n')}` : ''}${stepLines.length > 0 ? `\nCurrent Workflow Steps:\n${stepLines.join('\n')}` : ''}${historyBlock}\n\nGenerate the next best customer-facing response given the full context above.`;
 
         logger.info('[AI SUGGESTION] Calling AI Service', { taskId, prompt: prompt.substring(0, 100) });
 
@@ -126,7 +203,11 @@ async function generateAiSuggestion(taskId, wineryId, options = {}) {
 
             // Save internal routing recommendation
             if (aiResult.suggestedAction) {
-                task.suggestedAction = aiResult.suggestedAction;
+                task.suggestedAction = stripIrrelevantEmailWarning(
+                    aiResult.suggestedAction,
+                    responseChannel,
+                    responseContact
+                );
             }
 
             // Auto-assign if AI suggested a specific staff member and task is unassigned
@@ -135,11 +216,16 @@ async function generateAiSuggestion(taskId, wineryId, options = {}) {
             }
 
             // Save suggested recipient and CC
-            if (aiResult.suggestedRecipientEmail) {
+            if (responseChannel === 'email' && aiResult.suggestedRecipientEmail) {
                 task.suggestedRecipientEmail = aiResult.suggestedRecipientEmail;
             }
-            if (aiResult.suggestedCc) {
+            if (responseChannel === 'email' && aiResult.suggestedCc) {
                 task.suggestedCc = aiResult.suggestedCc;
+            }
+            if (responseChannel !== 'email') {
+                task.suggestedRecipientEmail = null;
+                task.suggestedCc = null;
+                task.suggestedReplySubject = null;
             }
 
             // Generate subject for email channel

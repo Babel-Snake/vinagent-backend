@@ -5,6 +5,7 @@ module.exports = (sequelize, DataTypes) => {
         static associate(models) {
             Message.belongsTo(models.Winery, { foreignKey: 'wineryId' });
             Message.belongsTo(models.Member, { foreignKey: 'memberId' });
+            Message.belongsTo(models.Task, { foreignKey: 'taskId' });
             Message.hasMany(models.Task, { foreignKey: 'messageId' });
         }
     }
@@ -33,6 +34,11 @@ module.exports = (sequelize, DataTypes) => {
                 type: DataTypes.INTEGER,
                 allowNull: true,
                 references: { model: 'Members', key: 'id' }
+            },
+            taskId: {
+                type: DataTypes.INTEGER,
+                allowNull: true,
+                references: { model: 'Tasks', key: 'id' }
             }
         },
         {

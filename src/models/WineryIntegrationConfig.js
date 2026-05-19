@@ -19,6 +19,7 @@ module.exports = (sequelize, DataTypes) => {
         crmProvider: { type: DataTypes.STRING, defaultValue: 'other' },
         bookingProvider: { type: DataTypes.STRING, defaultValue: 'other' },
         deliveryProvider: { type: DataTypes.STRING, defaultValue: 'other' },
+        providerConnections: { type: DataTypes.JSON, allowNull: true },
         planTier: { type: DataTypes.ENUM('basic', 'advanced'), defaultValue: 'basic' }
     }, {
         sequelize,

@@ -63,6 +63,7 @@ describe('Webhook Routes', () => {
             expect(task).toBeDefined();
             expect(task.type).toBe('ORDER_SHIPPING_DELAY');
             expect(task.wineryId).toBe(wineryId);
+            expect(message.taskId).toBe(task.id);
         });
 
         it('should return 400 if winery not found', async () => {
@@ -106,6 +107,10 @@ describe('Webhook Routes', () => {
             const message = await Message.findOne({ where: { externalId: payload.messageId } });
             expect(message).toBeDefined();
             expect(message.source).toBe('email');
+
+            const task = await Task.findOne({ where: { messageId: message.id } });
+            expect(task).toBeDefined();
+            expect(message.taskId).toBe(task.id);
         });
 
         it('should reject invalid signature', async () => {
@@ -143,6 +148,10 @@ describe('Webhook Routes', () => {
             const message = await Message.findOne({ where: { externalId: callSid } });
             expect(message).toBeDefined();
             expect(message.source).toBe('voice');
+
+            const task = await Task.findOne({ where: { messageId: message.id } });
+            expect(task).toBeDefined();
+            expect(message.taskId).toBe(task.id);
         });
     });
 });

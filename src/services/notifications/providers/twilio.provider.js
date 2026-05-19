@@ -23,16 +23,18 @@ class TwilioProvider {
      * @param {string} body - Message body
      * @returns {Promise<Object>} - Provider response
      */
-    async sendSms(to, body) {
+    async sendSms(to, body, options = {}) {
+        const fromNumber = options.from || this.fromNumber;
+
         if (!this.enabled) {
-            logger.info(`[MOCK SMS] To: ${to} | Body: ${body}`);
-            return { sid: 'mock-sid-' + Date.now(), status: 'queued' };
+            logger.info(`[MOCK SMS] To: ${to} | From: ${fromNumber || 'default'} | Body: ${body}`);
+            return { sid: 'mock-sid-' + Date.now(), status: 'queued', provider: 'twilio' };
         }
 
         try {
             const message = await this.client.messages.create({
                 body,
-                from: this.fromNumber,
+                from: fromNumber,
                 to
             });
             logger.info(`Twilio SMS sent: ${message.sid}`);

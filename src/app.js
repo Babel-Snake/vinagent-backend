@@ -49,8 +49,8 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: process.env.JSON_BODY_LIMIT || '10mb' }));
 
 // Root health check for "Cannot GET /" fix
 app.get('/', (req, res) => {

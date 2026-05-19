@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { fetchTasks, Task, getUsers, Staff, getMyProfile, getFlaggedTaskIds, toggleTaskFlag } from '../../../lib/api';
 import TaskBoard from '../../../components/TaskBoard';
@@ -27,6 +27,7 @@ export default function TasksPage() {
         search: '',
         showOnlyFlagged: false,
         mentionedMe: false,
+        deadlineState: 'all',
         sortBy: 'newest',
         dateFrom: '',
         dateTo: '',
@@ -47,6 +48,25 @@ export default function TasksPage() {
             setActiveTaskId(parseInt(highlightedTaskId));
         }
     }, [highlightedTaskId]);
+
+    useEffect(() => {
+        const nextFilters: Partial<typeof filters> = {};
+        const assigneeId = searchParams.get('assigneeId');
+        const mentionedMe = searchParams.get('mentionedMe');
+        const deadlineState = searchParams.get('deadlineState');
+
+        if (assigneeId) nextFilters.assigneeId = assigneeId;
+        if (mentionedMe === '1' || mentionedMe === 'true') nextFilters.mentionedMe = true;
+        if (deadlineState) nextFilters.deadlineState = deadlineState;
+
+        if (Object.keys(nextFilters).length > 0) {
+            setFilters(prev => {
+                const merged = { ...prev, ...nextFilters };
+                const changed = Object.entries(nextFilters).some(([key, value]) => prev[key as keyof typeof prev] !== value);
+                return changed ? merged : prev;
+            });
+        }
+    }, [searchParams]);
 
     async function loadTasks() {
         try {
@@ -99,11 +119,55 @@ export default function TasksPage() {
         return () => clearTimeout(timer);
     }, [filters, highlightedTaskId]); // highlightedTaskId trigger is legacy, technically not needed if we rely on initial load
 
-    const normalizePhone = (value: string) => value.replace(/[^\d]/g, '');
+    const sortedTasks = useMemo(() => {
+        const rankFor = (task: Task) => {
+            if (typeof task.deadlineSortRank === 'number') return task.deadlineSortRank;
+            if (task.isOverdue) return 0;
+            if (task.isDueSoon) return 1;
+            if (task.dueAt) return 2;
+            return 3;
+        };
 
-    // No client-side filtering anymore
-    const filteredTasks = tasks;
-    const sortedTasks = tasks; // Backend sorts DESC
+        return [...tasks].sort((a, b) => {
+            const rankDelta = rankFor(a) - rankFor(b);
+            if (rankDelta !== 0) return rankDelta;
+
+            const dueA = a.dueAt ? new Date(a.dueAt).getTime() : Number.POSITIVE_INFINITY;
+            const dueB = b.dueAt ? new Date(b.dueAt).getTime() : Number.POSITIVE_INFINITY;
+            if (dueA !== dueB) return dueA - dueB;
+
+            return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        });
+    }, [tasks]);
+
+    const queueStats = useMemo(() => {
+        const payloadFor = (task: Task) => {
+            if (!task.payload) return {};
+            if (typeof task.payload === 'string') {
+                try {
+                    return JSON.parse(task.payload);
+                } catch {
+                    return {};
+                }
+            }
+            return task.payload;
+        };
+
+        return {
+            total: tasks.length,
+            highPriority: tasks.filter(task => task.priority === 'high').length,
+            waiting: tasks.filter(task => task.workflowState === 'WAITING').length,
+            blocked: tasks.filter(task => task.workflowState === 'BLOCKED').length,
+            unassigned: tasks.filter(task => !task.assigneeId && task.status === 'PENDING').length,
+            overdue: tasks.filter(task => task.isOverdue).length,
+            dueSoon: tasks.filter(task => task.isDueSoon).length,
+            identityReview: tasks.filter(task => {
+                const manualIntake = payloadFor(task)?.manualIntake;
+                return manualIntake?.identityResolutionStatus === 'REVIEW_REQUIRED';
+            }).length,
+            followUps: tasks.filter(task => task.followUpRequired || task.parentTaskId || payloadFor(task)?.followUpAutomation).length
+        };
+    }, [tasks]);
 
     const handleCloseModal = () => {
         setActiveTaskId(null);
@@ -111,24 +175,44 @@ export default function TasksPage() {
     };
 
     return (
-        <div className="px-4 py-6 sm:px-0">
-            <div className="flex justify-between items-center mb-6">
-                <h1 className="text-2xl font-semibold text-gray-900">Tasks</h1>
-                <div className="flex gap-3">
+        <div className="page-shell">
+            <div className="page-header">
+                <div>
+                    <h1 className="text-2xl font-semibold text-[#1c231f]">Operations queue</h1>
+                    <p className="page-kicker">
+                        Triage inbound requests, workflow steps, customer follow-up, and staff handoffs from one case list.
+                    </p>
+                </div>
+                <div className="flex shrink-0 gap-3">
                     <button
                         onClick={() => setShowCreateModal(true)}
-                        className="px-4 py-2 bg-blue-600 text-white rounded shadow hover:bg-blue-700 text-sm font-medium flex items-center gap-2"
+                        className="btn-primary"
                     >
-                        <span>+</span> New Task (Smart)
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" />
+                        </svg>
+                        New Task
                     </button>
                 </div>
             </div>
 
             {error && (
-                <div className="bg-red-50 border-l-4 border-red-400 p-4 mb-6">
-                    <p className="text-sm text-red-700">{error}</p>
+                <div className="mb-5 rounded-md border border-red-200 bg-red-50 p-4">
+                    <p className="text-sm font-medium text-red-800">{error}</p>
                 </div>
             )}
+
+            <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-9">
+                <QueueMetric label="Loaded" value={queueStats.total} tone="slate" />
+                <QueueMetric label="High Priority" value={queueStats.highPriority} tone="red" />
+                <QueueMetric label="Waiting" value={queueStats.waiting} tone="amber" />
+                <QueueMetric label="Blocked" value={queueStats.blocked} tone="red" />
+                <QueueMetric label="Unassigned" value={queueStats.unassigned} tone="orange" />
+                <QueueMetric label="Overdue" value={queueStats.overdue} tone="red" />
+                <QueueMetric label="Due Soon" value={queueStats.dueSoon} tone="teal" />
+                <QueueMetric label="Identity Review" value={queueStats.identityReview} tone="purple" />
+                <QueueMetric label="Follow-ups" value={queueStats.followUps} tone="green" />
+            </div>
 
             <TaskFilters
                 filters={filters}
@@ -139,9 +223,9 @@ export default function TasksPage() {
             />
 
             {loading ? (
-                <div className="text-center py-12">
-                    <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-300 border-t-blue-600"></div>
-                    <p className="mt-2 text-gray-500">Loading tasks...</p>
+                <div className="surface-panel py-14 text-center">
+                    <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-[#d9dfd2] border-t-[var(--brand)]"></div>
+                    <p className="mt-3 text-sm font-medium text-[var(--muted)]">Loading queue...</p>
                 </div>
             ) : (
                 <TaskBoard
@@ -178,12 +262,44 @@ export default function TasksPage() {
             {showCreateModal && (
                 <CreateTaskModal
                     onClose={() => setShowCreateModal(false)}
+                    userRole={userRole}
+                    currentUserId={currentUserId}
                     onCreated={() => {
                         setShowCreateModal(false);
                         loadTasks();
                     }}
                 />
             )}
+        </div>
+    );
+}
+
+function QueueMetric({
+    label,
+    value,
+    tone
+}: {
+    label: string;
+    value: number;
+    tone: 'slate' | 'red' | 'amber' | 'orange' | 'teal' | 'purple' | 'green';
+}) {
+    const toneClasses: Record<typeof tone, string> = {
+        slate: 'bg-slate-500',
+        red: 'bg-red-500',
+        amber: 'bg-amber-500',
+        orange: 'bg-orange-500',
+        teal: 'bg-teal-600',
+        purple: 'bg-violet-500',
+        green: 'bg-emerald-500'
+    };
+
+    return (
+        <div className="metric-tile">
+            <div className="flex items-center justify-between gap-2">
+                <span className="truncate text-[11px] font-bold uppercase text-[var(--muted)]">{label}</span>
+                <span className={`status-dot ${toneClasses[tone]}`}></span>
+            </div>
+            <div className="mt-2 text-2xl font-semibold text-[#1c231f]">{value}</div>
         </div>
     );
 }

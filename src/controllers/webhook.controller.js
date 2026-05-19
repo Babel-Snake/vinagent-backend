@@ -1,6 +1,7 @@
-const { Message, Winery, Member, sequelize } = require('../models');
+const { Message, Winery, Member, WinerySettings, sequelize } = require('../models');
 const triageService = require('../services/triage.service');
 const taskService = require('../services/taskService');
+const customerIdentityService = require('../services/customerIdentity.service');
 const logger = require('../config/logger');
 const AppError = require('../utils/AppError');
 const { redact, scrubPII } = require('../utils/sanitizer');
@@ -10,9 +11,20 @@ async function resolveWineryByContact(contact) {
     return Winery.findOne({ where: contact });
 }
 
-async function findMemberByContact(wineryId, contactField, value) {
-    if (!value) return null;
-    return Member.findOne({ where: { wineryId, [contactField]: value } });
+async function resolveWebhookIdentity({ wineryId, inboundMethod, requesterEmail = null, requesterPhone = null, transaction }) {
+    const settings = await WinerySettings.findOne({ where: { wineryId }, transaction });
+    const identityConfig = customerIdentityService.getIdentityMatchingConfig(settings);
+    return customerIdentityService.resolveExternalIdentity({
+        wineryId,
+        category: null,
+        taskOrigin: 'EXTERNAL',
+        inboundMethod,
+        requesterEmail,
+        requesterPhone,
+        identityConfig,
+        transaction,
+        allowAutoCreate: false
+    });
 }
 
 async function handleSms(req, res, next) {
@@ -44,8 +56,16 @@ async function handleSms(req, res, next) {
             throw new AppError('Unknown destination phone number', 400, 'UNKNOWN_DESTINATION');
         }
 
-        // 2. Identify Member
-        const member = await findMemberByContact(winery.id, 'phone', From);
+        // 2. Resolve Member Identity
+        const identityResolution = await resolveWebhookIdentity({
+            wineryId: winery.id,
+            inboundMethod: 'sms',
+            requesterPhone: From,
+            transaction: t
+        });
+        const member = identityResolution.memberId
+            ? (identityResolution.matchedMember || await Member.findOne({ where: { id: identityResolution.memberId, wineryId: winery.id }, transaction: t }))
+            : null;
 
         // 3. Create Message (Atomic)
         const sanitizedPayload = redact(payload);
@@ -77,6 +97,10 @@ async function handleSms(req, res, next) {
                 ...triageResult,
                 memberId: member ? member.id : null,
                 messageId: message.id,
+                taskOrigin: 'EXTERNAL',
+                inboundMethod: 'sms',
+                requesterPhone: From,
+                identityResolution: identityResolution,
                 suggestedChannel: triageResult.suggestedChannel || 'sms',
                 steps: triageResult.suggestedSteps || []
             }
@@ -123,7 +147,15 @@ async function handleEmail(req, res, next) {
             throw new AppError('Unknown destination email address', 400, 'UNKNOWN_DESTINATION');
         }
 
-        const member = await findMemberByContact(winery.id, 'email', from);
+        const identityResolution = await resolveWebhookIdentity({
+            wineryId: winery.id,
+            inboundMethod: 'email',
+            requesterEmail: from,
+            transaction: t
+        });
+        const member = identityResolution.memberId
+            ? (identityResolution.matchedMember || await Member.findOne({ where: { id: identityResolution.memberId, wineryId: winery.id }, transaction: t }))
+            : null;
 
         const sanitizedPayload = redact(payload);
         const sanitizedBody = scrubPII(text);
@@ -153,6 +185,10 @@ async function handleEmail(req, res, next) {
                 ...triageResult,
                 memberId: member ? member.id : null,
                 messageId: message.id,
+                taskOrigin: 'EXTERNAL',
+                inboundMethod: 'email',
+                requesterEmail: from,
+                identityResolution: identityResolution,
                 suggestedChannel: triageResult.suggestedChannel || 'email',
                 steps: triageResult.suggestedSteps || []
             }
@@ -199,7 +235,15 @@ async function handleVoice(req, res, next) {
             throw new AppError('Unknown destination phone number', 400, 'UNKNOWN_DESTINATION');
         }
 
-        const member = await findMemberByContact(winery.id, 'phone', From);
+        const identityResolution = await resolveWebhookIdentity({
+            wineryId: winery.id,
+            inboundMethod: 'phone',
+            requesterPhone: From,
+            transaction: t
+        });
+        const member = identityResolution.memberId
+            ? (identityResolution.matchedMember || await Member.findOne({ where: { id: identityResolution.memberId, wineryId: winery.id }, transaction: t }))
+            : null;
 
         const sanitizedPayload = redact(payload);
         const piiTranscript = scrubPII(transcript);
@@ -229,6 +273,10 @@ async function handleVoice(req, res, next) {
                 ...triageResult,
                 memberId: member ? member.id : null,
                 messageId: message.id,
+                taskOrigin: 'EXTERNAL',
+                inboundMethod: 'phone',
+                requesterPhone: From,
+                identityResolution: identityResolution,
                 suggestedChannel: triageResult.suggestedChannel || 'voice',
                 steps: triageResult.suggestedSteps || []
             }

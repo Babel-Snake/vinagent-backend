@@ -10,11 +10,12 @@ The backend has a coherent core workflow:
 * staff can review and action tasks
 * secure member confirmation flows work for address updates
 * task history is tracked through `TaskAction`
+* operational analytics now reflect workflow, response, identity, and follow-up signals
 
 The current contract is based on:
 
 * task statuses: `PENDING`, `ACTIONED`, `REJECTED`
-* detailed workflow state: `TaskAction` + `MemberActionToken`
+* detailed workflow state: `TaskStep`, `TaskAction`, linked `Message` rows, outcome fields, and `MemberActionToken`
 
 ## What "Production Ready" Means for This Build
 
@@ -25,6 +26,7 @@ Before treating this build as production-ready, verify:
 * Firebase auth bypass is disabled outside test/dev
 * no debug-file writes remain on hot request paths
 * analytics and dashboard routes do not rely on retired statuses
+* operational analytics use the current task workflow fields and not stale status assumptions
 * frontend API calls match the backend route surface
 
 ## Operational Checklist

@@ -17,6 +17,8 @@ class BookingIntegrationFactory {
         switch (providerName) {
             case 'mock':
                 return new MockBookingProvider(config);
+            case 'sevenrooms':
+                throw new Error('SevenRooms provider not yet implemented');
             case 'tock':
                 // return new TockBookingProvider(config);
                 throw new Error('Tock provider not yet implemented');

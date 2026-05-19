@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { updateBookingsConfig, createBookingType, deleteBookingType } from '../../lib/api';
+import { updateBookingsConfig, createBookingType, updateBookingType, deleteBookingType } from '../../lib/api';
 
 export function BookingsTab({ winery, onUpdate }: { winery: any, onUpdate: () => void }) {
     const config = winery.bookingsConfig || {};
@@ -20,8 +20,11 @@ export function BookingsTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
 
     // Quick Add for Booking Type
     const [newType, setNewType] = useState({ name: '', description: '', priceCents: 0 });
+    const [editingTypeId, setEditingTypeId] = useState<number | null>(null);
+    const [editingType, setEditingType] = useState({ name: '', description: '', priceCents: 0 });
 
     const [saving, setSaving] = useState(false);
+    const [savingType, setSavingType] = useState(false);
 
     const handleConfigSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -48,9 +51,39 @@ export function BookingsTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
         if (!confirm('Delete this booking type?')) return;
         try {
             await deleteBookingType(id);
+            if (editingTypeId === id) handleCancelEditType();
             onUpdate();
         } catch (e) { alert('Failed'); }
     }
+
+    const handleEditType = (type: any) => {
+        setEditingTypeId(type.id);
+        setEditingType({
+            name: type.name || '',
+            description: type.description || '',
+            priceCents: type.priceCents || 0
+        });
+    };
+
+    const handleCancelEditType = () => {
+        setEditingTypeId(null);
+        setEditingType({ name: '', description: '', priceCents: 0 });
+    };
+
+    const handleSaveType = async (e: React.FormEvent, id: number) => {
+        e.preventDefault();
+        if (!editingType.name) return;
+        setSavingType(true);
+        try {
+            await updateBookingType(id, editingType);
+            handleCancelEditType();
+            onUpdate();
+        } catch (e) {
+            alert('Failed to update experience');
+        } finally {
+            setSavingType(false);
+        }
+    };
 
     return (
         <div className="space-y-8">
@@ -100,13 +133,69 @@ export function BookingsTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
                 <div className="bg-white shadow overflow-hidden sm:rounded-md mb-4">
                     <ul role="list" className="divide-y divide-gray-200">
                         {bookingTypes.map((type: any) => (
-                            <li key={type.id} className="px-4 py-4 sm:px-6 flex justify-between items-center">
-                                <div>
-                                    <p className="text-sm font-medium text-indigo-600 truncate">{type.name}</p>
-                                    <p className="text-sm text-gray-500">{type.priceCents > 0 ? `$${(type.priceCents / 100).toFixed(2)}` : 'Free'}</p>
-                                    {type.description && <p className="text-sm text-gray-600 mt-1 max-w-2xl">{type.description}</p>}
-                                </div>
-                                <button onClick={() => handleDeleteType(type.id)} className="text-red-600 hover:text-red-900 text-sm">Delete</button>
+                            <li key={type.id} className="px-4 py-4 sm:px-6">
+                                {editingTypeId === type.id ? (
+                                    <form onSubmit={(e) => handleSaveType(e, type.id)} className="space-y-4">
+                                        <div className="flex gap-4 items-start w-full">
+                                            <div className="flex-grow">
+                                                <label className="block text-sm font-medium text-gray-700">Experience Name</label>
+                                                <input
+                                                    type="text"
+                                                    required
+                                                    value={editingType.name}
+                                                    onChange={e => setEditingType({ ...editingType, name: e.target.value })}
+                                                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700">Price (Cents)</label>
+                                                <input
+                                                    type="number"
+                                                    value={editingType.priceCents}
+                                                    onChange={e => setEditingType({ ...editingType, priceCents: parseInt(e.target.value) || 0 })}
+                                                    className="mt-1 block w-28 rounded-md border-gray-300 shadow-sm border p-2"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700">Description</label>
+                                            <textarea
+                                                rows={2}
+                                                value={editingType.description}
+                                                onChange={e => setEditingType({ ...editingType, description: e.target.value })}
+                                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
+                                            />
+                                        </div>
+                                        <div className="flex justify-end gap-3">
+                                            <button
+                                                type="button"
+                                                onClick={handleCancelEditType}
+                                                className="inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button
+                                                type="submit"
+                                                disabled={savingType}
+                                                className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400"
+                                            >
+                                                {savingType ? 'Saving...' : 'Save Experience'}
+                                            </button>
+                                        </div>
+                                    </form>
+                                ) : (
+                                    <div className="flex justify-between items-center gap-4">
+                                        <div>
+                                            <p className="text-sm font-medium text-indigo-600 truncate">{type.name}</p>
+                                            <p className="text-sm text-gray-500">{type.priceCents > 0 ? `$${(type.priceCents / 100).toFixed(2)}` : 'Free'}</p>
+                                            {type.description && <p className="text-sm text-gray-600 mt-1 max-w-2xl">{type.description}</p>}
+                                        </div>
+                                        <div className="flex shrink-0 gap-3">
+                                            <button onClick={() => handleEditType(type)} className="text-indigo-600 hover:text-indigo-900 text-sm">Edit</button>
+                                            <button onClick={() => handleDeleteType(type.id)} className="text-red-600 hover:text-red-900 text-sm">Delete</button>
+                                        </div>
+                                    </div>
+                                )}
                             </li>
                         ))}
                         {bookingTypes.length === 0 && <li className="px-4 py-4 text-gray-500 italic text-sm">No experiences defined.</li>}

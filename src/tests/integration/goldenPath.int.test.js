@@ -193,6 +193,12 @@ describe('Golden Path E2E: Address Change Flow', () => {
         // 8. Verify Task Actioned
         const finalTask = await Task.findByPk(taskId);
         expect(finalTask.status).toBe('ACTIONED');
+        expect(finalTask.workflowState).toBe('COMPLETED');
+        expect(finalTask.resolvedAs).toBe('COMPLETED');
+        expect(finalTask.resolutionType).toBe('EXECUTED');
+        expect(finalTask.customerOutcome).toBe('ACCOUNT_UPDATED');
+        expect(finalTask.resolutionSummary).toMatch(/secure link/i);
+        expect(finalTask.resolvedAt).not.toBeNull();
 
         // 9. Verify Token marked used
         const usedToken = await MemberActionToken.findByPk(tokenRecord.id);

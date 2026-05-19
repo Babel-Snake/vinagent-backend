@@ -12,17 +12,23 @@ router.put('/brand', protect, requireRole(['manager', 'admin']), wineryControlle
 router.put('/bookings-config', protect, requireRole(['manager', 'admin']), wineryController.updateBookingsConfig);
 router.put('/policy-profile', protect, requireRole(['manager', 'admin']), wineryController.updatePolicyProfile);
 router.put('/integration-config', protect, requireRole(['manager', 'admin']), wineryController.updateIntegrationConfig);
+router.post('/integration-config/test', protect, requireRole(['manager', 'admin']), wineryController.testIntegrationConnection);
+router.post('/integration-config/email/sync', protect, requireRole(['manager', 'admin']), wineryController.syncEmailNow);
+router.put('/settings', protect, requireRole(['manager', 'admin']), wineryController.updateSettings);
 
 // Products
 router.post('/products', protect, requireRole(['manager', 'admin']), wineryController.createProduct);
+router.put('/products/:id', protect, requireRole(['manager', 'admin']), wineryController.updateProduct);
 router.delete('/products/:id', protect, requireRole(['manager', 'admin']), wineryController.deleteProduct);
 
 // Booking Types
 router.post('/bookings/types', protect, requireRole(['manager', 'admin']), wineryController.createBookingType);
+router.put('/bookings/types/:id', protect, requireRole(['manager', 'admin']), wineryController.updateBookingType);
 router.delete('/bookings/types/:id', protect, requireRole(['manager', 'admin']), wineryController.deleteBookingType);
 
 // FAQs (formerly Policies)
 router.post('/faqs', protect, requireRole(['manager', 'admin']), wineryController.createFAQ);
+router.put('/faqs/:id', protect, requireRole(['manager', 'admin']), wineryController.updateFAQ);
 router.delete('/faqs/:id', protect, requireRole(['manager', 'admin']), wineryController.deleteFAQ);
 
 // SOPs

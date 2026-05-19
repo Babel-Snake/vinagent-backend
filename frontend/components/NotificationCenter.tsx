@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { getNotifications, markNotificationRead, Notification } from '../lib/api';
+import { dismissNotification, getNotifications, markNotificationRead, Notification } from '../lib/api';
 
 export default function NotificationCenter() {
     const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -49,6 +49,18 @@ export default function NotificationCenter() {
         }
     }
 
+    async function handleDismiss(notification: Notification) {
+        try {
+            await dismissNotification(notification.id);
+            setNotifications(prev => prev.filter(item => item.id !== notification.id));
+            if (!notification.isRead) {
+                setUnreadCount(prev => Math.max(0, prev - 1));
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
     return (
         <div className="relative" ref={dropdownRef}>
             <button
@@ -82,7 +94,7 @@ export default function NotificationCenter() {
                                 notifications.map(notification => (
                                     <div
                                         key={notification.id}
-                                        className={`px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-50 cursor-pointer ${!notification.isRead ? 'bg-blue-50' : ''}`}
+                                        className={`group flex items-start gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-50 cursor-pointer ${!notification.isRead ? 'bg-blue-50' : ''}`}
                                         onClick={() => {
                                             if (!notification.isRead) handleMarkRead(notification.id);
 
@@ -92,12 +104,25 @@ export default function NotificationCenter() {
                                             }
                                         }}
                                     >
-                                        <p className="text-sm font-medium text-gray-900">
-                                            {notification.message}
-                                        </p>
-                                        <p className="text-xs text-gray-500 mt-1">
-                                            {new Date(notification.createdAt).toLocaleDateString()} {new Date(notification.createdAt).toLocaleTimeString()}
-                                        </p>
+                                        <div className="min-w-0 flex-1">
+                                            <p className="text-sm font-medium text-gray-900">
+                                                {notification.message}
+                                            </p>
+                                            <p className="text-xs text-gray-500 mt-1">
+                                                {new Date(notification.createdAt).toLocaleDateString()} {new Date(notification.createdAt).toLocaleTimeString()}
+                                            </p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            className="shrink-0 rounded px-2 py-1 text-xs font-bold text-gray-400 opacity-70 hover:bg-gray-100 hover:text-gray-700 group-hover:opacity-100"
+                                            aria-label="Dismiss notification"
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                handleDismiss(notification);
+                                            }}
+                                        >
+                                            x
+                                        </button>
                                     </div>
                                 ))
                             )}

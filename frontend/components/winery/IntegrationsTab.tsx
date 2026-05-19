@@ -1,123 +1,498 @@
 'use client';
 
 import { useState } from 'react';
-import { updateIntegrationConfig } from '../../lib/api';
+import {
+    IntegrationConnection,
+    syncEmailInbox,
+    testIntegrationConnection,
+    updateIntegrationConfig
+} from '../../lib/api';
+
+type IntegrationDomain = 'sms' | 'email' | 'pos' | 'crm' | 'booking' | 'delivery';
+
+type IntegrationForm = {
+    smsProvider: string;
+    smsFromNumber: string;
+    emailProvider: string;
+    emailFromAddress: string;
+    channelsEnabled: string[];
+    kioskModeEnabled: boolean;
+    posProvider: string;
+    crmProvider: string;
+    bookingProvider: string;
+    deliveryProvider: string;
+    providerConnections: Record<IntegrationDomain, IntegrationConnection>;
+};
+
+const DOMAIN_LABELS: Record<IntegrationDomain, string> = {
+    sms: 'SMS',
+    email: 'Email',
+    pos: 'Point of Sale',
+    crm: 'CRM / Wine Club',
+    booking: 'Booking',
+    delivery: 'Delivery'
+};
+
+const PROVIDER_FIELDS: Record<IntegrationDomain, keyof IntegrationForm> = {
+    sms: 'smsProvider',
+    email: 'emailProvider',
+    pos: 'posProvider',
+    crm: 'crmProvider',
+    booking: 'bookingProvider',
+    delivery: 'deliveryProvider'
+};
+
+const PROVIDER_OPTIONS: Record<IntegrationDomain, { value: string; label: string }[]> = {
+    sms: [
+        { value: 'twilio', label: 'Twilio' },
+        { value: 'messagemedia', label: 'MessageMedia' },
+        { value: 'other', label: 'Other / Custom' }
+    ],
+    email: [
+        { value: 'outlook', label: 'Outlook / Microsoft 365' },
+        { value: 'sendgrid', label: 'SendGrid' },
+        { value: 'mailgun', label: 'Mailgun' },
+        { value: 'ses', label: 'AWS SES' },
+        { value: 'other', label: 'Other / Custom' }
+    ],
+    pos: [
+        { value: 'square', label: 'Square' },
+        { value: 'shopify', label: 'Shopify' },
+        { value: 'vend', label: 'Vend' },
+        { value: 'lightspeed', label: 'Lightspeed' },
+        { value: 'other', label: 'Other / Custom' }
+    ],
+    crm: [
+        { value: 'commerce7', label: 'Commerce7' },
+        { value: 'winedirect', label: 'WineDirect' },
+        { value: 'ecellar', label: 'eCellar' },
+        { value: 'other', label: 'Other / Custom' }
+    ],
+    booking: [
+        { value: 'sevenrooms', label: 'SevenRooms' },
+        { value: 'resy', label: 'Resy' },
+        { value: 'opentable', label: 'OpenTable' },
+        { value: 'nowbookit', label: 'Now Book It' },
+        { value: 'other', label: 'Other / Custom' }
+    ],
+    delivery: [
+        { value: 'auspost', label: 'Australia Post' },
+        { value: 'shippit', label: 'Shippit' },
+        { value: 'startrack', label: 'StarTrack' },
+        { value: 'other', label: 'Other / Custom' }
+    ]
+};
+
+const DEFAULT_CAPABILITIES: Record<IntegrationDomain, string[]> = {
+    sms: ['send_outbound', 'receive_webhook', 'log_message'],
+    email: ['send_outbound', 'read_inbox', 'receive_webhook', 'log_message'],
+    pos: ['read_orders', 'read_products'],
+    crm: ['read_customers', 'write_customer_notes', 'record_order_event', 'sync_external_ids'],
+    booking: ['check_availability', 'create_reservation', 'record_booking_reference'],
+    delivery: ['track_shipments', 'create_tracking_follow_up']
+};
+
+const DEFAULT_WEBHOOKS: Record<IntegrationDomain, string> = {
+    sms: '/api/webhooks/sms',
+    email: '/api/webhooks/email',
+    pos: '/api/webhooks/pos',
+    crm: '/api/webhooks/crm',
+    booking: '/api/webhooks/booking',
+    delivery: '/api/webhooks/delivery'
+};
+
+const DOMAINS: IntegrationDomain[] = ['sms', 'email', 'crm', 'booking', 'pos', 'delivery'];
+const CHANNELS = ['sms', 'email'];
+
+function defaultConnection(domain: IntegrationDomain, provider: string): IntegrationConnection {
+    return {
+        provider,
+        status: 'not_connected',
+        authMethod: provider === 'other' ? 'manual' : 'api_key',
+        externalAccountId: '',
+        externalLocationId: '',
+        baseUrl: '',
+        webhookUrl: DEFAULT_WEBHOOKS[domain],
+        webhookSigningConfigured: false,
+        capabilities: DEFAULT_CAPABILITIES[domain],
+        lastTestedAt: null,
+        lastError: null,
+        notes: ''
+    };
+}
+
+function normalizeConnections(config: any, baseProviders: Record<IntegrationDomain, string>) {
+    const stored = config.providerConnections || {};
+
+    return DOMAINS.reduce((connections, domain) => {
+        connections[domain] = {
+            ...defaultConnection(domain, baseProviders[domain]),
+            ...(stored[domain] || {}),
+            provider: baseProviders[domain]
+        };
+        return connections;
+    }, {} as Record<IntegrationDomain, IntegrationConnection>);
+}
+
+function statusClass(status?: string) {
+    if (status === 'connected') return 'border-green-200 bg-green-50 text-green-700';
+    if (status === 'error') return 'border-red-200 bg-red-50 text-red-700';
+    if (status === 'needs_reauth') return 'border-amber-200 bg-amber-50 text-amber-700';
+    return 'border-gray-200 bg-gray-50 text-gray-600';
+}
+
+function capabilitiesToText(capabilities?: string[]) {
+    return Array.isArray(capabilities) ? capabilities.join(', ') : '';
+}
+
+function capabilitiesFromText(value: string) {
+    return value
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+}
 
 export function IntegrationsTab({ winery, onUpdate }: { winery: any, onUpdate: () => void }) {
     const config = winery.integrationConfig || {};
-    const [formData, setFormData] = useState({
-        smsProvider: config.smsProvider || 'twilio',
+    const baseProviders = {
+        sms: config.smsProvider || 'twilio',
+        email: config.emailProvider || 'sendgrid',
+        pos: config.posProvider || 'other',
+        crm: config.crmProvider || 'other',
+        booking: config.bookingProvider || 'other',
+        delivery: config.deliveryProvider || 'other'
+    };
+    const [formData, setFormData] = useState<IntegrationForm>({
+        smsProvider: baseProviders.sms,
         smsFromNumber: config.smsFromNumber || '',
-        emailProvider: config.emailProvider || 'sendgrid',
+        emailProvider: baseProviders.email,
         emailFromAddress: config.emailFromAddress || '',
+        channelsEnabled: Array.isArray(config.channelsEnabled) ? config.channelsEnabled : CHANNELS,
         kioskModeEnabled: config.kioskModeEnabled || false,
-        posProvider: config.posProvider || 'other',
-        crmProvider: config.crmProvider || 'other',
-        bookingProvider: config.bookingProvider || 'other',
-        deliveryProvider: config.deliveryProvider || 'other'
+        posProvider: baseProviders.pos,
+        crmProvider: baseProviders.crm,
+        bookingProvider: baseProviders.booking,
+        deliveryProvider: baseProviders.delivery,
+        providerConnections: normalizeConnections(config, baseProviders)
     });
     const [saving, setSaving] = useState(false);
+    const [testingDomain, setTestingDomain] = useState<IntegrationDomain | null>(null);
+    const [syncingEmail, setSyncingEmail] = useState(false);
+    const [emailSyncSummary, setEmailSyncSummary] = useState<string | null>(null);
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    function updateConnection(domain: IntegrationDomain, updates: Partial<IntegrationConnection>) {
+        setFormData((current) => ({
+            ...current,
+            providerConnections: {
+                ...current.providerConnections,
+                [domain]: {
+                    ...current.providerConnections[domain],
+                    ...updates
+                }
+            }
+        }));
+    }
+
+    function updateProvider(domain: IntegrationDomain, provider: string) {
+        const providerField = PROVIDER_FIELDS[domain];
+        setFormData((current) => ({
+            ...current,
+            [providerField]: provider,
+            providerConnections: {
+                ...current.providerConnections,
+                [domain]: {
+                    ...current.providerConnections[domain],
+                    provider,
+                    authMethod: provider === 'other' ? 'manual' : current.providerConnections[domain].authMethod || 'api_key'
+                }
+            }
+        }));
+    }
+
+    function toggleChannel(channel: string) {
+        setFormData((current) => {
+            const nextChannels = current.channelsEnabled.includes(channel)
+                ? current.channelsEnabled.filter((entry) => entry !== channel)
+                : [...current.channelsEnabled, channel];
+            return { ...current, channelsEnabled: nextChannels };
+        });
+    }
+
+    async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
         setSaving(true);
         try {
             await updateIntegrationConfig(formData);
-            alert('Integrations Saved!');
             onUpdate();
-        } catch (e) { alert('Failed to save'); }
-        finally { setSaving(false); }
-    };
+        } catch {
+            alert('Failed to save integrations');
+        } finally {
+            setSaving(false);
+        }
+    }
+
+    async function handleTest(domain: IntegrationDomain) {
+        setTestingDomain(domain);
+        try {
+            const result = await testIntegrationConnection(domain);
+            updateConnection(domain, result);
+        } catch {
+            updateConnection(domain, {
+                status: 'error',
+                lastTestedAt: new Date().toISOString(),
+                lastError: 'Connection test failed.'
+            });
+        } finally {
+            setTestingDomain(null);
+        }
+    }
+
+    async function handleSyncEmail() {
+        setSyncingEmail(true);
+        setEmailSyncSummary(null);
+        try {
+            const result = await syncEmailInbox(25);
+            setEmailSyncSummary(`Inbox synced: ${result.imported} imported, ${result.duplicates} duplicates, ${result.createdTasks} tasks created.`);
+            onUpdate();
+        } catch (err: any) {
+            setEmailSyncSummary(err?.message || 'Email sync failed.');
+        } finally {
+            setSyncingEmail(false);
+        }
+    }
 
     return (
-        <form onSubmit={handleSubmit} className="space-y-8 max-w-3xl">
-            <div className="bg-white p-6 rounded-lg border border-gray-200">
-                <h3 className="text-lg font-medium text-gray-900 mb-4">Communication Channels</h3>
-                <div className="grid grid-cols-1 gap-y-6">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">SMS Provider</label>
-                        <select value={formData.smsProvider} onChange={e => setFormData({ ...formData, smsProvider: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2">
-                            <option value="twilio">Twilio</option>
-                            <option value="messagemedia">MessageMedia</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">SMS From Number (Sender ID)</label>
-                        <input type="text" value={formData.smsFromNumber} onChange={e => setFormData({ ...formData, smsFromNumber: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" placeholder="+614..." />
-                    </div>
-
-                    <div className="border-t pt-4">
-                        <label className="block text-sm font-medium text-gray-700">Email Provider</label>
-                        <select value={formData.emailProvider} onChange={e => setFormData({ ...formData, emailProvider: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2">
-                            <option value="sendgrid">SendGrid</option>
-                            <option value="mailgun">Mailgun</option>
-                            <option value="ses">AWS SES</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">From Email Address</label>
-                        <input type="email" value={formData.emailFromAddress} onChange={e => setFormData({ ...formData, emailFromAddress: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" placeholder="hello@winery.com" />
+        <form onSubmit={handleSubmit} className="space-y-6">
+            <section className="rounded-lg border border-gray-200 bg-white p-5">
+                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <h3 className="text-lg font-semibold text-gray-900">Communication Channels</h3>
+                    <div className="flex flex-wrap gap-3">
+                        {CHANNELS.map((channel) => (
+                            <label key={channel} className="inline-flex items-center gap-2 text-sm text-gray-700">
+                                <input
+                                    type="checkbox"
+                                    checked={formData.channelsEnabled.includes(channel)}
+                                    onChange={() => toggleChannel(channel)}
+                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600"
+                                />
+                                {channel.toUpperCase()}
+                            </label>
+                        ))}
                     </div>
                 </div>
-            </div>
 
-            <div className="bg-white p-6 rounded-lg border border-gray-200">
-                <h3 className="text-lg font-medium text-gray-900 mb-4">Operational Systems</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700">Point of Sale (POS)</label>
-                        <select value={formData.posProvider} onChange={e => setFormData({ ...formData, posProvider: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2">
-                            <option value="square">Square</option>
-                            <option value="shopify">Shopify</option>
-                            <option value="vend">Vend</option>
-                            <option value="lightspeed">Lightspeed</option>
-                            <option value="other">Other / Custom</option>
-                        </select>
+                        <label className="block text-xs font-bold uppercase text-gray-600">SMS Sender</label>
+                        <input
+                            type="text"
+                            value={formData.smsFromNumber}
+                            onChange={(e) => setFormData({ ...formData, smsFromNumber: e.target.value })}
+                            className="mt-1 w-full rounded-md border border-gray-300 p-2 text-sm"
+                            placeholder="+614..."
+                        />
                     </div>
-
                     <div>
-                        <label className="block text-sm font-medium text-gray-700">CRM / Wine Club</label>
-                        <select value={formData.crmProvider} onChange={e => setFormData({ ...formData, crmProvider: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2">
-                            <option value="commerce7">Commerce7</option>
-                            <option value="winedirect">WineDirect</option>
-                            <option value="ecellar">eCellar</option>
-                            <option value="other">Other / Custom</option>
-                        </select>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">Booking System</label>
-                        <select value={formData.bookingProvider} onChange={e => setFormData({ ...formData, bookingProvider: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2">
-                            <option value="sevenrooms">SevenRooms</option>
-                            <option value="resy">Resy</option>
-                            <option value="opentable">OpenTable</option>
-                            <option value="nowbookit">Now Book It</option>
-                            <option value="other">Other / Custom</option>
-                        </select>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">Delivery / Tracking</label>
-                        <select value={formData.deliveryProvider} onChange={e => setFormData({ ...formData, deliveryProvider: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2">
-                            <option value="auspost">Australia Post</option>
-                            <option value="shippit">Shippit</option>
-                            <option value="startrack">StarTrack</option>
-                            <option value="other">Other / Custom</option>
-                        </select>
+                        <label className="block text-xs font-bold uppercase text-gray-600">Email From Address</label>
+                        <input
+                            type="email"
+                            value={formData.emailFromAddress}
+                            onChange={(e) => setFormData({ ...formData, emailFromAddress: e.target.value })}
+                            className="mt-1 w-full rounded-md border border-gray-300 p-2 text-sm"
+                            placeholder="hello@winery.com"
+                        />
                     </div>
                 </div>
-            </div>
+            </section>
 
-            <div className="bg-yellow-50 p-6 rounded-lg border border-yellow-200">
-                <h3 className="text-lg font-medium text-yellow-900 mb-2">Kiosk Mode</h3>
-                <div className="flex items-center">
-                    <input type="checkbox" checked={formData.kioskModeEnabled} onChange={e => setFormData({ ...formData, kioskModeEnabled: e.target.checked })} className="h-4 w-4 text-indigo-600 rounded" />
-                    <label className="ml-2 text-sm text-yellow-900">Enable Kiosk Mode for device activation</label>
+            <section className="rounded-lg border border-gray-200 bg-white">
+                <div className="border-b border-gray-200 px-5 py-4">
+                    <h3 className="text-lg font-semibold text-gray-900">Provider Connections</h3>
                 </div>
-            </div>
 
-            <button type="submit" disabled={saving} className="btn-primary inline-flex justify-center rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:bg-gray-400">
-                {saving ? 'Saving...' : 'Save Integrations'}
+                <div className="divide-y divide-gray-200">
+                    {DOMAINS.map((domain) => {
+                        const connection = formData.providerConnections[domain];
+                        const providerField = PROVIDER_FIELDS[domain];
+                        const provider = String(formData[providerField] || connection.provider || 'other');
+
+                        return (
+                            <div key={domain} className="grid grid-cols-1 gap-4 px-5 py-5 xl:grid-cols-[180px_1fr]">
+                                <div className="space-y-3">
+                                    <div>
+                                        <div className="text-sm font-semibold text-gray-900">{DOMAIN_LABELS[domain]}</div>
+                                        <div className={`mt-2 inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${statusClass(connection.status)}`}>
+                                            {(connection.status || 'not_connected').replace(/_/g, ' ')}
+                                        </div>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleTest(domain)}
+                                        disabled={testingDomain === domain}
+                                        className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                                    >
+                                        {testingDomain === domain ? 'Testing...' : 'Test'}
+                                    </button>
+                                    {domain === 'email' && provider === 'outlook' && (
+                                        <button
+                                            type="button"
+                                            onClick={handleSyncEmail}
+                                            disabled={syncingEmail}
+                                            className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+                                        >
+                                            {syncingEmail ? 'Syncing...' : 'Sync Inbox'}
+                                        </button>
+                                    )}
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                                    <div>
+                                        <label className="block text-xs font-bold uppercase text-gray-600">Provider</label>
+                                        <select
+                                            value={provider}
+                                            onChange={(e) => updateProvider(domain, e.target.value)}
+                                            className="mt-1 w-full rounded-md border border-gray-300 p-2 text-sm"
+                                        >
+                                            {PROVIDER_OPTIONS[domain].map((option) => (
+                                                <option key={option.value} value={option.value}>{option.label}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold uppercase text-gray-600">Auth Method</label>
+                                        <select
+                                            value={connection.authMethod || 'none'}
+                                            onChange={(e) => updateConnection(domain, { authMethod: e.target.value as IntegrationConnection['authMethod'] })}
+                                            className="mt-1 w-full rounded-md border border-gray-300 p-2 text-sm"
+                                        >
+                                            <option value="none">None</option>
+                                            <option value="api_key">API Key</option>
+                                            <option value="oauth">OAuth</option>
+                                            <option value="webhook">Webhook</option>
+                                            <option value="manual">Manual</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold uppercase text-gray-600">Status</label>
+                                        <select
+                                            value={connection.status || 'not_connected'}
+                                            onChange={(e) => updateConnection(domain, { status: e.target.value as IntegrationConnection['status'] })}
+                                            className="mt-1 w-full rounded-md border border-gray-300 p-2 text-sm"
+                                        >
+                                            <option value="not_connected">Not connected</option>
+                                            <option value="connected">Connected</option>
+                                            <option value="needs_reauth">Needs reauth</option>
+                                            <option value="error">Error</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold uppercase text-gray-600">Account ID</label>
+                                        <input
+                                            type="text"
+                                            value={connection.externalAccountId || ''}
+                                            onChange={(e) => updateConnection(domain, { externalAccountId: e.target.value })}
+                                            className="mt-1 w-full rounded-md border border-gray-300 p-2 text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold uppercase text-gray-600">Location ID</label>
+                                        <input
+                                            type="text"
+                                            value={connection.externalLocationId || ''}
+                                            onChange={(e) => updateConnection(domain, { externalLocationId: e.target.value })}
+                                            className="mt-1 w-full rounded-md border border-gray-300 p-2 text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold uppercase text-gray-600">Base URL</label>
+                                        <input
+                                            type="text"
+                                            value={connection.baseUrl || ''}
+                                            onChange={(e) => updateConnection(domain, { baseUrl: e.target.value })}
+                                            className="mt-1 w-full rounded-md border border-gray-300 p-2 text-sm"
+                                        />
+                                    </div>
+                                    <div className="lg:col-span-2">
+                                        <label className="block text-xs font-bold uppercase text-gray-600">Webhook URL</label>
+                                        <input
+                                            type="text"
+                                            value={connection.webhookUrl || ''}
+                                            onChange={(e) => updateConnection(domain, { webhookUrl: e.target.value })}
+                                            className="mt-1 w-full rounded-md border border-gray-300 p-2 text-sm"
+                                        />
+                                    </div>
+                                    <div className="flex items-end">
+                                        <label className="mb-2 inline-flex items-center gap-2 text-sm text-gray-700">
+                                            <input
+                                                type="checkbox"
+                                                checked={Boolean(connection.webhookSigningConfigured)}
+                                                onChange={(e) => updateConnection(domain, { webhookSigningConfigured: e.target.checked })}
+                                                className="h-4 w-4 rounded border-gray-300 text-indigo-600"
+                                            />
+                                            Signed webhooks
+                                        </label>
+                                    </div>
+                                    <div className="lg:col-span-3">
+                                        <label className="block text-xs font-bold uppercase text-gray-600">Capabilities</label>
+                                        <input
+                                            type="text"
+                                            value={capabilitiesToText(connection.capabilities)}
+                                            onChange={(e) => updateConnection(domain, { capabilities: capabilitiesFromText(e.target.value) })}
+                                            className="mt-1 w-full rounded-md border border-gray-300 p-2 text-sm"
+                                        />
+                                    </div>
+                                    <div className="lg:col-span-3">
+                                        <label className="block text-xs font-bold uppercase text-gray-600">Notes</label>
+                                        <textarea
+                                            value={connection.notes || ''}
+                                            onChange={(e) => updateConnection(domain, { notes: e.target.value })}
+                                            className="mt-1 w-full rounded-md border border-gray-300 p-2 text-sm"
+                                            rows={2}
+                                        />
+                                    </div>
+                                    {(connection.lastTestedAt || connection.lastError || connection.executionProvider) && (
+                                        <div className="lg:col-span-3 rounded-md border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600">
+                                            {connection.executionProvider && (
+                                                <div>Execution provider: {connection.executionProvider}</div>
+                                            )}
+                                            {connection.lastTestedAt && (
+                                                <div>Last tested: {new Date(connection.lastTestedAt).toLocaleString()}</div>
+                                            )}
+                                            {connection.lastError && (
+                                                <div className="text-red-700">{connection.lastError}</div>
+                                            )}
+                                        </div>
+                                    )}
+                                    {domain === 'email' && emailSyncSummary && (
+                                        <div className="lg:col-span-3 rounded-md border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700">
+                                            {emailSyncSummary}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </section>
+
+            <section className="rounded-lg border border-gray-200 bg-white p-5">
+                <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-800">
+                    <input
+                        type="checkbox"
+                        checked={formData.kioskModeEnabled}
+                        onChange={(e) => setFormData({ ...formData, kioskModeEnabled: e.target.checked })}
+                        className="h-4 w-4 rounded border-gray-300 text-indigo-600"
+                    />
+                    Kiosk mode enabled
+                </label>
+            </section>
+
+            <button
+                type="submit"
+                disabled={saving}
+                className="rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:bg-gray-400"
+            >
+                {saving ? 'Saving...' : 'Save Connections'}
             </button>
         </form>
     );

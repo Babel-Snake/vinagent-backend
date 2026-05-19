@@ -51,6 +51,11 @@ module.exports = (sequelize, DataTypes) => {
             lastPurchaseAt: { type: DataTypes.DATE, allowNull: true },
 
             // --- Loyalty & Segmentation ---
+            customerType: {
+                type: DataTypes.ENUM('guest', 'member', 'tour_operator'),
+                allowNull: false,
+                defaultValue: 'guest'
+            },
             loyaltyTier: {
                 type: DataTypes.ENUM('none', 'bronze', 'silver', 'gold', 'platinum'),
                 defaultValue: 'none'

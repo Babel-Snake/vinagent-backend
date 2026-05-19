@@ -12,6 +12,7 @@ interface TaskFiltersProps {
         search: string;
         showOnlyFlagged?: boolean;
         mentionedMe?: boolean;
+        deadlineState?: string;
         actionedById?: string;
         sortBy?: string;
         dateRangeType?: string;
@@ -39,15 +40,15 @@ export default function TaskFilters({ filters, onFilterChange, tasks, users, cur
     };
 
     return (
-        <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 mb-6">
+        <div className="surface-panel mb-5 p-4">
             {/* Top Row: Essential Filters */}
-            <div className="flex flex-col md:flex-row gap-4 items-end">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
                 {/* Search */}
                 <div className="flex-1 w-full">
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Search Tasks</label>
+                    <label className="mb-1.5 block text-xs font-bold uppercase text-[var(--muted)]">Search Tasks</label>
                     <input
                         type="text"
-                        className="w-full text-sm border-gray-300 rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2 placeholder-gray-400"
+                        className="form-control"
                         value={filters.search}
                         onChange={(e) => handleChange('search', e.target.value)}
                         placeholder="Search by name, phone, email, or content..."
@@ -56,9 +57,9 @@ export default function TaskFilters({ filters, onFilterChange, tasks, users, cur
 
                 {/* Status Filter */}
                 <div className="w-full md:w-64">
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Status</label>
+                    <label className="mb-1.5 block text-xs font-bold uppercase text-[var(--muted)]">Status</label>
                     <select
-                        className="w-full text-sm border-gray-300 rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2 bg-gray-50 text-gray-800 font-medium"
+                        className="form-control font-medium"
                         value={filters.status}
                         onChange={(e) => handleChange('status', e.target.value)}
                     >
@@ -70,44 +71,56 @@ export default function TaskFilters({ filters, onFilterChange, tasks, users, cur
                 </div>
 
                 {/* Always-visible toggles */}
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                     <button
+                        type="button"
                         onClick={() => handleChange('mentionedMe', !filters.mentionedMe)}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors border ${filters.mentionedMe ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                        className={`btn-secondary ${filters.mentionedMe ? 'border-violet-200 bg-violet-50 text-violet-700' : ''}`}
                     >
                         <span className={filters.mentionedMe ? 'text-purple-500' : 'text-gray-400'}>@</span>
                         Mentions
                     </button>
 
                     <button
+                        type="button"
                         onClick={() => handleChange('showOnlyFlagged', !filters.showOnlyFlagged)}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors border ${filters.showOnlyFlagged ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                        className={`btn-secondary ${filters.showOnlyFlagged ? 'border-amber-200 bg-amber-50 text-amber-700' : ''}`}
                     >
                         <span className={filters.showOnlyFlagged ? 'text-yellow-500' : 'text-gray-400'}>★</span>
                         Flagged
                     </button>
                     
                     <button
+                        type="button"
+                        onClick={() => handleChange('deadlineState', filters.deadlineState === 'OVERDUE' ? 'all' : 'OVERDUE')}
+                        className={`btn-secondary ${filters.deadlineState === 'OVERDUE' ? 'border-red-200 bg-red-50 text-red-700' : ''}`}
+                    >
+                        <span className={filters.deadlineState === 'OVERDUE' ? 'text-red-500' : 'text-gray-400'}>!</span>
+                        Overdue
+                    </button>
+
+                    <button
+                        type="button"
                         onClick={() => setIsAdvancedOpen(!isAdvancedOpen)}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors border ${isAdvancedOpen ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                        className={`btn-secondary ${isAdvancedOpen ? 'border-teal-200 bg-teal-50 text-teal-800' : ''}`}
                     >
                         <svg className={`w-4 h-4 transition-transform ${isAdvancedOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                         </svg>
-                        Filters
+                        {isAdvancedOpen ? 'Less Filters' : 'More Filters'}
                     </button>
                 </div>
             </div>
 
             {/* Advanced Filters Collapse */}
             {isAdvancedOpen && (
-                <div className="mt-5 pt-5 border-t border-gray-100 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="mt-5 border-t border-[var(--border)] pt-5">
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-x-6 gap-y-4">
                         {/* Category Filter */}
                         <div>
-                            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Category</label>
+                            <label className="mb-1.5 block text-xs font-semibold uppercase text-[var(--muted)]">Category</label>
                             <select
-                                className="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                className="form-control"
                                 value={filters.category}
                                 onChange={(e) => handleChange('category', e.target.value)}
                             >
@@ -120,9 +133,9 @@ export default function TaskFilters({ filters, onFilterChange, tasks, users, cur
 
                         {/* Priority Filter */}
                         <div>
-                            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Priority</label>
+                            <label className="mb-1.5 block text-xs font-semibold uppercase text-[var(--muted)]">Priority</label>
                             <select
-                                className="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                className="form-control"
                                 value={filters.priority}
                                 onChange={(e) => handleChange('priority', e.target.value)}
                             >
@@ -135,9 +148,9 @@ export default function TaskFilters({ filters, onFilterChange, tasks, users, cur
 
                         {/* Assignee Filter */}
                         <div>
-                            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Assignee</label>
+                            <label className="mb-1.5 block text-xs font-semibold uppercase text-[var(--muted)]">Assignee</label>
                             <select
-                                className="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                className="form-control"
                                 value={filters.assigneeId}
                                 onChange={(e) => handleChange('assigneeId', e.target.value)}
                             >
@@ -152,9 +165,9 @@ export default function TaskFilters({ filters, onFilterChange, tasks, users, cur
 
                         {/* Actioned By Filter */}
                         <div>
-                            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Actioned By</label>
+                            <label className="mb-1.5 block text-xs font-semibold uppercase text-[var(--muted)]">Actioned By</label>
                             <select
-                                className="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                className="form-control"
                                 value={filters.actionedById || 'all'}
                                 onChange={(e) => handleChange('actionedById', e.target.value)}
                             >
@@ -168,9 +181,9 @@ export default function TaskFilters({ filters, onFilterChange, tasks, users, cur
 
                         {/* Created By Filter */}
                         <div>
-                            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Created By</label>
+                            <label className="mb-1.5 block text-xs font-semibold uppercase text-[var(--muted)]">Created By</label>
                             <select
-                                className="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                className="form-control"
                                 value={filters.createdById}
                                 onChange={(e) => handleChange('createdById', e.target.value)}
                             >
@@ -184,9 +197,9 @@ export default function TaskFilters({ filters, onFilterChange, tasks, users, cur
 
                         {/* Sentiment Filter */}
                         <div>
-                            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Sentiment</label>
+                            <label className="mb-1.5 block text-xs font-semibold uppercase text-[var(--muted)]">Sentiment</label>
                             <select
-                                className="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                className="form-control"
                                 value={filters.sentiment}
                                 onChange={(e) => handleChange('sentiment', e.target.value)}
                             >
@@ -199,9 +212,9 @@ export default function TaskFilters({ filters, onFilterChange, tasks, users, cur
 
                         {/* Sort By */}
                         <div>
-                            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Sort By</label>
+                            <label className="mb-1.5 block text-xs font-semibold uppercase text-[var(--muted)]">Sort By</label>
                             <select
-                                className="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                className="form-control"
                                 value={filters.sortBy || 'newest'}
                                 onChange={(e) => handleChange('sortBy', e.target.value)}
                             >
@@ -212,10 +225,10 @@ export default function TaskFilters({ filters, onFilterChange, tasks, users, cur
 
                         {/* Date Range Select */}
                         <div className="md:col-span-2">
-                            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Date Range</label>
-                            <div className="flex gap-4 items-center">
+                            <label className="mb-1.5 block text-xs font-semibold uppercase text-[var(--muted)]">Date Range</label>
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                                 <select
-                                    className="w-1/2 text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                    className="form-control sm:w-1/2"
                                     value={filters.dateRangeType || 'all'}
                                     onChange={e => {
                                         const type = e.target.value;
@@ -249,17 +262,17 @@ export default function TaskFilters({ filters, onFilterChange, tasks, users, cur
                                 </select>
                                 
                                 {filters.dateRangeType === 'custom' && (
-                                    <div className="flex items-center gap-2 w-1/2">
+                                    <div className="flex items-center gap-2 sm:w-1/2">
                                         <input
                                             type="date"
-                                            className="w-full border-gray-300 rounded-md text-sm shadow-sm"
+                                            className="form-control"
                                             value={filters.dateFrom || ''}
                                             onChange={e => handleChange('dateFrom', e.target.value)}
                                         />
                                         <span className="text-gray-400 text-xs">to</span>
                                         <input
                                             type="date"
-                                            className="w-full border-gray-300 rounded-md text-sm shadow-sm"
+                                            className="form-control"
                                             value={filters.dateTo || ''}
                                             onChange={e => handleChange('dateTo', e.target.value)}
                                         />

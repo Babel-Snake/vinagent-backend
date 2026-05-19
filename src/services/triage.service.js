@@ -64,11 +64,15 @@ async function triageMessage(message, context = {}) {
         payload: { summary: messageBody.substring(0, 50) }
     };
 
-    const suggestedChannel = message.source === 'email'
-        ? 'email'
-        : message.source === 'voice'
-            ? 'voice'
-            : 'sms';
+    const suggestedChannel = context.suggestedChannel
+        || message.suggestedChannel
+        || (message.source === 'email'
+            ? 'email'
+            : message.source === 'voice'
+                ? 'voice'
+                : message.source === 'sms'
+                    ? 'sms'
+                    : 'sms');
 
     const skipAI = process.env.AI_SKIP === 'true';
 
@@ -146,8 +150,8 @@ async function triageMessage(message, context = {}) {
         suggestedChannel,
         suggestedAssigneeId: result.suggestedAssigneeId || undefined,
         suggestedAction: result.suggestedAction || undefined,
-        suggestedRecipientEmail: result.suggestedRecipientEmail || undefined,
-        suggestedCc: result.suggestedCc || undefined,
+        suggestedRecipientEmail: suggestedChannel === 'email' ? result.suggestedRecipientEmail || undefined : undefined,
+        suggestedCc: suggestedChannel === 'email' ? result.suggestedCc || undefined : undefined,
         suggestedSteps
     };
 }
@@ -159,14 +163,47 @@ async function triageMessage(message, context = {}) {
  * @returns {Promise<Object>} - The proposed task structure
  */
 async function classifyStaffNote(input) {
-    const { text, memberId, wineryId } = input;
+    const {
+        text,
+        memberId,
+        wineryId,
+        taskOrigin,
+        inboundMethod,
+        requesterName,
+        requesterEmail,
+        requesterPhone,
+        suggestedChannel
+    } = input;
     const { Member } = require('../models');
 
     // Simulate message object for triage
-    const message = { body: text };
+    const source = inboundMethod === 'email'
+        ? 'email'
+        : inboundMethod === 'phone'
+            ? 'voice'
+            : inboundMethod === 'sms'
+                ? 'sms'
+                : undefined;
+    const message = { body: text, source, suggestedChannel };
 
     // Fetch member if ID provided to help context
-    let context = { wineryId };
+    let context = {
+        wineryId,
+        taskOrigin,
+        inboundMethod,
+        requesterName,
+        requesterEmail,
+        requesterPhone,
+        suggestedChannel,
+        manualIntake: {
+            taskOrigin,
+            inboundMethod,
+            requesterName,
+            requesterEmail,
+            requesterPhone,
+            preferredResponseChannel: suggestedChannel
+        }
+    };
     let foundMember = null;
 
     if (memberId) {

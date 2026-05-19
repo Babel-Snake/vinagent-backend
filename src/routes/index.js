@@ -18,6 +18,8 @@ router.use('/public', require('./public.routes'));
 // Dashboard APIs (protected by Firebase auth)
 router.use('/tasks/flags', authMiddleware, require('./taskFlag.routes'));
 router.use('/tasks', authMiddleware, taskRoutes);
+router.use('/notices', authMiddleware, require('./notice.routes'));
+router.use('/attachments', authMiddleware, require('./attachment.routes'));
 router.use('/staff', authMiddleware, require('./staff.routes'));
 router.use('/users', authMiddleware, require('./user.routes'));
 router.use('/members', authMiddleware, require('./member.routes'));

@@ -8,6 +8,7 @@ jest.mock('../../models', () => ({
     Task: {
         findOne: jest.fn(),
         findByPk: jest.fn(),
+        findAll: jest.fn(),
         update: jest.fn(),
         findAndCountAll: jest.fn(),
         sequelize: {
@@ -37,7 +38,8 @@ jest.mock('../../models', () => ({
         findAll: jest.fn()
     },
     Notification: {
-        create: jest.fn()
+        create: jest.fn(),
+        findAll: jest.fn()
     }
 }));
 
@@ -55,14 +57,16 @@ jest.mock('../../services/audit.service', () => ({
     logTaskAction: jest.fn()
 }));
 
-const { Task, TaskAction, TaskStep, WinerySettings } = require('../../models');
+const { Task, TaskAction, TaskStep, WinerySettings, Notification } = require('../../models');
 const executionService = require('../../services/execution.service');
 
 describe('TaskService Unit Tests', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        Task.findAll.mockResolvedValue([]);
         TaskStep.findAll.mockResolvedValue([]);
+        Notification.findAll.mockResolvedValue([]);
     });
 
     describe('updateTask', () => {

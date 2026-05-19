@@ -16,16 +16,21 @@ module.exports = (sequelize, DataTypes) => {
                     'ACTIONED',
                     'REJECTED',
                     'EXECUTION_TRIGGERED',
+                    'EXECUTION_RECORDED',
                     'UPDATED_PAYLOAD',
                     'NOTE_ADDED',
                     'MANUAL_CREATED',
                     'MANUAL_UPDATE',
+                    'OUTCOME_RECORDED',
+                    'MEMBER_ENRICHED',
                     'ASSIGNED',
                     'LINKED_TASK',
                     'STEP_CREATED',
                     'STEP_UPDATED',
                     'STEP_COMPLETED',
-                    'STEP_DELETED'
+                    'STEP_DELETED',
+                    'ATTACHMENT_ADDED',
+                    'ATTACHMENT_DELETED'
                 ),
                 allowNull: false
             },

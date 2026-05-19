@@ -11,8 +11,21 @@ module.exports = (sequelize, DataTypes) => {
       Task.belongsTo(models.User, { foreignKey: 'assigneeId', as: 'Assignee' });
       Task.belongsTo(models.Task, { foreignKey: 'parentTaskId', as: 'ParentTask' });
       Task.hasMany(models.Task, { foreignKey: 'parentTaskId', as: 'SubTasks' });
+      Task.hasMany(models.Message, { foreignKey: 'taskId', as: 'Messages' });
       Task.hasMany(models.TaskAction, { foreignKey: 'taskId' });
       Task.hasMany(models.TaskStep, { foreignKey: 'taskId', as: 'TaskSteps' });
+      Task.belongsToMany(models.Notice, {
+        through: models.NoticeTask,
+        foreignKey: 'taskId',
+        otherKey: 'noticeId',
+        as: 'LinkedNotices'
+      });
+      Task.belongsToMany(models.CalendarEvent, {
+        through: models.CalendarEventTask,
+        foreignKey: 'taskId',
+        otherKey: 'calendarEventId',
+        as: 'CalendarEvents'
+      });
     }
   }
 
@@ -69,7 +82,52 @@ module.exports = (sequelize, DataTypes) => {
       nextStepSummary: { type: DataTypes.STRING, allowNull: true },
       blockedReason: { type: DataTypes.TEXT, allowNull: true },
       dueAt: { type: DataTypes.DATE, allowNull: true },
+      resolvedAs: {
+        type: DataTypes.ENUM(
+          'COMPLETED',
+          'WORKAROUND',
+          'ESCALATED',
+          'DECLINED',
+          'DUPLICATE',
+          'NO_ACTION'
+        ),
+        allowNull: true
+      },
+      resolutionType: {
+        type: DataTypes.ENUM(
+          'EXECUTED',
+          'REPLIED',
+          'MANUAL_WORKAROUND',
+          'POLICY_DECLINE',
+          'CUSTOMER_NO_RESPONSE',
+          'NO_ACTION_NEEDED',
+          'SPAM_OR_INVALID',
+          'EXTERNAL_ESCALATION',
+          'INTERNAL_ESCALATION',
+          'MERGED_DUPLICATE',
+          'ALREADY_RESOLVED',
+          'INFO_ONLY'
+        ),
+        allowNull: true
+      },
+      customerOutcome: {
+        type: DataTypes.ENUM(
+          'BOOKING_CONFIRMED',
+          'ORDER_UPDATED',
+          'ACCOUNT_UPDATED',
+          'INFO_PROVIDED',
+          'ISSUE_RESOLVED',
+          'REQUEST_DECLINED',
+          'REFERRED',
+          'NO_CHANGE',
+          'UNKNOWN'
+        ),
+        allowNull: true
+      },
       resolutionSummary: { type: DataTypes.TEXT, allowNull: true },
+      followUpRequired: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      followUpDueAt: { type: DataTypes.DATE, allowNull: true },
+      followUpSummary: { type: DataTypes.TEXT, allowNull: true },
       resolvedAt: { type: DataTypes.DATE, allowNull: true },
       payload: { type: DataTypes.JSON, allowNull: true },
       suggestedChannel: {

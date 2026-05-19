@@ -6,7 +6,13 @@ It is aligned to the current implementation, which uses:
 
 * task statuses: `PENDING`, `ACTIONED`, `REJECTED`
 * task workflow summary fields on `Task`
+* task communication timeline through linked `Message` records
 * `TaskStep` for structured progress
+* structured task outcome taxonomy on closed tasks
+* managed child follow-up tasks driven from structured closure semantics
+* structured manual intake and identity-resolution states
+* webhook-created task identity-resolution states
+* ranked review candidates for uncertain customer matches
 * `TaskAction` for detailed audit history
 * `MemberActionToken` for secure member self-service
 
@@ -20,6 +26,8 @@ The backend test suite should prove that:
 4. execution side effects are safe and predictable
 5. public token-based flows work end to end
 6. auth, permissions, and webhook signatures are enforced
+7. task communication history remains attached to the case across inbound and outbound events
+8. analytics reports operational flow from workflow, action, identity, message, and follow-up data
 
 ## 2. Test Layers
 
@@ -44,6 +52,7 @@ Use integration tests for:
 * task list/detail/update APIs
 * address-update public APIs
 * execution side effects with a real test DB
+* task communication timeline retrieval
 * security middleware
 
 ### 2.3 Golden Path
@@ -88,6 +97,8 @@ Tests should reflect the current best-effort execution model:
 * actioning a task may trigger execution
 * if execution validation fails, the status change is not rolled back
 * if secure links are disabled, address automation is skipped and the task stays `ACTIONED`
+* order execution can record structured CRM writeback results when usable customer identity exists
+* outbound notifications generated during execution are logged back onto the task as outbound `Message` rows for both SMS and email
 
 ## 4. High-Value Unit Tests
 
@@ -121,6 +132,8 @@ Cover:
 * step creation/update/delete sync workflow summary correctly
 * actioning triggers execution
 * execution failures do not roll back the saved status change
+* closed tasks record normalized outcome fields and reopen clears them
+* closed tasks create, update, or cancel managed follow-up child tasks when automation rules apply
 
 ### 4.2a `services/ai`
 
@@ -136,9 +149,10 @@ Cover:
 
 * address-change tasks create `MemberActionToken`
 * address-change tasks are reset to `PENDING` after token creation
-* order tasks remain `ACTIONED` and log `ORDER_UPDATE_STUB`
-* secure-links-disabled paths skip token creation
+* order tasks remain `ACTIONED` and can log `ORDER_WRITEBACK` plus `EXECUTION_RECORDED`
+* secure-links-disabled paths skip token creation without blocking unrelated order/booking execution paths
 * invalid payloads fail safely
+* outbound SMS and email attempts are attached to the task timeline
 
 ### 4.4 `memberActionTokenService`
 
@@ -159,6 +173,11 @@ Cover:
 * linked task becomes `ACTIONED`
 * audit entry contains `MEMBER_CONFIRMED_ADDRESS`
 * missing address / missing member errors
+* external task intake either links, creates, or flags a review-required candidate safely
+* winery matching thresholds alter auto-link vs review behavior
+* staff can confirm a suggested customer match on an existing task
+* actioned external task outcomes enrich the linked member record conservatively
+* duplicate customer records can be merged while preserving linked task/message/token history
 
 ## 5. High-Value Integration Tests
 
@@ -168,6 +187,8 @@ For SMS, email, and voice:
 
 * valid webhook creates inbound `Message`
 * valid webhook creates `Task`
+* inbound webhook `Message` is linked back to the created task timeline
+* webhook-created external tasks follow the shared identity-resolution rules
 * valid webhook creates initial workflow steps from AI or template planning
 * duplicate provider ID returns a duplicate acknowledgement
 * unknown destination errors cleanly
@@ -192,6 +213,8 @@ Cover:
 * `PATCH /api/tasks/:id`
 * `POST /api/tasks/:id/steps`
 * `PATCH /api/tasks/:id/steps/:stepId`
+* `POST /api/tasks/:id/steps/:stepId/suggestion`
+* `POST /api/tasks/:id/steps/:stepId/action`
 * `DELETE /api/tasks/:id/steps/:stepId`
 * `PATCH /api/tasks/:id/notes/:actionId`
 
@@ -199,11 +222,17 @@ Important assertions:
 
 * winery scoping is enforced
 * staff queue scoping is enforced
+* `GET /api/tasks/:id` returns linked communication timeline messages
+* webhook-created external tasks can land as `AUTO_LINKED`, `AUTO_CREATED`, or `REVIEW_REQUIRED`
 * assignment writes `ASSIGNED`
 * notes write `NOTE_ADDED`
 * actioning writes `ACTIONED`
 * rejecting writes `REJECTED`
+* outcome changes write `OUTCOME_RECORDED`
+* managed follow-up creation and cancellation are visible through `LINKED_TASK` history and child task state
 * step edits write `STEP_*` audit events
+* step suggestion generation persists draft fields and writes a generated-source step audit event
+* step suggestion actioning can send an outbound email message and complete the step
 
 ### 5.4 Public Address Update
 
@@ -214,6 +243,18 @@ Cover:
 * confirm token success
 * replay protection
 * linked task/member updates
+
+### 5.5 Analytics API
+
+Cover:
+
+* `GET /api/analytics` requires manager/admin auth
+* current waiting, blocked, overdue, and due-soon task counts
+* average/median resolution timing for closed tasks
+* first-response latency from linked inbound/outbound messages
+* handoff counts from assignment and step-owner audit actions
+* identity-review workload from `payload.manualIntake.identityResolutionStatus`
+* follow-up automation generation/completion/cancellation from child tasks
 
 ## 6. Golden Path Test
 
@@ -231,6 +272,7 @@ Recommended audit assertions:
 * one staff `ACTIONED`
 * one `EXECUTION_TRIGGERED`
 * one member-confirmation `ACTIONED`
+* final task carries normalized completion outcome fields such as `resolvedAs = COMPLETED`
 
 ## 7. Non-Functional Checks
 

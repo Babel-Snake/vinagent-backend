@@ -1,6 +1,7 @@
 const admin = require('../config/firebase');
 const logger = require('../config/logger');
 const { User, Winery } = require('../models');
+const { verifyPinSessionToken } = require('../utils/pinAuth');
 
 async function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization || '';
@@ -16,6 +17,39 @@ async function authMiddleware(req, res, next) {
   }
 
   try {
+    if (token.startsWith('pin.')) {
+      const session = verifyPinSessionToken(token);
+      const user = await User.findOne({
+        where: { id: session.sub, wineryId: session.wineryId, isActive: true },
+        include: [{ model: Winery, attributes: ['name'] }]
+      });
+
+      if (!user || !user.pinHash) {
+        return res.status(401).json({
+          error: {
+            code: 'UNAUTHENTICATED',
+            message: 'Invalid or expired PIN session'
+          }
+        });
+      }
+
+      req.user = {
+        id: user.id,
+        userId: user.id,
+        email: user.email,
+        displayName: user.displayName,
+        role: session.role === 'staff' ? 'staff' : user.role,
+        actualRole: user.role,
+        authMode: session.authMode || 'pin',
+        isPinSession: true,
+        wineryId: user.wineryId,
+        wineryName: user.Winery ? user.Winery.name : 'Unknown Winery',
+        firebaseUid: user.firebaseUid
+      };
+
+      return next();
+    }
+
     // 1. Test Bypass (Explicit Config Only)
     // Read directly from env for dynamic test support
     const allowTestBypass = process.env.ALLOW_TEST_AUTH_BYPASS === 'true';
@@ -63,6 +97,7 @@ async function authMiddleware(req, res, next) {
         id: user.id,
         userId: user.id,
         email: user.email,
+        displayName: user.displayName,
         role: user.role,
         wineryId: user.wineryId,
         wineryName: user.Winery ? user.Winery.name : 'Unknown Winery',
@@ -109,6 +144,7 @@ async function authMiddleware(req, res, next) {
       id: user.id,
       userId: user.id, // Legacy compatibility
       email: user.email,
+      displayName: user.displayName,
       role: user.role,
       wineryId: user.wineryId,
       wineryName: user.Winery ? user.Winery.name : 'Unknown Winery',

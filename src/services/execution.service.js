@@ -1,61 +1,72 @@
 const { Member, TaskAction } = require('../models');
 const memberActionTokenService = require('./memberActionTokenService');
 const logger = require('../config/logger');
+const { clearTaskOutcomeFields } = require('../utils/taskOutcome');
 
-/**
- * Executes follow-up side effects after a task is actioned.
- * @param {Object} task - The task instance (Sequelize model)
- * @param {Object} transaction - Sequelize transaction
- * @returns {Promise<void>}
- */
-async function executeTask(task, transaction, settings) {
-    if (!settings) {
-        // Fetch if not provided
-        const { WinerySettings } = require('../models');
-        settings = await WinerySettings.findOne({ where: { wineryId: task.wineryId }, transaction });
-    }
-
-    if (!settings || !settings.enableSecureLinks) {
-        logger.info(`Skipping automated execution for task ${task.id}: Secure Links disabled.`);
-        return;
-    }
-
-    // --- EXECUTION LOGIC ---
-    if (task.subType === 'ACCOUNT_ADDRESS_CHANGE' || task.type === 'ADDRESS_CHANGE') {
-        _validateAddressPayload(task); // Throws on failure
-        await _executeAddressChange(task, transaction);
-    } else if (task.subType === 'BOOKING_NEW') {
-        _validateBookingPayload(task); // Throws on failure
-        await _executeBooking(task, transaction, settings);
-    } else if (task.type.startsWith('ORDER_') || task.category === 'ORDER') {
-        _validateOrderPayload(task);
-        await _executeOrderUpdate(task, transaction);
-    } else {
-        logger.info('No automatic execution logic for task', { type: task.subType || task.type, taskId: task.id });
-    }
-
-    // --- GENERIC NOTIFICATION LOGIC ---
-    // If the task has a suggested reply and a delivery channel, send it.
-    if (task.suggestedReplyBody && task.suggestedChannel && task.suggestedChannel !== 'none') {
-        const { Member } = require('../models');
-        const member = await Member.findByPk(task.memberId, { transaction });
-
-        if (member) {
-            const contact = task.suggestedChannel === 'email' ? member.email : member.phone;
-            if (contact) {
-                try {
-                    await _sendNotification(task, member, contact, transaction);
-                } catch (notifyErr) {
-                    logger.error('Failed to send notification', notifyErr);
-                }
-            } else {
-                logger.warn(`No contact details for ${task.suggestedChannel} on member ${member.id}`);
-            }
-        }
-    }
+function _isAddressTask(task) {
+    return task.subType === 'ACCOUNT_ADDRESS_CHANGE' || task.type === 'ADDRESS_CHANGE';
 }
 
-// --- LAYER 3: PRE-FLIGHT VALIDATION HELPERS ---
+function _isBookingTask(task) {
+    return task.subType === 'BOOKING_NEW';
+}
+
+function _isOrderTask(task) {
+    return (task.type && task.type.startsWith('ORDER_')) || task.category === 'ORDER';
+}
+
+function _cloneTaskPayload(task) {
+    if (task.payload && typeof task.payload === 'object') {
+        return { ...task.payload };
+    }
+    return {};
+}
+
+function _extractAddressPayload(task) {
+    if (task.payload && task.payload.newAddress) {
+        return task.payload.newAddress;
+    }
+    return task.payload || {};
+}
+
+function _extractRequesterProfile(task, member = null) {
+    const manualIntake = task.payload?.manualIntake || {};
+    const requesterName = manualIntake.requesterName || null;
+    const nameParts = requesterName ? requesterName.trim().split(/\s+/) : [];
+
+    return {
+        firstName: member?.firstName || nameParts[0] || 'Unknown',
+        lastName: member?.lastName || (nameParts.length > 1 ? nameParts.slice(1).join(' ') : 'Customer'),
+        email: member?.email || task.suggestedRecipientEmail || manualIntake.requesterEmail || null,
+        phone: member?.phone || manualIntake.requesterPhone || null
+    };
+}
+
+async function _recordExecutionResult(task, transaction, result) {
+    const nextResult = {
+        occurredAt: new Date().toISOString(),
+        ...result
+    };
+    const payload = _cloneTaskPayload(task);
+    const executionResults = Array.isArray(payload.executionResults) ? [...payload.executionResults] : [];
+
+    executionResults.push(nextResult);
+    payload.executionResults = executionResults.slice(-25);
+    payload.lastExecutionResult = nextResult;
+    task.payload = payload;
+    task.changed('payload', true);
+    await task.save({ transaction });
+
+    await TaskAction.create({
+        taskId: task.id,
+        userId: task.updatedBy || null,
+        actionType: 'EXECUTION_RECORDED',
+        details: nextResult
+    }, { transaction });
+
+    return nextResult;
+}
+
 function _validateAddressPayload(task) {
     const errors = [];
     if (!task.memberId) errors.push('Member ID is required');
@@ -91,40 +102,109 @@ function _validateBookingPayload(task) {
     }
 }
 
-function _extractAddressPayload(task) {
-    if (task.payload && task.payload.newAddress) {
-        return task.payload.newAddress;
+function _validateOrderPayload(task) {
+    if (!task.payload) return;
+}
+
+function _buildOrderNote(task) {
+    const orderId = task.payload?.orderId || 'unknown-order';
+    return [
+        `VinAgent order workflow update`,
+        `Task ID: ${task.id}`,
+        `Task Type: ${task.subType || task.type || task.category}`,
+        `Order ID: ${orderId}`,
+        task.suggestedAction ? `Suggested Action: ${task.suggestedAction}` : null,
+        task.resolutionSummary ? `Resolution Summary: ${task.resolutionSummary}` : null
+    ].filter(Boolean).join('\n');
+}
+
+function _resolveNotificationTarget(task, member) {
+    const manualIntake = task.payload?.manualIntake || {};
+    const channel = task.suggestedChannel;
+
+    if (channel === 'email') {
+        return {
+            to: task.suggestedRecipientEmail || member?.email || manualIntake.requesterEmail || null,
+            subject: task.suggestedReplySubject || `Update: ${task.subType || task.category || 'Task'}`,
+            cc: task.suggestedCc || null
+        };
     }
-    return task.payload || {};
+
+    if (channel === 'sms') {
+        return {
+            to: member?.phone || manualIntake.requesterPhone || null,
+            subject: null
+        };
+    }
+
+    return { to: null, subject: null };
 }
 
-async function _sendNotification(task, member, contact, transaction) {
+async function _sendNotification(task, member, transaction) {
     const notificationService = require('./notifications/notification.service');
-    await notificationService.send({
-        to: contact,
-        body: task.suggestedReplyBody,
-        channel: task.suggestedChannel
-    }, {
-        wineryId: task.wineryId,
-        memberId: member.id,
-        taskId: task.id
-    });
-}
+    const target = _resolveNotificationTarget(task, member);
 
-async function _executeAddressChange(task, transaction) {
-    if (!task.memberId || !task.payload) {
-        logger.warn('Cannot execute ADDRESS_CHANGE: missing memberId or payload', { taskId: task.id });
+    if (!target.to) {
+        await _recordExecutionResult(task, transaction, {
+            kind: 'notification',
+            operation: 'send',
+            provider: task.suggestedChannel || 'unknown',
+            status: 'SKIPPED',
+            channel: task.suggestedChannel || 'unknown',
+            summary: 'Notification skipped because no destination contact was available.'
+        });
         return;
     }
 
-    // Find Member
+    try {
+        const providerResult = await notificationService.send({
+            to: target.to,
+            body: task.suggestedReplyBody,
+            channel: task.suggestedChannel,
+            subject: target.subject,
+            cc: target.cc || null
+        }, {
+            wineryId: task.wineryId,
+            memberId: member?.id || task.memberId || null,
+            taskId: task.id,
+            transaction
+        });
+
+        await _recordExecutionResult(task, transaction, {
+            kind: 'notification',
+            operation: 'send',
+            provider: providerResult?.provider || task.suggestedChannel,
+            status: providerResult?.status || 'SENT',
+            channel: task.suggestedChannel,
+            target: target.to,
+            subject: target.subject,
+            cc: target.cc || null,
+            externalId: providerResult?.sid || providerResult?.id || null,
+            summary: `Sent ${task.suggestedChannel} notification to ${target.to}.`
+        });
+    } catch (notifyErr) {
+        await _recordExecutionResult(task, transaction, {
+            kind: 'notification',
+            operation: 'send',
+            provider: task.suggestedChannel,
+            status: 'FAILED',
+            channel: task.suggestedChannel,
+            target: target.to,
+            subject: target.subject,
+            cc: target.cc || null,
+            summary: notifyErr.message
+        });
+        throw notifyErr;
+    }
+}
+
+async function _executeAddressChange(task, transaction) {
     const member = await Member.findByPk(task.memberId, { transaction });
     if (!member) {
         throw new Error(`Member not found for task ${task.id}`);
     }
 
     const addressPayload = _extractAddressPayload(task);
-
     const channel = task.suggestedChannel || 'sms';
     const target = channel === 'email' ? member.email : member.phone;
     if (!target) {
@@ -148,39 +228,49 @@ async function _executeAddressChange(task, transaction) {
         ? baseBody
         : `${baseBody} ${confirmationUrl}`;
 
-    task.status = 'PENDING'; // Still logically pending member response
+    task.status = 'PENDING';
+    task.workflowState = 'WAITING';
+    task.waitingOn = 'CUSTOMER';
+    task.nextStepSummary = 'Await member confirmation';
+    task.blockedReason = null;
+    clearTaskOutcomeFields(task);
     task.suggestedReplyBody = replyBody;
     await task.save({ transaction });
 
     await TaskAction.create({
         taskId: task.id,
-        userId: task.updatedBy, // The approver
+        userId: task.updatedBy,
         actionType: 'EXECUTION_TRIGGERED',
         details: { tokenId: tokenRecord.id, channel }
     }, { transaction });
+
+    await _recordExecutionResult(task, transaction, {
+        kind: 'address_change',
+        operation: 'secure_link_created',
+        provider: 'secure_link',
+        status: 'PENDING_CUSTOMER',
+        channel,
+        tokenId: tokenRecord.id,
+        target,
+        summary: 'Address confirmation link created and awaiting member action.'
+    });
 
     logger.info('Execution triggered for ADDRESS_CHANGE', {
         taskId: task.id,
         memberId: member.id,
         tokenId: tokenRecord.id
     });
+
+    return member;
 }
 
 async function _executeBooking(task, transaction) {
-    if (!task.payload || !task.payload.date || !task.payload.time || !task.payload.pax) {
-        logger.warn('Skipping BOOKING execution: Missing details in payload (date/time/pax)', { taskId: task.id });
-        return;
-    }
-
-    const { Member } = require('../models');
     const member = await Member.findByPk(task.memberId, { transaction });
     if (!member) throw new Error('Member not found for booking');
 
-    // Load Provider
     const bookingFactory = require('./integrations/booking');
     const provider = await bookingFactory.getProvider(task.wineryId);
 
-    // Make Reservation
     try {
         const result = await provider.createReservation({
             ...task.payload,
@@ -193,18 +283,20 @@ async function _executeBooking(task, transaction) {
 
         logger.info(`Booking created via ${result.provider}`, { reference: result.referenceCode });
 
-        // Update Task with Success Info
         task.status = 'ACTIONED';
-        task.payload = { ...task.payload, bookingReference: result.referenceCode, bookingStatus: result.status };
+        task.payload = {
+            ..._cloneTaskPayload(task),
+            bookingReference: result.referenceCode,
+            bookingStatus: result.status,
+            bookingProvider: result.provider
+        };
 
-        // Append Reference to Reply if it exists
         if (task.suggestedReplyBody) {
             task.suggestedReplyBody += ` (Ref: ${result.referenceCode})`;
         }
 
         await task.save({ transaction });
 
-        // Log Action
         await TaskAction.create({
             taskId: task.id,
             userId: task.updatedBy,
@@ -216,40 +308,178 @@ async function _executeBooking(task, transaction) {
             }
         }, { transaction });
 
+        await _recordExecutionResult(task, transaction, {
+            kind: 'booking',
+            operation: 'create_reservation',
+            provider: result.provider || 'unknown',
+            status: result.status || 'RECORDED',
+            referenceCode: result.referenceCode || null,
+            externalId: result.referenceCode || null,
+            summary: `Booking created with provider ${result.provider || 'unknown'}.`
+        });
     } catch (bookingError) {
+        await _recordExecutionResult(task, transaction, {
+            kind: 'booking',
+            operation: 'create_reservation',
+            provider: 'unknown',
+            status: 'FAILED',
+            summary: bookingError.message
+        });
         logger.error('Booking Provider Failed', bookingError);
-        // Note: We do NOT throw here if we want to allow the task action to succeed
-        // even if the automation fails (maybe manual follow-up needed).
-        // OR we throw and rollback the action?
-        // Let's throw for now so the user knows it failed.
         throw new Error(`Booking Failed: ${bookingError.message}`);
     }
-}
 
-function _validateOrderPayload(task) {
-    if (!task.payload) return; // Optional payload for some orders
-    // Add logic if specific fields required
+    return member;
 }
 
 async function _executeOrderUpdate(task, transaction) {
-    // Stub for Order Management System integration
-    // E.g. Update order status in Commerce7, or flag for staff follow-up
+    const crmFactory = require('./integrations/crm');
+    const member = task.memberId ? await Member.findByPk(task.memberId, { transaction }) : null;
+    const customerProfile = _extractRequesterProfile(task, member);
 
-    // For now, actioning an order task keeps it ACTIONED
-    // and potentially send a notification if suggested.
+    if (!customerProfile.email && !customerProfile.phone) {
+        await _recordExecutionResult(task, transaction, {
+            kind: 'order',
+            operation: 'crm_writeback',
+            provider: 'unavailable',
+            status: 'SKIPPED',
+            summary: 'Order writeback skipped because no customer email or phone was available.'
+        });
+        return member;
+    }
 
-    logger.info('Executing Order Update (Stub)', { taskId: task.id, type: task.type });
+    const provider = await crmFactory.getProvider(task.wineryId);
 
-    // Mark as actioned
-    task.status = 'ACTIONED';
-    await task.save({ transaction });
+    try {
+        const externalMember = member?.externalRef
+            ? { id: member.externalRef, created: false }
+            : await provider.upsertMember(customerProfile);
 
-    await TaskAction.create({
-        taskId: task.id,
-        userId: task.updatedBy,
-        actionType: 'ACTIONED',
-        details: { action: 'ORDER_UPDATE_STUB', note: 'Simulated execution' }
-    }, { transaction });
+        if (member && externalMember?.id && member.externalRef !== externalMember.id) {
+            member.externalRef = externalMember.id;
+            await member.save({ transaction });
+        }
+
+        await provider.addNote(externalMember.id, _buildOrderNote(task));
+        const orderResult = await provider.recordOrderEvent(externalMember.id, {
+            taskId: task.id,
+            orderId: task.payload?.orderId || null,
+            subType: task.subType || task.type || 'ORDER',
+            payload: task.payload || {}
+        });
+
+        task.status = 'ACTIONED';
+        task.payload = {
+            ..._cloneTaskPayload(task),
+            orderWriteback: {
+                provider: orderResult.provider,
+                crmMemberId: externalMember.id,
+                referenceCode: orderResult.referenceCode,
+                status: orderResult.status,
+                recordedAt: orderResult.recordedAt,
+                createdCustomer: Boolean(externalMember.created)
+            }
+        };
+        await task.save({ transaction });
+
+        await TaskAction.create({
+            taskId: task.id,
+            userId: task.updatedBy,
+            actionType: 'ACTIONED',
+            details: {
+                action: 'ORDER_WRITEBACK',
+                provider: orderResult.provider,
+                reference: orderResult.referenceCode,
+                crmMemberId: externalMember.id
+            }
+        }, { transaction });
+
+        await _recordExecutionResult(task, transaction, {
+            kind: 'order',
+            operation: 'crm_writeback',
+            provider: orderResult.provider || 'unknown',
+            status: orderResult.status || 'RECORDED',
+            referenceCode: orderResult.referenceCode || null,
+            externalId: externalMember.id,
+            orderId: task.payload?.orderId || null,
+            summary: `Order event recorded against external customer ${externalMember.id}.`
+        });
+    } catch (orderError) {
+        await _recordExecutionResult(task, transaction, {
+            kind: 'order',
+            operation: 'crm_writeback',
+            provider: 'unknown',
+            status: 'FAILED',
+            orderId: task.payload?.orderId || null,
+            summary: orderError.message
+        });
+        logger.error('Order writeback failed', orderError);
+        throw new Error(`Order Writeback Failed: ${orderError.message}`);
+    }
+
+    return member;
+}
+
+async function executeTask(task, transaction, settings) {
+    if (!settings) {
+        const { WinerySettings } = require('../models');
+        settings = await WinerySettings.findOne({ where: { wineryId: task.wineryId }, transaction });
+    }
+
+    let member = task.memberId ? await Member.findByPk(task.memberId, { transaction }) : null;
+
+    if (_isAddressTask(task)) {
+        if (!settings || !settings.enableSecureLinks) {
+            logger.info(`Skipping secure-link execution for task ${task.id}: Secure Links disabled.`);
+            await _recordExecutionResult(task, transaction, {
+                kind: 'address_change',
+                operation: 'secure_link_created',
+                provider: 'secure_link',
+                status: 'SKIPPED',
+                summary: 'Secure link execution skipped because secure links are disabled.'
+            });
+        } else {
+            _validateAddressPayload(task);
+            member = await _executeAddressChange(task, transaction);
+        }
+    } else if (_isBookingTask(task)) {
+        if (settings && settings.enableBookingModule === false) {
+            await _recordExecutionResult(task, transaction, {
+                kind: 'booking',
+                operation: 'create_reservation',
+                provider: settings.bookingProvider || 'mock',
+                status: 'SKIPPED',
+                summary: 'Booking execution skipped because the booking module is disabled.'
+            });
+        } else {
+            _validateBookingPayload(task);
+            member = await _executeBooking(task, transaction);
+        }
+    } else if (_isOrderTask(task)) {
+        if (settings && settings.enableOrdersModule === false) {
+            await _recordExecutionResult(task, transaction, {
+                kind: 'order',
+                operation: 'crm_writeback',
+                provider: settings.crmProvider || 'mock',
+                status: 'SKIPPED',
+                orderId: task.payload?.orderId || null,
+                summary: 'Order execution skipped because the orders module is disabled.'
+            });
+        } else {
+            _validateOrderPayload(task);
+            member = await _executeOrderUpdate(task, transaction);
+        }
+    } else {
+        logger.info('No automatic execution logic for task', { type: task.subType || task.type, taskId: task.id });
+    }
+
+    if (task.suggestedReplyBody && task.suggestedChannel && !['none', 'voice'].includes(task.suggestedChannel)) {
+        try {
+            await _sendNotification(task, member, transaction);
+        } catch (notifyErr) {
+            logger.error('Failed to send notification', notifyErr);
+        }
+    }
 }
 
 module.exports = {

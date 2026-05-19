@@ -1,8 +1,21 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f6f7f3;
+  --foreground: #1c231f;
+  --surface: #fffefa;
+  --surface-muted: #eef1e8;
+  --border: #dde4d8;
+  --brand: #7a1f2b;
+  --brand-strong: #5f1721;
+  --brand-soft: #f6e8ea;
+  --accent: #0f766e;
+  --accent-soft: #e4f4f1;
+  --warning: #a86412;
+  --warning-soft: #fff4dd;
+  --danger: #b42318;
+  --danger-soft: #fee9e7;
+  --muted: #667085;
 }
 
 @theme inline {
@@ -12,15 +25,157 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  min-height: 100%;
+  background: var(--background);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+::selection {
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+}
+
+.page-shell {
+  padding: 1.5rem 1rem 2.5rem;
+}
+
+@media (min-width: 640px) {
+  .page-shell {
+    padding-left: 0;
+    padding-right: 0;
+  }
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.page-kicker {
+  color: var(--muted);
+  font-size: 0.875rem;
+  margin-top: 0.25rem;
+}
+
+.surface-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(28, 35, 31, 0.05);
+}
+
+.btn-primary {
+  align-items: center;
+  background: var(--brand);
+  border-radius: 8px;
+  color: white;
+  display: inline-flex;
+  font-size: 0.875rem;
+  font-weight: 650;
+  gap: 0.5rem;
+  line-height: 1.25rem;
+  padding: 0.625rem 0.875rem;
+  transition: background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.btn-primary:hover {
+  background: var(--brand-strong);
+}
+
+.btn-secondary {
+  align-items: center;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: #344039;
+  display: inline-flex;
+  font-size: 0.875rem;
+  font-weight: 600;
+  gap: 0.5rem;
+  line-height: 1.25rem;
+  padding: 0.625rem 0.875rem;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.btn-secondary:hover {
+  background: #f8faf6;
+  border-color: #cbd5c6;
+}
+
+.icon-button {
+  align-items: center;
+  border-radius: 8px;
+  display: inline-flex;
+  height: 2.25rem;
+  justify-content: center;
+  width: 2.25rem;
+}
+
+.form-control {
+  background: white;
+  border: 1px solid #ccd5c7;
+  border-radius: 8px;
+  color: #1c231f;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.75rem;
+  width: 100%;
+}
+
+.form-control:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
+  outline: none;
+}
+
+.metric-tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.875rem;
+}
+
+.status-dot {
+  border-radius: 999px;
+  display: inline-block;
+  height: 0.5rem;
+  width: 0.5rem;
+}
+
+.empty-state {
+  align-items: center;
+  background: var(--surface);
+  border: 1px dashed #cbd5c6;
+  border-radius: 8px;
+  color: var(--muted);
+  display: flex;
+  justify-content: center;
+  min-height: 10rem;
+  padding: 2rem;
+  text-align: center;
 }

@@ -7,9 +7,12 @@ const { authMiddleware } = require('../middleware/authMiddleware');
 
 // Resolve Staff (Public)
 router.get('/resolve-staff', authController.resolveStaff);
+router.get('/pin-config', authController.getPinConfig);
+router.post('/pin-login', authController.pinLogin);
 
 // Protected Auth Routes
 router.get('/me', authMiddleware, authController.getMe);
+router.patch('/me', authMiddleware, authController.updateMe);
 
 // Member Self-Service (secured by MemberActionToken, not Firebase auth)
 router.get('/address-update/validate', addressUpdateController.validateToken);

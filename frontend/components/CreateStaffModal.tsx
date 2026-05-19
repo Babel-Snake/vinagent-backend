@@ -9,16 +9,19 @@ interface CreateStaffModalProps {
 export default function CreateStaffModal({ onClose }: CreateStaffModalProps) {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
+    const [pin, setPin] = useState('');
     const [error, setError] = useState('');
     const [successUser, setSuccessUser] = useState<string | null>(null);
+    const [successPin, setSuccessPin] = useState('');
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
         setError('');
 
         try {
-            await createStaff({ username, password });
+            await createStaff({ username, password, pin: pin.trim() || undefined });
             setSuccessUser(username);
+            setSuccessPin(pin.trim());
         } catch (err: any) {
             setError(err.message);
         }
@@ -38,7 +41,8 @@ export default function CreateStaffModal({ onClose }: CreateStaffModalProps) {
                         <p className="text-sm text-gray-500 mb-2">Please share these login details with your staff member:</p>
                         <p className="text-sm"><strong>Username:</strong> {successUser}</p>
                         <p className="text-sm"><strong>Access Code:</strong> {password}</p>
-                        <p className="text-xs text-gray-400 mt-2">They can log in using the "Staff Login" tab.</p>
+                        {successPin && <p className="text-sm"><strong>Quick PIN:</strong> {successPin}</p>}
+                        <p className="text-xs text-gray-400 mt-2">They can use Staff Login, or Quick PIN if it is enabled for the winery.</p>
                     </div>
                     <button
                         onClick={onClose}
@@ -86,7 +90,22 @@ export default function CreateStaffModal({ onClose }: CreateStaffModalProps) {
                             className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:text-sm"
                         />
                         <p className="mt-1 text-xs text-gray-500">
-                            Use at least 6 characters.
+                            Use at least 8 characters, including one number.
+                        </p>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">Quick PIN</label>
+                        <input
+                            type="text"
+                            placeholder="e.g. 4821"
+                            value={pin}
+                            onChange={e => setPin(e.target.value)}
+                            pattern="[A-Za-z0-9]{4,12}"
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:text-sm"
+                        />
+                        <p className="mt-1 text-xs text-gray-500">
+                            Optional. Use 4 to 12 letters or numbers for quick kiosk login.
                         </p>
                     </div>
 

@@ -2,6 +2,58 @@ const AIAdapter = require('./ai.adapter');
 const OpenAI = require('openai');
 const logger = require('../../config/logger');
 
+function formatResponseChannel(channel) {
+    if (channel === 'email') return 'email';
+    if (channel === 'sms') return 'SMS/text';
+    if (channel === 'voice') return 'phone call';
+    return 'internal/no customer reply';
+}
+
+function buildResponseContactContext(context, channel) {
+    const manualIntake = context.manualIntake || {};
+    const email = context.contact?.email
+        || context.member?.email
+        || context.requesterEmail
+        || manualIntake.requesterEmail
+        || null;
+    const phone = context.contact?.phone
+        || context.member?.phone
+        || context.requesterPhone
+        || manualIntake.requesterPhone
+        || null;
+    const requiredContact = channel === 'email'
+        ? 'email'
+        : channel === 'sms' || channel === 'voice'
+            ? 'phone'
+            : 'none';
+    const hasRequiredContact = requiredContact === 'email'
+        ? Boolean(email)
+        : requiredContact === 'phone'
+            ? Boolean(phone)
+            : true;
+
+    return {
+        preferredResponseChannel: channel,
+        preferredResponseChannelLabel: formatResponseChannel(channel),
+        requesterName: context.requesterName || manualIntake.requesterName || null,
+        email,
+        phone,
+        requiredContact,
+        hasRequiredContact
+    };
+}
+
+function stripIrrelevantEmailWarning(action, channel, responseContact) {
+    if (!action || !['sms', 'voice'].includes(channel) || !responseContact.phone) {
+        return action;
+    }
+
+    return String(action)
+        .replace(/Contact details missing\.?\s*Please locate the customer's email before sending the drafted reply\.?/gi, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+}
+
 class OpenAIAdapter extends AIAdapter {
     constructor(apiKey, model = 'gpt-4o-mini') {
         super();
@@ -41,6 +93,8 @@ class OpenAIAdapter extends AIAdapter {
         }
 
         const channel = context.suggestedChannel || 'sms'; // Default to SMS style if unknown
+        const responseContact = buildResponseContactContext(context, channel);
+        const responseContactString = JSON.stringify(responseContact, null, 2);
         const maxChars = channel === 'sms' ? 160 : 1000;
 
         // ==========================================
@@ -55,6 +109,17 @@ ${wineryContextString || 'No specific winery context available.'}
 
 **Member Context (Who you are talking to):**
 ${memberContextString || 'Unknown Visitor'}
+
+**Preferred Response Channel & Contact Context:**
+${responseContactString}
+
+**CRITICAL CONTACT RULES:**
+- The preferred response channel is ${formatResponseChannel(channel)}.
+- Only warn about missing contact details if the contact detail required for that preferred response channel is missing.
+- Email replies require an email address.
+- SMS/text replies and phone-call responses require a phone number.
+- If the preferred response channel is SMS/text or phone call and a phone number is available, DO NOT ask staff to locate an email before responding.
+- If the preferred response channel is internal/no customer reply, do not ask for customer contact details unless the task itself explicitly requires them.
 
 **CRITICAL DIRECTIVE ON POLICIES & FAQS:**
 You MUST meticulously read the provided 'policies' and 'faqs' in the Winery Context.
@@ -83,15 +148,16 @@ Return a JSON object with the following fields:
 - suggestedAssigneeId: An integer matching the 'id' from the 'staff' array above. Pick the system user whose 'responsibilities' best match this task. If no staff member matches, set to null.
 
 - suggestedAction: An INTERNAL note advising the winery team on the best next step.
-    - **CRITICAL**: If the customer's contact email is missing from the context, explicitly add to this note: "Contact details missing. Please locate the customer's email before sending the drafted reply."
+    - **CRITICAL**: Be channel-aware. If the required contact detail for the preferred response channel is missing, explicitly say which detail is missing. Do not mention missing email for SMS/text or phone-call responses when a phone number is available.
 
 - suggestedRecipientEmail: The email address the reply should be sent TO.
-    - **DECISION A (Staff User Match):** Draft directly to the CUSTOMER. Use the member's 'email'. **CRITICAL**: If the member's email is unknown/missing, you MUST set this to \`null\`. DO NOT hallucinate or guess a customer's email, and DO NOT use a staff member's email here.
+    - Only populate this field for an email response or an internal email escalation. If the preferred response channel is SMS/text, phone call, or no customer reply, set this to \`null\`.
+    - **DECISION A (Staff User Match):** Draft directly to the CUSTOMER. Use the member's or requester email only when the preferred response channel is email. **CRITICAL**: If the customer's email is unknown/missing, you MUST set this to \`null\`. DO NOT hallucinate or guess a customer's email, and DO NOT use a staff member's email here.
     - **DECISION B (External Org Match):** Draft an INTERNAL ESCALATION to the STAFF CONTACT. Use the organisation contact's 'email'.
 
 - suggestedCc: A comma-separated string of email addresses that should be CC'd on the reply. If none, set to null.
 
-- copywriterDirectives: Extremely clear, explicit instructions to the downstream AI model detailing exactly what the email should say. Give it the sender's name to sign off with (e.g., Emily Chen, Manager), the recipient, the tone, and definitively state the answer based on your policy check in step 5. If contact details are missing, instruct the copywriter to draft the email anyway so the staff can send it once they find the address.
+- copywriterDirectives: Extremely clear, explicit instructions to the downstream AI model detailing exactly what the response should say for the preferred response channel. Give it the sender's name to sign off with (e.g., Emily Chen, Manager), the recipient, the tone, and definitively state the answer based on your policy check in step 5. If the required contact detail for the preferred response channel is missing, instruct the copywriter to draft the response anyway so staff can send it once they find that detail.
 
 - suggestedSteps: An array of 1 to 5 workflow step objects that describe how the winery team should progress this task.
     - title: Short imperative title for the step.
@@ -118,23 +184,44 @@ Return a JSON object with the following fields:
             });
 
             const strategistResult = JSON.parse(strategistCompletion.choices[0].message.content);
+            strategistResult.suggestedAction = stripIrrelevantEmailWarning(
+                strategistResult.suggestedAction,
+                channel,
+                responseContact
+            );
+            strategistResult.copywriterDirectives = stripIrrelevantEmailWarning(
+                strategistResult.copywriterDirectives,
+                channel,
+                responseContact
+            );
+
+            if (channel !== 'email') {
+                strategistResult.suggestedRecipientEmail = null;
+                strategistResult.suggestedCc = null;
+            }
 
             // ==========================================
             // PHASE 2: COPYWRITER (Drafting)
             // ==========================================
             
             const brandContextString = wineryData && wineryData.brand ? JSON.stringify(wineryData.brand, null, 2) : 'No brand guidelines available.';
+            const targetRecipient = channel === 'email'
+                ? strategistResult.suggestedRecipientEmail || 'Unknown email recipient'
+                : channel === 'sms' || channel === 'voice'
+                    ? responseContact.phone || 'Unknown phone number'
+                    : 'No outbound customer recipient';
 
             const copywriterPrompt = `
 You are the Copywriter AI for ${context.wineryId ? 'a specific winery' : 'a winery'}.
-You write emails based STRICTLY on the directives provided by the Cellar Door Manager (the Strategist AI).
+You write customer responses based STRICTLY on the directives provided by the Cellar Door Manager (the Strategist AI).
 Do NOT invent policies, do NOT offer to check schedules if the directive says to reject it, and do NOT change the decision.
 
 **Brand Voice Guidelines:**
 ${brandContextString}
 
 **Directives from the Strategist AI:**
-- Target Recipient: ${strategistResult.suggestedRecipientEmail || 'Unknown'}
+- Preferred Response Channel: ${formatResponseChannel(channel)}
+- Target Recipient: ${targetRecipient}
 - Assigned Sender Name (to sign off as): ${wineryData?.staff?.find(s => s.id === strategistResult.suggestedAssigneeId)?.name || 'Winery Team'}
 - Exact Instructions for Body text: "${strategistResult.copywriterDirectives}"
 

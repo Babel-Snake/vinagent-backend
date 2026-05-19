@@ -13,7 +13,12 @@ router.get('/:id', taskController.getTask);
 
 // Updates include status changes, notes, assignment, and suggestion refreshes.
 router.patch('/:id', taskController.updateTask);
+router.post('/:id/notices', requireRole(['manager', 'admin']), taskController.linkNotice);
+router.delete('/:id/notices/:noticeId', requireRole(['manager', 'admin']), taskController.unlinkNotice);
 router.post('/:id/steps', taskController.createTaskStep);
+router.patch('/:id/steps/reorder', requireRole(['manager', 'admin']), taskController.reorderTaskSteps);
+router.post('/:id/steps/:stepId/suggestion', taskController.generateTaskStepSuggestion);
+router.post('/:id/steps/:stepId/action', taskController.actionTaskStepSuggestion);
 router.patch('/:id/steps/:stepId', taskController.updateTaskStep);
 router.delete('/:id/steps/:stepId', taskController.deleteTaskStep);
 

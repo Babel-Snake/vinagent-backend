@@ -30,8 +30,11 @@ export default function TaskBoard({
 }: TaskBoardProps) {
     if (tasks.length === 0) {
         return (
-            <div className="text-center py-12 bg-white rounded-lg shadow">
-                <p className="text-gray-500">No tasks found.</p>
+            <div className="empty-state">
+                <div>
+                    <p className="font-semibold text-[#344039]">No matching tasks</p>
+                    <p className="mt-1 text-sm">Adjust filters or create a new case when fresh work arrives.</p>
+                </div>
             </div>
         );
     }

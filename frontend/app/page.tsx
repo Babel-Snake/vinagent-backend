@@ -7,12 +7,12 @@ export default function RootPage() {
   const router = useRouter();
 
   useEffect(() => {
-    router.push('/tasks');
+    router.push('/home');
   }, [router]);
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-      <div className="animate-spin rounded-full h-8 w-8 border-4 border-gray-300 border-t-indigo-600"></div>
+    <div className="flex min-h-screen items-center justify-center bg-[var(--background)]">
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#d9dfd2] border-t-[var(--brand)]"></div>
     </div>
   );
 }

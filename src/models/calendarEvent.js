@@ -7,6 +7,19 @@ module.exports = (sequelize, DataTypes) => {
             CalendarEvent.belongsTo(models.Winery, { foreignKey: 'wineryId' });
             CalendarEvent.belongsTo(models.User, { foreignKey: 'createdBy', as: 'Creator' });
             CalendarEvent.belongsTo(models.Task, { foreignKey: 'taskId', as: 'LinkedTask' });
+            CalendarEvent.belongsTo(models.Notice, { foreignKey: 'noticeId', as: 'LinkedNotice' });
+            CalendarEvent.belongsToMany(models.Task, {
+                through: models.CalendarEventTask,
+                foreignKey: 'calendarEventId',
+                otherKey: 'taskId',
+                as: 'LinkedTasks'
+            });
+            CalendarEvent.belongsToMany(models.Notice, {
+                through: models.CalendarEventNotice,
+                foreignKey: 'calendarEventId',
+                otherKey: 'noticeId',
+                as: 'LinkedNotices'
+            });
         }
     }
 
@@ -33,7 +46,7 @@ module.exports = (sequelize, DataTypes) => {
                 defaultValue: false
             },
             type: {
-                type: DataTypes.ENUM('reminder', 'meeting', 'task_deadline', 'other'),
+                type: DataTypes.ENUM('reminder', 'meeting', 'event', 'task_deadline', 'notice', 'other'),
                 defaultValue: 'other'
             },
             wineryId: {
@@ -57,6 +70,14 @@ module.exports = (sequelize, DataTypes) => {
                 allowNull: true,
                 references: {
                     model: 'Tasks',
+                    key: 'id'
+                }
+            },
+            noticeId: {
+                type: DataTypes.INTEGER,
+                allowNull: true,
+                references: {
+                    model: 'Notices',
                     key: 'id'
                 }
             }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { createFAQ, deleteFAQ, createSOP, updateSOP, deleteSOP } from '../../lib/api';
+import { createFAQ, updateFAQ, deleteFAQ, createSOP, updateSOP, deleteSOP } from '../../lib/api';
 
 export function PoliciesTab({ winery, onUpdate }: { winery: any, onUpdate: () => void }) {
     // 1. SOPs (Dynamic List)
@@ -12,8 +12,13 @@ export function PoliciesTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
     // 2. FAQs (List)
     const faqs = winery.faqs || [];
     const [newFAQ, setNewFAQ] = useState({ question: '', answer: '', tags: '' });
+    const [editingFAQ, setEditingFAQ] = useState<any>(null);
 
     const [saving, setSaving] = useState(false);
+    const [savingFAQ, setSavingFAQ] = useState(false);
+
+    const tagsToInput = (tags: any) => Array.isArray(tags) ? tags.join(', ') : (tags || '');
+    const tagsFromInput = (tags: string) => tags.split(',').map(s => s.trim()).filter(Boolean);
 
     const handleCreateSOP = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -48,17 +53,44 @@ export function PoliciesTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
     const handleCreateFAQ = async (e: React.FormEvent) => {
         e.preventDefault();
         try {
-            const tagsArray = newFAQ.tags.split(',').map(s => s.trim()).filter(Boolean);
-            await createFAQ({ ...newFAQ, tags: tagsArray });
+            await createFAQ({ ...newFAQ, tags: tagsFromInput(newFAQ.tags) });
             setNewFAQ({ question: '', answer: '', tags: '' });
             onUpdate();
         } catch (e) { alert('Failed to create FAQ'); }
+    };
+
+    const handleEditFAQ = (faq: any) => {
+        setEditingFAQ({
+            id: faq.id,
+            question: faq.question || '',
+            answer: faq.answer || '',
+            tags: tagsToInput(faq.tags)
+        });
+    };
+
+    const handleUpdateFAQ = async (e: React.FormEvent, id: number) => {
+        e.preventDefault();
+        setSavingFAQ(true);
+        try {
+            await updateFAQ(id, {
+                question: editingFAQ.question,
+                answer: editingFAQ.answer,
+                tags: tagsFromInput(editingFAQ.tags)
+            });
+            setEditingFAQ(null);
+            onUpdate();
+        } catch (e) {
+            alert('Failed to update FAQ');
+        } finally {
+            setSavingFAQ(false);
+        }
     };
 
     const handleDeleteFAQ = async (id: number) => {
         if (!confirm('Delete this FAQ?')) return;
         try {
             await deleteFAQ(id);
+            if (editingFAQ?.id === id) setEditingFAQ(null);
             onUpdate();
         } catch (e) { alert('Failed'); }
     };
@@ -112,11 +144,49 @@ export function PoliciesTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
 
                 {faqs.map((faq: any) => (
                     <div key={faq.id} className="bg-gray-50 border border-gray-200 rounded-lg p-4 shadow-sm relative group">
-                        <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity flex space-x-2">
+                            <button onClick={() => handleEditFAQ(faq)} className="text-blue-500 hover:text-blue-700 text-xs">Edit</button>
                             <button onClick={() => handleDeleteFAQ(faq.id)} className="text-red-500 hover:text-red-700 text-xs">Delete</button>
                         </div>
-                        <h4 className="text-sm font-semibold text-gray-900">{faq.question}</h4>
-                        <p className="text-sm text-gray-600 mt-1 whitespace-pre-wrap">{faq.answer}</p>
+                        {editingFAQ?.id === faq.id ? (
+                            <form onSubmit={(e) => handleUpdateFAQ(e, faq.id)} className="space-y-3 pr-16">
+                                <input
+                                    type="text"
+                                    required
+                                    value={editingFAQ.question}
+                                    onChange={e => setEditingFAQ({ ...editingFAQ, question: e.target.value })}
+                                    className="block w-full rounded-md border-gray-300 shadow-sm border p-2 font-medium"
+                                />
+                                <textarea
+                                    rows={3}
+                                    required
+                                    value={editingFAQ.answer}
+                                    onChange={e => setEditingFAQ({ ...editingFAQ, answer: e.target.value })}
+                                    className="block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
+                                />
+                                <input
+                                    type="text"
+                                    placeholder="Tags (e.g. shipping, dogs)"
+                                    value={editingFAQ.tags}
+                                    onChange={e => setEditingFAQ({ ...editingFAQ, tags: e.target.value })}
+                                    className="block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
+                                />
+                                <div className="flex space-x-2">
+                                    <button type="submit" disabled={savingFAQ} className="inline-flex py-1 px-3 border border-transparent text-xs font-medium rounded text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400">
+                                        {savingFAQ ? 'Saving...' : 'Save'}
+                                    </button>
+                                    <button type="button" onClick={() => setEditingFAQ(null)} className="inline-flex py-1 px-3 border border-gray-300 text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50">Cancel</button>
+                                </div>
+                            </form>
+                        ) : (
+                            <>
+                                <h4 className="text-sm font-semibold text-gray-900 pr-16">{faq.question}</h4>
+                                <p className="text-sm text-gray-600 mt-1 whitespace-pre-wrap">{faq.answer}</p>
+                                {Array.isArray(faq.tags) && faq.tags.length > 0 && (
+                                    <p className="mt-2 text-xs text-gray-400">{faq.tags.join(', ')}</p>
+                                )}
+                            </>
+                        )}
                     </div>
                 ))}
 

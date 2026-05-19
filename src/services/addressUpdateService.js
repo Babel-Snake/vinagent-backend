@@ -4,6 +4,7 @@
 const logger = require('../config/logger');
 const { Member, Task, TaskAction } = require('../models');
 const memberActionTokenService = require('./memberActionTokenService');
+const { getDefaultTaskOutcome } = require('../utils/taskOutcome');
 
 /**
  * Confirm an address change using a MemberActionToken
@@ -55,7 +56,21 @@ async function confirmAddress({ token, newAddress }) {
 
     // 6. Update Task status to ACTIONED (if linked)
     if (task) {
+      const defaultOutcome = getDefaultTaskOutcome(task, 'ACTIONED');
       task.status = 'ACTIONED';
+      task.workflowState = 'COMPLETED';
+      task.waitingOn = 'NONE';
+      task.nextStepSummary = null;
+      task.blockedReason = null;
+      task.dueAt = null;
+      task.resolvedAs = defaultOutcome.resolvedAs;
+      task.resolutionType = defaultOutcome.resolutionType;
+      task.customerOutcome = 'ACCOUNT_UPDATED';
+      task.followUpRequired = false;
+      task.followUpDueAt = null;
+      task.followUpSummary = null;
+      task.resolutionSummary = 'Member confirmed address change via secure link.';
+      task.resolvedAt = new Date();
       await task.save({ transaction: t });
 
       // 7. Create TaskAction

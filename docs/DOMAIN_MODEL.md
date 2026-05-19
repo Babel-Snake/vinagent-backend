@@ -60,6 +60,7 @@ Key fields:
 * `bookingConfig`
 * `crmProvider`
 * `crmConfig`
+* `identityMatchingConfig`
 
 ## 3. Member
 
@@ -76,12 +77,21 @@ Important fields:
 * address fields
 * profile/preference fields used by the dashboard and AI context
 
+Operationally, `Member` is also the canonical surviving record for customer merges.
+
 Relationships:
 
 * belongs to `Winery`
 * has many `Message`
 * has many `Task`
 * can be targeted by `MemberActionToken`
+
+When duplicates are merged:
+
+* downstream `Task`, `Message`, and `MemberActionToken` relations are reassigned
+* engagement metrics are consolidated
+* tags are unioned
+* notes retain merge context
 
 ## 4. Message
 
@@ -92,6 +102,7 @@ Important fields:
 * `id`
 * `wineryId`
 * `memberId`
+* `taskId`
 * `source`: `sms | email | voice`
 * `direction`: `inbound | outbound`
 * `subject`
@@ -104,7 +115,9 @@ Relationships:
 
 * belongs to `Winery`
 * may belong to `Member`
-* may be linked to a `Task`
+* may belong to a `Task`
+
+Operationally, `Message` is now the communication record for the case timeline, not just an ingestion artifact.
 
 ## 5. Task
 
@@ -132,7 +145,7 @@ Current enum:
 * `ACTIONED`
 * `REJECTED`
 
-This enum is intentionally coarse. Fine-grained progress is represented through task workflow summary fields, `TaskStep` rows, `TaskAction` rows, and, for secure workflows, `MemberActionToken`.
+This enum is intentionally coarse. Fine-grained progress is represented through task workflow summary fields, linked `Message` rows, `TaskStep` rows, `TaskAction` rows, and, for secure workflows, `MemberActionToken`.
 
 ### 5.3 Workflow Summary Fields
 
@@ -142,8 +155,18 @@ Current task-level workflow fields:
 * `waitingOn`: `NONE | STAFF | CUSTOMER | MANAGER | EXTERNAL`
 * `nextStepSummary`
 * `blockedReason`
+* `payload.manualIntake` may hold structured external-intake identity state
+* `payload.executionResults` holds the structured external effects recorded during execution
+* `payload.orderWriteback` stores the latest order CRM-writeback snapshot when applicable
+* `payload.followUpAutomation` marks an auto-managed child follow-up case when the task was generated from parent closure logic
 * `dueAt`
+* `resolvedAs`: `COMPLETED | WORKAROUND | ESCALATED | DECLINED | DUPLICATE | NO_ACTION`
+* `resolutionType`: normalized operational closure reason
+* `customerOutcome`: normalized customer-facing result
 * `resolutionSummary`
+* `followUpRequired`
+* `followUpDueAt`
+* `followUpSummary`
 * `resolvedAt`
 
 These fields are the high-level progress view for list/detail surfaces. They do not replace the step list.
@@ -174,6 +197,8 @@ These fields are the high-level progress view for list/detail surfaces. They do 
 * may belong to `Message`
 * may belong to creator/updater/assignee `User`
 * may belong to a parent `Task`
+* may have many child `Task` records
+* has many `Message`
 * has many `TaskStep`
 * has many `TaskAction`
 
@@ -186,7 +211,12 @@ Examples:
 * a new triaged task is `PENDING`
 * the same task can also have `workflowState = NOT_STARTED` or `WAITING`
 * ordered `TaskStep` rows describe the work required inside the task
+* linked inbound and outbound `Message` rows describe the communication thread inside the case
+* external tasks can carry identity states such as `AUTO_LINKED`, `AUTO_CREATED`, or `REVIEW_REQUIRED`
+* review-required tasks can also carry multiple ranked candidate customers inside `payload.manualIntake.suggestedCandidates`
 * a manager can mark it `ACTIONED`
+* once a task is closed, normalized outcome fields describe what actually happened
+* those closure fields can also spawn a managed child follow-up task when more work is explicitly needed
 * an address-change task may then be set back to `PENDING` while waiting for member confirmation
 * after the member confirms, the task returns to `ACTIONED`
 
@@ -220,7 +250,9 @@ Structured workflow unit inside a task.
 
 Use `TaskStep` for staged work inside one case.
 
-Use parent/child tasks only when the work becomes a separate case with its own lifecycle.
+Use parent/child tasks when the work becomes a separate case with its own lifecycle.
+
+The main live example is managed post-closure follow-up automation. Those follow-up cases are created as child tasks so they can be assigned, delayed, actioned, or cancelled independently without overloading the parent case status.
 
 ## 7. TaskAction
 
@@ -236,6 +268,9 @@ Current enum in the model:
 * `NOTE_ADDED`
 * `MANUAL_CREATED`
 * `MANUAL_UPDATE`
+* `OUTCOME_RECORDED`
+* `EXECUTION_RECORDED`
+* `MEMBER_ENRICHED`
 * `ASSIGNED`
 * `LINKED_TASK`
 * `STEP_CREATED`
@@ -247,11 +282,14 @@ Important notes:
 
 * the enum is broader than the currently emitted set
 * most live workflows emit `MANUAL_CREATED`, `MANUAL_UPDATE`, `ACTIONED`, `REJECTED`, `EXECUTION_TRIGGERED`, `NOTE_ADDED`, `ASSIGNED`, and `LINKED_TASK`
-* `ACTIONED` is reused for different outcomes; inspect `details.action` when you need finer meaning
+* `ACTIONED` is still used for operator closure and some execution-specific success markers; inspect `details.action` when you need finer meaning
+* provider-level execution details now live in `EXECUTION_RECORDED` audit entries and `payload.executionResults`
+* normalized closure semantics now live on the `Task` itself and are captured in `OUTCOME_RECORDED` audit entries when they change
+* managed follow-up creation, update, and cancellation are represented through `LINKED_TASK` entries on the parent plus normal lifecycle entries on the child task
 
 Examples of `details.action` values used today:
 
-* `ORDER_UPDATE_STUB`
+* `ORDER_WRITEBACK`
 * `BOOKING_CREATED`
 * `MEMBER_CONFIRMED_ADDRESS`
 
@@ -324,3 +362,17 @@ For workflow truth, read these together:
 * `docs/TASK_WORKFLOW_PLAN.md`
 
 That combination defines how the current backend really behaves.
+
+## 11. Analytics Semantics
+
+Operational analytics are derived from the same case records rather than a separate reporting schema.
+
+Current analytics sources:
+
+* `Task` for workflow state, waiting owner, due dates, outcomes, identity metadata, and parent/child follow-up cases
+* `TaskStep` for period step-status progress
+* `TaskAction` for assignment and step-owner handoff counts
+* `Message` for first-response latency across task communication timelines
+* `Member` for customer source, loyalty, spend, and lifecycle counts
+
+Waiting and blocked age are currently approximated from the open task's latest update timestamp. That is useful for MVP management visibility, but exact state-duration analytics would require explicit workflow-state transition timestamps.

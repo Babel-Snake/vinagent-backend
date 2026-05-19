@@ -77,7 +77,9 @@ describe('Webhook Full Integration (with SQLite)', () => {
         const task = await Task.findByPk(res.body.taskId);
         expect(task).not.toBeNull();
         expect(task.messageId).toBe(message.id);
+        expect(message.taskId).toBe(task.id);
         expect(task.category).toBe('ORDER'); // Heuristic should catch "order"
+        expect(task.payload.manualIntake.identityResolutionStatus).toBe('AUTO_LINKED');
 
         const taskSteps = await TaskStep.findAll({
             where: { taskId: task.id },
@@ -85,6 +87,65 @@ describe('Webhook Full Integration (with SQLite)', () => {
         });
         expect(taskSteps.length).toBeGreaterThan(0);
         expect(taskSteps[0].title).toMatch(/Review/i);
+    });
+
+    it('should auto-create a member for webhook-created external order tasks when no safe match exists', async () => {
+        const payload = {
+            From: '+15550001111',
+            To: '+15557654321',
+            Body: 'I want to order another mixed case',
+            MessageSid: 'SM_TEST_FULL_002'
+        };
+
+        const res = await request(app)
+            .post('/api/webhooks/sms')
+            .set('x-twilio-signature', 'mock-signature')
+            .send(payload);
+
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+
+        const task = await Task.findByPk(res.body.taskId);
+        const message = await Message.findOne({ where: { externalId: payload.MessageSid } });
+        const member = await Member.findByPk(task.memberId);
+
+        expect(task.memberId).toBeTruthy();
+        expect(member).not.toBeNull();
+        expect(member.phone).toBe(payload.From);
+        expect(task.payload.manualIntake.identityResolutionStatus).toBe('AUTO_CREATED');
+        expect(message.memberId).toBe(task.memberId);
+    });
+
+    it('should keep webhook tasks unlinked and surface review candidates when identity confidence is weak', async () => {
+        await Member.create({
+            firstName: 'Suffix',
+            lastName: 'Match',
+            phone: '+61412345678',
+            email: 'suffix@example.com',
+            wineryId: 1
+        });
+
+        const payload = {
+            From: '0412345678',
+            To: '+15557654321',
+            Body: 'I want to order a gift pack',
+            MessageSid: 'SM_TEST_FULL_003'
+        };
+
+        const res = await request(app)
+            .post('/api/webhooks/sms')
+            .set('x-twilio-signature', 'mock-signature')
+            .send(payload);
+
+        expect(res.status).toBe(200);
+
+        const task = await Task.findByPk(res.body.taskId);
+        const message = await Message.findOne({ where: { externalId: payload.MessageSid } });
+
+        expect(task.memberId).toBeNull();
+        expect(message.memberId).toBeNull();
+        expect(task.payload.manualIntake.identityResolutionStatus).toBe('REVIEW_REQUIRED');
+        expect(task.payload.manualIntake.suggestedCandidates.length).toBeGreaterThan(0);
     });
 
     it('should handle duplicate SMS idempotently', async () => {

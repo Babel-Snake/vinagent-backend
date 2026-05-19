@@ -7,6 +7,9 @@ module.exports = (sequelize, DataTypes) => {
             User.hasMany(models.Notification, { foreignKey: 'userId' });
             User.hasMany(models.TaskAction, { foreignKey: 'userId' });
             User.hasMany(models.TaskStep, { foreignKey: 'ownerUserId', as: 'OwnedTaskSteps' });
+            User.hasMany(models.Notice, { foreignKey: 'createdBy', as: 'AuthoredNotices' });
+            User.hasMany(models.NoticeTask, { foreignKey: 'createdBy', as: 'CreatedNoticeTaskLinks' });
+            User.hasMany(models.NoticeComment, { foreignKey: 'userId', as: 'NoticeComments' });
         }
     }
 
@@ -40,6 +43,27 @@ module.exports = (sequelize, DataTypes) => {
             },
             responsibilities: {
                 type: DataTypes.TEXT,
+                allowNull: true
+            },
+            pinHash: {
+                type: DataTypes.STRING,
+                allowNull: true
+            },
+            pinUpdatedAt: {
+                type: DataTypes.DATE,
+                allowNull: true
+            },
+            pinFailedAttempts: {
+                type: DataTypes.INTEGER,
+                allowNull: false,
+                defaultValue: 0
+            },
+            pinLockedUntil: {
+                type: DataTypes.DATE,
+                allowNull: true
+            },
+            pinLastLoginAt: {
+                type: DataTypes.DATE,
                 allowNull: true
             },
             wineryId: {

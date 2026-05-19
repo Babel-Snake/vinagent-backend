@@ -65,6 +65,14 @@ module.exports = (sequelize, DataTypes) => {
         crmConfig: {
             type: DataTypes.JSON,
             allowNull: true
+        },
+        identityMatchingConfig: {
+            type: DataTypes.JSON,
+            allowNull: true
+        },
+        authConfig: {
+            type: DataTypes.JSON,
+            allowNull: true
         }
     }, {
         sequelize,

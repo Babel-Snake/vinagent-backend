@@ -1,86 +1,205 @@
-
-const { CalendarEvent, Task, User } = require('../models');
+const {
+    CalendarEvent,
+    CalendarEventNotice,
+    CalendarEventTask,
+    Notice,
+    Task,
+    User
+} = require('../models');
 const { Op } = require('sequelize');
 const logger = require('../config/logger');
 
-// List Events
+const LINKED_TASK_ATTRIBUTES = [
+    'id',
+    'status',
+    'category',
+    'subType',
+    'priority',
+    'payload',
+    'assigneeId',
+    'dueAt'
+];
+const LINKED_NOTICE_ATTRIBUTES = [
+    'id',
+    'title',
+    'category',
+    'priority',
+    'isPinned',
+    'effectiveFrom',
+    'expiresAt',
+    'archivedAt'
+];
+
+function normalizeIdList(values, legacyValue) {
+    const rawValues = Array.isArray(values) ? values : [];
+    if (legacyValue !== undefined && legacyValue !== null && legacyValue !== '') {
+        rawValues.push(legacyValue);
+    }
+
+    const ids = rawValues
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0);
+
+    return Array.from(new Set(ids));
+}
+
+function buildEventInclude() {
+    return [
+        { model: Task, as: 'LinkedTask', attributes: LINKED_TASK_ATTRIBUTES },
+        {
+            model: Task,
+            as: 'LinkedTasks',
+            attributes: LINKED_TASK_ATTRIBUTES,
+            through: { attributes: ['createdAt', 'createdBy'] },
+            required: false
+        },
+        { model: Notice, as: 'LinkedNotice', attributes: LINKED_NOTICE_ATTRIBUTES },
+        {
+            model: Notice,
+            as: 'LinkedNotices',
+            attributes: LINKED_NOTICE_ATTRIBUTES,
+            through: { attributes: ['createdAt', 'createdBy'] },
+            required: false
+        },
+        { model: User, as: 'Creator', attributes: ['id', 'displayName', 'email'] }
+    ];
+}
+
+async function assertLinkedRecords({ wineryId, taskIds, noticeIds, transaction }) {
+    if (taskIds.length > 0) {
+        const tasks = await Task.findAll({
+            where: { id: { [Op.in]: taskIds }, wineryId },
+            attributes: ['id'],
+            transaction
+        });
+        if (tasks.length !== taskIds.length) {
+            const err = new Error('One or more linked tasks were not found');
+            err.statusCode = 404;
+            throw err;
+        }
+    }
+
+    if (noticeIds.length > 0) {
+        const notices = await Notice.findAll({
+            where: { id: { [Op.in]: noticeIds }, wineryId },
+            attributes: ['id'],
+            transaction
+        });
+        if (notices.length !== noticeIds.length) {
+            const err = new Error('One or more linked notices were not found');
+            err.statusCode = 404;
+            throw err;
+        }
+    }
+}
+
+async function replaceEventLinks({ event, taskIds, noticeIds, wineryId, userId, transaction }) {
+    await CalendarEventTask.destroy({
+        where: { calendarEventId: event.id },
+        transaction
+    });
+    await CalendarEventNotice.destroy({
+        where: { calendarEventId: event.id },
+        transaction
+    });
+
+    if (taskIds.length > 0) {
+        await CalendarEventTask.bulkCreate(
+            taskIds.map((taskId) => ({
+                calendarEventId: event.id,
+                taskId,
+                wineryId,
+                createdBy: userId
+            })),
+            { transaction, ignoreDuplicates: true }
+        );
+    }
+
+    if (noticeIds.length > 0) {
+        await CalendarEventNotice.bulkCreate(
+            noticeIds.map((noticeId) => ({
+                calendarEventId: event.id,
+                noticeId,
+                wineryId,
+                createdBy: userId
+            })),
+            { transaction, ignoreDuplicates: true }
+        );
+    }
+}
+
+async function getCalendarEventById(id, wineryId) {
+    return CalendarEvent.findOne({
+        where: { id, wineryId },
+        include: buildEventInclude()
+    });
+}
+
 exports.listEvents = async (req, res) => {
     try {
-
-        const { start, end } = req.query;
+        const { start, end, search, pageSize } = req.query;
         if (!req.user) {
             return res.status(401).json({ error: 'Unauthorized' });
         }
+
         const wineryId = req.user.wineryId;
-
-
         const where = { wineryId };
 
         if (start && end) {
-            where.start = {
-                [Op.gte]: new Date(start) // Events starting on/after request start
-            };
-            where.end = {
-                [Op.lte]: new Date(end) // Events ending on/before request end
-            }
-            // Note: This specific logic might miss events spanning across the range boundaries.
-            // Better logic for finding overlapping events:
-            // (StartA <= EndB) and (EndA >= StartB)
             where[Op.and] = [
                 { start: { [Op.lte]: new Date(end) } },
                 { end: { [Op.gte]: new Date(start) } }
             ];
-            delete where.start; // remove the previous naive check
-            delete where.end;
         }
 
+        if (search && String(search).trim()) {
+            const term = `%${String(search).trim()}%`;
+            where[Op.and] = [
+                ...(where[Op.and] || []),
+                {
+                    [Op.or]: [
+                        { title: { [Op.like]: term } },
+                        { description: { [Op.like]: term } }
+                    ]
+                }
+            ];
+        }
 
+        const limit = pageSize ? Math.min(Math.max(Number(pageSize) || 20, 1), 100) : undefined;
         const events = await CalendarEvent.findAll({
             where,
-            include: [
-                { model: Task, as: 'LinkedTask', attributes: ['id', 'status', 'category', 'subType', 'priority'] },
-                { model: User, as: 'Creator', attributes: ['id', 'displayName', 'email'] }
-            ],
-            order: [['start', 'ASC']]
+            include: buildEventInclude(),
+            order: [['start', 'ASC']],
+            ...(limit ? { limit } : {})
         });
 
-
         res.json(events);
-
     } catch (error) {
         logger.error('Error fetching calendar events:', error);
-
-        // Temporary Debug Logging
-        try {
-            const fs = require('fs');
-            const path = require('path');
-            const logPath = path.join(__dirname, '../../debug_calendar_error.log');
-            fs.appendFileSync(logPath, `[${new Date().toISOString()}] FETCH ERROR: ${error.message}\n${error.stack}\n\n`);
-        } catch (e) { /* ignore */ }
-
         res.status(500).json({ error: 'Failed to fetch events' });
     }
-
 };
 
-// Create Event
 exports.createEvent = async (req, res) => {
+    const transaction = await CalendarEvent.sequelize.transaction();
     try {
-
-        const { title, description, start, end, allDay, type, taskId } = req.body;
-
+        const { title, description, start, end, allDay, type } = req.body;
         if (!req.user) {
+            await transaction.rollback();
             return res.status(401).json({ error: 'Unauthorized' });
+        }
+
+        if (!title || !start || !end) {
+            await transaction.rollback();
+            return res.status(400).json({ error: 'Missing required fields' });
         }
 
         const wineryId = req.user.wineryId;
         const createdBy = req.user.id;
+        const taskIds = normalizeIdList(req.body.taskIds, req.body.taskId);
+        const noticeIds = normalizeIdList(req.body.noticeIds, req.body.noticeId);
 
-
-        // Validation
-        if (!title || !start || !end) {
-            return res.status(400).json({ error: 'Missing required fields' });
-        }
+        await assertLinkedRecords({ wineryId, taskIds, noticeIds, transaction });
 
         const event = await CalendarEvent.create({
             title,
@@ -91,28 +210,39 @@ exports.createEvent = async (req, res) => {
             type,
             wineryId,
             createdBy,
-            taskId
-        });
+            taskId: taskIds[0] || null,
+            noticeId: noticeIds[0] || null
+        }, { transaction });
 
-        res.status(201).json(event);
+        await replaceEventLinks({ event, taskIds, noticeIds, wineryId, userId: createdBy, transaction });
+        await transaction.commit();
+
+        const eventWithLinks = await getCalendarEventById(event.id, wineryId);
+        res.status(201).json(eventWithLinks);
     } catch (error) {
+        if (!transaction.finished) await transaction.rollback();
         logger.error('Error creating calendar event:', error);
-        res.status(500).json({ error: 'Failed to create event' });
+        res.status(error.statusCode || 500).json({ error: error.message || 'Failed to create event' });
     }
 };
 
-// Update Event
 exports.updateEvent = async (req, res) => {
+    const transaction = await CalendarEvent.sequelize.transaction();
     try {
         const { id } = req.params;
-        const { title, description, start, end, allDay, type, taskId } = req.body;
+        const { title, description, start, end, allDay, type } = req.body;
         const wineryId = req.user.wineryId;
+        const userId = req.user.id;
 
-        const event = await CalendarEvent.findOne({ where: { id, wineryId } });
-
+        const event = await CalendarEvent.findOne({ where: { id, wineryId }, transaction });
         if (!event) {
+            await transaction.rollback();
             return res.status(404).json({ error: 'Event not found' });
         }
+
+        const taskIds = normalizeIdList(req.body.taskIds, req.body.taskId);
+        const noticeIds = normalizeIdList(req.body.noticeIds, req.body.noticeId);
+        await assertLinkedRecords({ wineryId, taskIds, noticeIds, transaction });
 
         await event.update({
             title,
@@ -121,30 +251,33 @@ exports.updateEvent = async (req, res) => {
             end,
             allDay,
             type,
-            taskId
-        });
+            taskId: taskIds[0] || null,
+            noticeId: noticeIds[0] || null
+        }, { transaction });
 
-        res.json(event);
+        await replaceEventLinks({ event, taskIds, noticeIds, wineryId, userId, transaction });
+        await transaction.commit();
+
+        const eventWithLinks = await getCalendarEventById(event.id, wineryId);
+        res.json(eventWithLinks);
     } catch (error) {
+        if (!transaction.finished) await transaction.rollback();
         logger.error('Error updating calendar event:', error);
-        res.status(500).json({ error: 'Failed to update event' });
+        res.status(error.statusCode || 500).json({ error: error.message || 'Failed to update event' });
     }
 };
 
-// Delete Event
 exports.deleteEvent = async (req, res) => {
     try {
         const { id } = req.params;
         const wineryId = req.user.wineryId;
 
         const event = await CalendarEvent.findOne({ where: { id, wineryId } });
-
         if (!event) {
             return res.status(404).json({ error: 'Event not found' });
         }
 
         await event.destroy();
-
         res.json({ message: 'Event deleted successfully' });
     } catch (error) {
         logger.error('Error deleting calendar event:', error);

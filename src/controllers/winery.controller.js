@@ -1,13 +1,16 @@
 const {
     Winery, WineryBrandProfile, WineryBookingsConfig,
     WineryBookingType, WineryProduct, WineryPolicyProfile,
-    WineryFAQItem, WineryIntegrationConfig, WinerySop, WineryContact
+    WineryFAQItem, WineryIntegrationConfig, WinerySop, WineryContact, WinerySettings
 } = require('../models');
 const AppError = require('../utils/AppError');
 const {
     validate, wineryBrandSchema, wineryBookingsSchema,
-    wineryPolicySchema, wineryIntegrationSchema, winerySopSchema
+    wineryPolicySchema, wineryIntegrationSchema, wineryIntegrationTestSchema,
+    emailSyncSchema, winerySopSchema, winerySettingsSchema
 } = require('../utils/validation');
+const emailSyncService = require('../services/emailSync.service');
+const integrationConnectionService = require('../services/integrationConnection.service');
 
 // --- GET FULL PROFILE ---
 exports.getWinery = async (req, res, next) => {
@@ -23,7 +26,8 @@ exports.getWinery = async (req, res, next) => {
                 { model: WineryFAQItem, as: 'faqs' },
                 { model: WinerySop, as: 'sops' },
                 { model: WineryIntegrationConfig, as: 'integrationConfig' },
-                { model: WineryContact, as: 'contacts' }
+                { model: WineryContact, as: 'contacts' },
+                { model: WinerySettings, as: 'settings' }
             ]
         });
 
@@ -83,8 +87,54 @@ exports.updateIntegrationConfig = async (req, res, next) => {
         const wineryId = req.user.wineryId;
         const payload = validate(wineryIntegrationSchema, req.body);
         const [config] = await WineryIntegrationConfig.findOrCreate({ where: { wineryId } });
-        await config.update(payload);
-        res.json({ success: true, data: config });
+        const providerConnections = integrationConnectionService.normalizeProviderConnections(payload, config);
+
+        await config.update({
+            ...payload,
+            providerConnections
+        });
+        const settings = await integrationConnectionService.syncExecutionSettings({
+            wineryId,
+            integrationConfig: config
+        });
+
+        res.json({ success: true, data: config, settings });
+    } catch (err) { next(err); }
+};
+
+exports.testIntegrationConnection = async (req, res, next) => {
+    try {
+        const wineryId = req.user.wineryId;
+        const payload = validate(wineryIntegrationTestSchema, req.body);
+        const result = await integrationConnectionService.testConnection({
+            wineryId,
+            domain: payload.domain
+        });
+
+        res.json({ success: true, data: result });
+    } catch (err) { next(err); }
+};
+
+exports.syncEmailNow = async (req, res, next) => {
+    try {
+        const wineryId = req.user.wineryId;
+        const payload = validate(emailSyncSchema, req.body || {});
+        const result = await emailSyncService.syncWineryEmail({
+            wineryId,
+            limit: payload.limit
+        });
+
+        res.json({ success: true, data: result });
+    } catch (err) { next(err); }
+};
+
+exports.updateSettings = async (req, res, next) => {
+    try {
+        const wineryId = req.user.wineryId;
+        const payload = validate(winerySettingsSchema, req.body);
+        const [settings] = await WinerySettings.findOrCreate({ where: { wineryId } });
+        await settings.update(payload);
+        res.json({ success: true, data: settings });
     } catch (err) { next(err); }
 };
 
@@ -93,6 +143,34 @@ exports.createProduct = async (req, res, next) => {
     try {
         const product = await WineryProduct.create({ ...req.body, wineryId: req.user.wineryId });
         res.status(201).json({ success: true, data: product });
+    } catch (err) { next(err); }
+};
+exports.updateProduct = async (req, res, next) => {
+    try {
+        const product = await WineryProduct.findOne({ where: { id: req.params.id, wineryId: req.user.wineryId } });
+        if (!product) throw new AppError('Product not found', 404, 'NOT_FOUND');
+
+        const updates = {};
+        const allowedFields = [
+            'name',
+            'category',
+            'vintage',
+            'price',
+            'stockStatus',
+            'tastingNotes',
+            'keySellingPoints',
+            'pairingSuggestions',
+            'awards',
+            'isFeatured',
+            'isActive'
+        ];
+
+        for (const field of allowedFields) {
+            if (req.body[field] !== undefined) updates[field] = req.body[field];
+        }
+
+        await product.update(updates);
+        res.json({ success: true, data: product });
     } catch (err) { next(err); }
 };
 exports.deleteProduct = async (req, res, next) => {
@@ -109,6 +187,35 @@ exports.createBookingType = async (req, res, next) => {
         res.status(201).json({ success: true, data: type });
     } catch (err) { next(err); }
 };
+exports.updateBookingType = async (req, res, next) => {
+    try {
+        const type = await WineryBookingType.findOne({ where: { id: req.params.id, wineryId: req.user.wineryId } });
+        if (!type) throw new AppError('Booking type not found', 404, 'NOT_FOUND');
+
+        const updates = {};
+        const allowedFields = [
+            'name',
+            'description',
+            'durationMinutes',
+            'priceCents',
+            'currency',
+            'minGuests',
+            'maxGuests',
+            'daysAvailable',
+            'requiresDeposit',
+            'depositCents',
+            'notesForGuests',
+            'isActive'
+        ];
+
+        for (const field of allowedFields) {
+            if (req.body[field] !== undefined) updates[field] = req.body[field];
+        }
+
+        await type.update(updates);
+        res.json({ success: true, data: type });
+    } catch (err) { next(err); }
+};
 exports.deleteBookingType = async (req, res, next) => {
     try {
         await WineryBookingType.destroy({ where: { id: req.params.id, wineryId: req.user.wineryId } });
@@ -121,6 +228,21 @@ exports.createFAQ = async (req, res, next) => {
     try {
         const faq = await WineryFAQItem.create({ ...req.body, wineryId: req.user.wineryId });
         res.status(201).json({ success: true, data: faq });
+    } catch (err) { next(err); }
+};
+exports.updateFAQ = async (req, res, next) => {
+    try {
+        const faq = await WineryFAQItem.findOne({ where: { id: req.params.id, wineryId: req.user.wineryId } });
+        if (!faq) throw new AppError('FAQ not found', 404, 'NOT_FOUND');
+
+        const updates = {};
+        const allowedFields = ['question', 'answer', 'tags', 'isActive'];
+        for (const field of allowedFields) {
+            if (req.body[field] !== undefined) updates[field] = req.body[field];
+        }
+
+        await faq.update(updates);
+        res.json({ success: true, data: faq });
     } catch (err) { next(err); }
 };
 exports.deleteFAQ = async (req, res, next) => {

@@ -9,9 +9,36 @@ const STATUS_LABELS: Record<string, string> = {
 const STATUS_COLORS: Record<string, string> = {
     PENDING: '#f59e0b', ACTIONED: '#10b981', REJECTED: '#ef4444'
 };
+const RESOLVED_AS_LABELS: Record<string, string> = {
+    COMPLETED: 'Completed',
+    WORKAROUND: 'Workaround',
+    ESCALATED: 'Escalated',
+    DECLINED: 'Declined',
+    DUPLICATE: 'Duplicate',
+    NO_ACTION: 'No Action'
+};
+const RESOLVED_AS_COLORS: Record<string, string> = {
+    COMPLETED: '#10b981',
+    WORKAROUND: '#f59e0b',
+    ESCALATED: '#6366f1',
+    DECLINED: '#ef4444',
+    DUPLICATE: '#6b7280',
+    NO_ACTION: '#94a3b8'
+};
 const CATEGORY_LABELS: Record<string, string> = {
     BOOKING: 'Booking', ORDER: 'Order', ACCOUNT: 'Account', GENERAL: 'General',
     INTERNAL: 'Internal', SYSTEM: 'System', OPERATIONS: 'Operations'
+};
+const CUSTOMER_OUTCOME_LABELS: Record<string, string> = {
+    BOOKING_CONFIRMED: 'Booking Confirmed',
+    ORDER_UPDATED: 'Order Updated',
+    ACCOUNT_UPDATED: 'Account Updated',
+    INFO_PROVIDED: 'Info Provided',
+    ISSUE_RESOLVED: 'Issue Resolved',
+    REQUEST_DECLINED: 'Request Declined',
+    REFERRED: 'Referred',
+    NO_CHANGE: 'No Change',
+    UNKNOWN: 'Unknown'
 };
 const SOURCE_LABELS: Record<string, string> = {
     manual: 'Manual', sms: 'SMS', email: 'Email', booking: 'Booking',
@@ -21,6 +48,45 @@ const SOURCE_LABELS: Record<string, string> = {
 const LOYALTY_LABELS: Record<string, string> = { none: 'None', bronze: 'Bronze', silver: 'Silver', gold: 'Gold', platinum: 'Platinum' };
 const LOYALTY_COLORS: Record<string, string> = { none: '#9ca3af', bronze: '#d97706', silver: '#6b7280', gold: '#eab308', platinum: '#6366f1' };
 const SENTIMENT_COLORS: Record<string, string> = { POSITIVE: '#10b981', NEUTRAL: '#6b7280', NEGATIVE: '#ef4444' };
+const WORKFLOW_LABELS: Record<string, string> = {
+    NOT_STARTED: 'Not Started',
+    IN_PROGRESS: 'In Progress',
+    WAITING: 'Waiting',
+    BLOCKED: 'Blocked',
+    COMPLETED: 'Completed',
+    CANCELLED: 'Cancelled'
+};
+const WORKFLOW_COLORS: Record<string, string> = {
+    NOT_STARTED: '#94a3b8',
+    IN_PROGRESS: '#3b82f6',
+    WAITING: '#f59e0b',
+    BLOCKED: '#ef4444',
+    COMPLETED: '#10b981',
+    CANCELLED: '#6b7280'
+};
+const WAITING_LABELS: Record<string, string> = {
+    NONE: 'None',
+    STAFF: 'Staff',
+    CUSTOMER: 'Customer',
+    MANAGER: 'Manager',
+    EXTERNAL: 'External'
+};
+const IDENTITY_LABELS: Record<string, string> = {
+    AUTO_LINKED: 'Auto Linked',
+    AUTO_CREATED: 'Auto Created',
+    REVIEW_REQUIRED: 'Review Required',
+    REVIEW_CONFIRMED: 'Review Confirmed',
+    MANUALLY_LINKED: 'Manually Linked',
+    UNRESOLVED: 'Unresolved',
+    UNLINKED: 'Unlinked',
+    SELECTED_MEMBER: 'Selected Member',
+    UNRECORDED: 'Unrecorded'
+};
+const AUTOMATION_LABELS: Record<string, string> = {
+    EXPLICIT_FOLLOW_UP: 'Explicit Follow-up',
+    CUSTOMER_NO_RESPONSE_CALLBACK: 'No-response Callback',
+    ESCALATION_REVIEW: 'Escalation Review'
+};
 const DAY_ORDER = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 // --- Chart Components ---
@@ -112,6 +178,29 @@ function SparkBars({ data, labelKey, valueKey }: { data: any[], labelKey: string
     );
 }
 
+function formatNumber(value: any) {
+    return (Number(value) || 0).toLocaleString('en-AU');
+}
+
+function formatHours(value: any) {
+    const numeric = Number(value) || 0;
+    if (numeric === 0) return '0h';
+    if (numeric < 1) return `${Math.round(numeric * 60)}m`;
+    if (numeric >= 48) return `${(numeric / 24).toFixed(1)}d`;
+    return `${numeric.toFixed(1)}h`;
+}
+
+function formatMinutes(value: any) {
+    const numeric = Number(value) || 0;
+    if (numeric === 0) return '0m';
+    if (numeric >= 60) return `${(numeric / 60).toFixed(1)}h`;
+    return `${numeric.toFixed(0)}m`;
+}
+
+function formatPercent(value: any) {
+    return `${Math.round(Number(value) || 0)}%`;
+}
+
 // --- Page ---
 
 export default function AnalyticsPage() {
@@ -140,19 +229,19 @@ export default function AnalyticsPage() {
     const periodLabel = data?.period?.label || '';
 
     return (
-        <div className="px-4 py-6 sm:px-0 space-y-8">
+        <div className="page-shell space-y-7">
             {/* Header + Period Selector */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div className="page-header">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Analytics</h1>
-                    <p className="text-sm text-gray-500 mt-1">Operations and customer engagement insights.</p>
+                    <h1 className="text-2xl font-bold text-[#1c231f]">Analytics</h1>
+                    <p className="page-kicker">Operations, customer engagement, workflow quality, and follow-up signals.</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                     {/* Period granularity buttons */}
-                    <div className="flex bg-gray-100 rounded-lg p-0.5">
+                    <div className="flex rounded-md bg-[#eef1e8] p-0.5">
                         {(['day', 'week', 'month', 'year'] as const).map(p => (
                             <button key={p} onClick={() => { setPeriod(p); setOffset(0); }}
-                                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${period === p ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-all ${period === p ? 'bg-white text-[#1c231f] shadow-sm' : 'text-[#536158] hover:text-[#1c231f]'}`}>
                                 {p.charAt(0).toUpperCase() + p.slice(1)}
                             </button>
                         ))}
@@ -160,15 +249,15 @@ export default function AnalyticsPage() {
 
                     {/* Navigation arrows */}
                     <div className="flex items-center gap-1 ml-2">
-                        <button onClick={goBack} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors" title="Previous">
+                        <button onClick={goBack} className="icon-button text-[var(--muted)] hover:bg-[#eef1e8] hover:text-[#1c231f]" title="Previous">
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
                         </button>
                         <button onClick={goToday} disabled={offset === 0}
-                            className="px-2.5 py-1 text-xs font-medium rounded-md border border-gray-300 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-default transition-colors">
+                            className="btn-secondary px-2.5 py-1 text-xs disabled:opacity-40">
                             Today
                         </button>
                         <button onClick={goForward} disabled={offset === 0}
-                            className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500 hover:text-gray-700 disabled:opacity-40 transition-colors" title="Next">
+                            className="icon-button text-[var(--muted)] hover:bg-[#eef1e8] hover:text-[#1c231f] disabled:opacity-40" title="Next">
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
                         </button>
                     </div>
@@ -178,15 +267,15 @@ export default function AnalyticsPage() {
             {/* Period Label */}
             {periodLabel && (
                 <div className="text-center">
-                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-sm font-medium">
-                        📅 {periodLabel}
+                    <span className="inline-flex items-center rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-1 text-sm font-medium text-[#344039]">
+                        {periodLabel}
                     </span>
                 </div>
             )}
 
             {loading && (
                 <div className="flex items-center justify-center py-16">
-                    <div className="animate-spin rounded-full h-8 w-8 border-4 border-gray-300 border-t-indigo-600"></div>
+                    <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#d9dfd2] border-t-[var(--brand)]"></div>
                 </div>
             )}
 
@@ -197,26 +286,94 @@ export default function AnalyticsPage() {
             )}
 
             {data && !loading && (() => {
-                const { kpis, tasks, customers, staff, communication, bookings } = data;
+                const { kpis, tasks, customers, staff, communication, bookings, operations = {} } = data;
+                const workflow = operations.workflow || {};
+                const timing = operations.timing || {};
+                const response = operations.response || {};
+                const handoffs = operations.handoffs || {};
+                const identity = operations.identity || {};
+                const followUps = operations.followUps || {};
                 return (
                     <>
                         {/* KPI Cards */}
-                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
                             {[
-                                { label: 'Open Tasks', value: kpis.openTasks, icon: '📋', bg: 'bg-amber-50', color: 'text-amber-600' },
-                                { label: 'Resolved', value: kpis.resolvedInPeriod, icon: '✅', bg: 'bg-green-50', color: 'text-green-600' },
-                                { label: 'New Customers', value: kpis.newCustomers, icon: '🆕', bg: 'bg-sky-50', color: 'text-sky-600' },
-                                { label: 'Total Customers', value: kpis.totalCustomers, icon: '👥', bg: 'bg-indigo-50', color: 'text-indigo-600' },
-                                { label: 'Wine Club', value: kpis.wineClubMembers, icon: '🍷', bg: 'bg-purple-50', color: 'text-purple-600' },
-                                { label: 'Revenue Tracked', value: `$${(kpis.revenueTracked || 0).toLocaleString('en-AU', { minimumFractionDigits: 0 })}`, icon: '💰', bg: 'bg-emerald-50', color: 'text-emerald-600' },
-                                { label: 'Inbound Msgs', value: kpis.inboundMessages, icon: '📨', bg: 'bg-blue-50', color: 'text-blue-600' }
+                                { label: 'Open Tasks', value: kpis.openTasks, dot: 'bg-amber-500', color: 'text-amber-700' },
+                                { label: 'Resolved', value: kpis.resolvedInPeriod, dot: 'bg-emerald-500', color: 'text-emerald-700' },
+                                { label: 'Follow-up Marked', value: kpis.followUpsMarked, dot: 'bg-orange-500', color: 'text-orange-700' },
+                                { label: 'New Customers', value: kpis.newCustomers, dot: 'bg-sky-500', color: 'text-sky-700' },
+                                { label: 'Total Customers', value: kpis.totalCustomers, dot: 'bg-teal-600', color: 'text-teal-800' },
+                                { label: 'Wine Club', value: kpis.wineClubMembers, dot: 'bg-violet-500', color: 'text-violet-700' },
+                                { label: 'Revenue Tracked', value: `$${(kpis.revenueTracked || 0).toLocaleString('en-AU', { minimumFractionDigits: 0 })}`, dot: 'bg-emerald-600', color: 'text-emerald-800' },
+                                { label: 'Inbound Msgs', value: kpis.inboundMessages, dot: 'bg-blue-500', color: 'text-blue-700' }
                             ].map((kpi, i) => (
-                                <div key={i} className={`${kpi.bg} rounded-lg p-3 border border-opacity-20`}>
-                                    <div className="text-sm mb-0.5">{kpi.icon}</div>
+                                <div key={i} className="metric-tile">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className="truncate text-[10px] font-bold uppercase text-[var(--muted)]">{kpi.label}</span>
+                                        <span className={`status-dot ${kpi.dot}`}></span>
+                                    </div>
                                     <div className={`text-xl font-bold ${kpi.color}`}>{kpi.value}</div>
-                                    <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">{kpi.label}</div>
                                 </div>
                             ))}
+                        </div>
+
+                        {/* Operational Flow */}
+                        <div>
+                            <div className="flex items-center justify-between mb-4">
+                                <div>
+                                    <h2 className="text-lg font-semibold text-gray-900">Operational Flow</h2>
+                                    <p className="text-sm text-gray-500">Where work is waiting, blocked, delayed, or moving through handoffs.</p>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
+                                {[
+                                    { label: 'Avg Resolution', value: formatHours(timing.avgResolutionHours), sub: 'closed cases' },
+                                    { label: 'First Response', value: formatMinutes(response.avgFirstResponseMinutes), sub: `${formatPercent(response.responseCoverageRate)} coverage` },
+                                    { label: 'Waiting Now', value: formatNumber(workflow.currentWaiting), sub: `${formatHours(timing.avgWaitingAgeHours)} avg age` },
+                                    { label: 'Blocked Now', value: formatNumber(workflow.currentBlocked), sub: `${formatHours(timing.avgBlockedAgeHours)} avg age` },
+                                    { label: 'Overdue', value: formatNumber(workflow.overdueTasks), sub: `${formatNumber(workflow.dueSoonTasks)} due soon` },
+                                    { label: 'Handoffs', value: formatNumber(handoffs.total), sub: `${formatNumber(handoffs.tasksWithHandoffs)} tasks touched` }
+                                ].map((metric, i) => (
+                                    <div key={i} className="bg-white rounded-lg border border-gray-200 p-4">
+                                        <div className="text-2xl font-bold text-gray-900">{metric.value}</div>
+                                        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 mt-1">{metric.label}</div>
+                                        <div className="text-[11px] text-gray-400 mt-1">{metric.sub}</div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                <div className="bg-white rounded-lg border border-gray-200 p-5">
+                                    <h3 className="text-sm font-semibold text-gray-900 mb-3">Current Workflow State</h3>
+                                    <BarChart
+                                        data={workflow.currentByState || []}
+                                        labelKey="workflowState"
+                                        valueKey="count"
+                                        colorFn={value => WORKFLOW_COLORS[value] || '#6b7280'}
+                                        labelMap={WORKFLOW_LABELS}
+                                    />
+                                </div>
+                                <div className="bg-white rounded-lg border border-gray-200 p-5">
+                                    <h3 className="text-sm font-semibold text-gray-900 mb-3">Waiting On</h3>
+                                    <BarChart
+                                        data={workflow.currentByWaitingOn || []}
+                                        labelKey="waitingOn"
+                                        valueKey="count"
+                                        colorFn={() => '#f59e0b'}
+                                        labelMap={WAITING_LABELS}
+                                    />
+                                </div>
+                                <div className="bg-white rounded-lg border border-gray-200 p-5">
+                                    <h3 className="text-sm font-semibold text-gray-900 mb-3">Step Status This Period</h3>
+                                    <BarChart
+                                        data={workflow.stepStatus || []}
+                                        labelKey="status"
+                                        valueKey="count"
+                                        colorFn={value => WORKFLOW_COLORS[value] || '#64748b'}
+                                        labelMap={{ PENDING: 'Pending', IN_PROGRESS: 'In Progress', BLOCKED: 'Blocked', COMPLETED: 'Completed', SKIPPED: 'Skipped', CANCELLED: 'Cancelled' }}
+                                    />
+                                </div>
+                            </div>
                         </div>
 
                         {/* Task Analytics */}
@@ -242,6 +399,95 @@ export default function AnalyticsPage() {
                                 {tasks.overTime.length > 0 ? (
                                     <SparkBars data={tasks.overTime} labelKey="date" valueKey="count" />
                                 ) : <p className="text-sm text-gray-400 text-center py-8">No tasks in this period</p>}
+                            </div>
+                            <div className="bg-white rounded-lg border border-gray-200 p-5">
+                                <h3 className="text-sm font-semibold text-gray-900 mb-3">Resolution Outcomes</h3>
+                                <DonutChart
+                                    data={tasks.outcomes?.byResolvedAs || []}
+                                    labelKey="resolvedAs"
+                                    valueKey="count"
+                                    colorFn={value => RESOLVED_AS_COLORS[value] || '#6b7280'}
+                                    labelMap={RESOLVED_AS_LABELS}
+                                />
+                            </div>
+                            <div className="bg-white rounded-lg border border-gray-200 p-5">
+                                <h3 className="text-sm font-semibold text-gray-900 mb-3">Customer Outcomes</h3>
+                                <BarChart
+                                    data={tasks.outcomes?.byCustomerOutcome || []}
+                                    labelKey="customerOutcome"
+                                    valueKey="count"
+                                    colorFn={() => '#0f766e'}
+                                    labelMap={CUSTOMER_OUTCOME_LABELS}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Identity, Follow-up, and Handoffs */}
+                        <div>
+                            <h2 className="text-lg font-semibold text-gray-900 mb-4">Operational Quality Signals</h2>
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                <div className="bg-white rounded-lg border border-gray-200 p-5">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <h3 className="text-sm font-semibold text-gray-900">Identity Resolution</h3>
+                                        <span className="text-xs text-gray-500">{formatPercent(identity.reviewRate)} review rate</span>
+                                    </div>
+                                    <BarChart
+                                        data={identity.byStatus || []}
+                                        labelKey="status"
+                                        valueKey="count"
+                                        colorFn={value => value === 'REVIEW_REQUIRED' ? '#f59e0b' : value === 'AUTO_LINKED' || value === 'AUTO_CREATED' ? '#10b981' : '#64748b'}
+                                        labelMap={IDENTITY_LABELS}
+                                    />
+                                </div>
+                                <div className="bg-white rounded-lg border border-gray-200 p-5">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <h3 className="text-sm font-semibold text-gray-900">Follow-up Automation</h3>
+                                        <span className="text-xs text-gray-500">{formatNumber(followUps.generated)} generated</span>
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-2 mb-4">
+                                        <div className="rounded-md bg-amber-50 p-2 text-center">
+                                            <div className="text-lg font-bold text-amber-700">{formatNumber(followUps.pending)}</div>
+                                            <div className="text-[10px] text-amber-700">Pending</div>
+                                        </div>
+                                        <div className="rounded-md bg-green-50 p-2 text-center">
+                                            <div className="text-lg font-bold text-green-700">{formatNumber(followUps.completed)}</div>
+                                            <div className="text-[10px] text-green-700">Done</div>
+                                        </div>
+                                        <div className="rounded-md bg-gray-50 p-2 text-center">
+                                            <div className="text-lg font-bold text-gray-700">{formatNumber(followUps.cancelled)}</div>
+                                            <div className="text-[10px] text-gray-700">Cancelled</div>
+                                        </div>
+                                    </div>
+                                    <BarChart
+                                        data={followUps.byAutomationType || []}
+                                        labelKey="automationType"
+                                        valueKey="count"
+                                        colorFn={() => '#0891b2'}
+                                        labelMap={AUTOMATION_LABELS}
+                                    />
+                                </div>
+                                <div className="bg-white rounded-lg border border-gray-200 p-5">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <h3 className="text-sm font-semibold text-gray-900">Handoffs</h3>
+                                        <span className="text-xs text-gray-500">{handoffs.averagePerCreatedTask || 0} per task</span>
+                                    </div>
+                                    <BarChart
+                                        data={handoffs.byRecipient || []}
+                                        labelKey="name"
+                                        valueKey="count"
+                                        colorFn={() => '#6366f1'}
+                                    />
+                                    <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                                        <div className="rounded-md bg-slate-50 p-2">
+                                            <div className="font-semibold text-slate-900">{formatNumber(timing.reopenedTasks)}</div>
+                                            <div className="text-slate-500">Reopened cases</div>
+                                        </div>
+                                        <div className="rounded-md bg-slate-50 p-2">
+                                            <div className="font-semibold text-slate-900">{formatNumber(response.awaitingResponseThreads)}</div>
+                                            <div className="text-slate-500">Awaiting replies</div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 

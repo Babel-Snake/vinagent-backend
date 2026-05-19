@@ -43,6 +43,25 @@ class CrmAdapter {
     async addNote(externalId, note) {
         throw new Error('addNote() not implemented');
     }
+
+    /**
+     * Finds or creates the external member/customer record needed for writeback.
+     * @param {Object} profile
+     * @returns {Promise<Object>} - { id, created, ... }
+     */
+    async upsertMember(profile) {
+        throw new Error('upsertMember() not implemented');
+    }
+
+    /**
+     * Records an order-related event against the external record.
+     * @param {string} externalId
+     * @param {Object} event
+     * @returns {Promise<Object>}
+     */
+    async recordOrderEvent(externalId, event) {
+        throw new Error('recordOrderEvent() not implemented');
+    }
 }
 
 module.exports = CrmAdapter;

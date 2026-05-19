@@ -32,10 +32,13 @@ The model currently allows these `actionType` values:
 * `ACTIONED`
 * `REJECTED`
 * `EXECUTION_TRIGGERED`
+* `EXECUTION_RECORDED`
 * `UPDATED_PAYLOAD`
 * `NOTE_ADDED`
 * `MANUAL_CREATED`
 * `MANUAL_UPDATE`
+* `OUTCOME_RECORDED`
+* `MEMBER_ENRICHED`
 * `ASSIGNED`
 * `LINKED_TASK`
 * `STEP_CREATED`
@@ -53,6 +56,7 @@ The current implementation most commonly emits:
 * `ACTIONED`
 * `REJECTED`
 * `EXECUTION_TRIGGERED`
+* `EXECUTION_RECORDED`
 * `NOTE_ADDED`
 * `ASSIGNED`
 * `LINKED_TASK`
@@ -60,6 +64,8 @@ The current implementation most commonly emits:
 * `STEP_UPDATED`
 * `STEP_COMPLETED`
 * `STEP_DELETED`
+* `OUTCOME_RECORDED`
+* `MEMBER_ENRICHED`
 
 Important nuance:
 
@@ -110,7 +116,7 @@ Examples:
 
 * a staff user actioning a task
 * booking creation success
-* order-stub execution success
+* order CRM writeback success
 * member-confirmed address update
 
 To tell these apart, inspect `details`.
@@ -128,10 +134,23 @@ Examples:
 }
 ```
 
+### Step Suggestions
+
+Step-level AI suggestion work reuses the existing step audit types:
+
+* generated or saved drafts use `STEP_UPDATED`
+* actioned-and-completed suggestions use `STEP_COMPLETED`
+
+The source is recorded in `details.source`:
+
+* `STEP_SUGGESTION_GENERATED`
+* `STEP_SUGGESTION_ACTIONED`
+
 ```json
 {
-  "action": "ORDER_UPDATE_STUB",
-  "note": "Simulated execution"
+  "action": "ORDER_WRITEBACK",
+  "provider": "mock",
+  "reference": "CRM-ORDER-123"
 }
 ```
 
@@ -156,6 +175,23 @@ Common current example:
 {
   "tokenId": 8001,
   "channel": "sms"
+}
+```
+
+### `EXECUTION_RECORDED`
+
+Used when execution captures a structured provider result or a skipped/failed execution outcome.
+
+Typical details:
+
+```json
+{
+  "kind": "order",
+  "operation": "crm_writeback",
+  "provider": "mock",
+  "status": "RECORDED",
+  "referenceCode": "CRM-ORDER-123",
+  "summary": "Order event recorded against external customer crm-mock-123."
 }
 ```
 
@@ -197,6 +233,14 @@ Used when a workflow step is completed.
 ### `STEP_DELETED`
 
 Used when a workflow step is removed from a task.
+
+### `OUTCOME_RECORDED`
+
+Used when normalized closure fields such as `resolvedAs`, `resolutionType`, `customerOutcome`, or follow-up metadata change.
+
+### `MEMBER_ENRICHED`
+
+Used when actioning an external task materially improves the linked member/customer record.
 
 ## 6. Why Audit Matters More Than Status
 

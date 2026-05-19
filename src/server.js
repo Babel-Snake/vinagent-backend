@@ -4,6 +4,8 @@ const app = require('./app');
 // Require models to trigger init/association
 const db = require('./models');
 const logger = require('./config/logger');
+const taskDeadlineService = require('./services/taskDeadline.service');
+const emailSyncService = require('./services/emailSync.service');
 
 const PORT = process.env.PORT || 3000;
 
@@ -20,6 +22,9 @@ async function startServer() {
     const server = app.listen(PORT, () => {
       logger.info(`VinAgent API listening on port ${PORT}`);
     });
+
+    taskDeadlineService.startDeadlineReminderScheduler();
+    emailSyncService.startEmailSyncScheduler();
 
     // Workaround for Node.js/Windows event loop premature drain when detached or in MinGW
     setInterval(() => {

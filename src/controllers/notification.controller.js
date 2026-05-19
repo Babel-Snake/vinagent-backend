@@ -29,4 +29,18 @@ async function markRead(req, res, next) {
     }
 }
 
-module.exports = { listNotifications, markRead };
+async function dismissNotification(req, res, next) {
+    try {
+        const { id } = req.params;
+        const { userId } = req.user;
+        const notification = await Notification.findOne({ where: { id, userId } });
+        if (!notification) return res.status(404).json({ error: 'Notification not found' });
+
+        await notification.destroy();
+        res.json({ success: true });
+    } catch (err) {
+        next(err);
+    }
+}
+
+module.exports = { listNotifications, markRead, dismissNotification };

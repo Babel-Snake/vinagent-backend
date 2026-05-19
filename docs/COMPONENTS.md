@@ -29,6 +29,8 @@ Responsibilities:
 * expose `req.user`
 * enforce manager/admin/staff route permissions
 * support winery-scoped access
+* support current-user profile updates through `/api/public/me`
+* keep password reset paths separate: email-backed users use Firebase reset email, while internal staff access codes are reset by manager/admin users
 
 ## 3. Ingestion Layer
 
@@ -111,7 +113,7 @@ Responsibilities:
 Notable current behaviour:
 
 * address-change tasks go back to `PENDING` after token creation
-* order tasks use a stub execution path
+* order tasks can record CRM-backed writeback results and structured execution outcomes
 * booking tasks use the configured provider path
 
 ## 7. Winery Context Layer
@@ -142,10 +144,10 @@ Files:
 Responsibilities:
 
 * member management
-* staff management
+* staff management, including manager/admin reset of internal staff access codes
 * notifications
 * calendar/event support
-* analytics endpoints for the dashboard
+* analytics endpoints for the dashboard, including operational flow metrics from tasks, steps, actions, messages, identity resolution, and follow-up automation
 
 ## 9. Frontend
 
@@ -160,6 +162,8 @@ Responsibilities:
 * dashboard task views
 * winery configuration UI
 * member and staff management UI
+* profile settings for display name updates and Firebase password reset emails
+* Staff & Access reset flow for internal staff account access codes
 * analytics and calendar views
 * public secure-link flows
 

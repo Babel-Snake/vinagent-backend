@@ -1,6 +1,73 @@
 const admin = require('../config/firebase');
-const { User, Winery, sequelize } = require('../models');
+const { Op } = require('sequelize');
+const { User } = require('../models');
 const AppError = require('../utils/AppError');
+const { hashPin, validatePin, verifyPin } = require('../utils/pinAuth');
+
+function staffPayload(user) {
+    return {
+        id: user.id,
+        displayName: user.displayName,
+        email: user.email,
+        createdAt: user.createdAt,
+        role: user.role,
+        isActive: user.isActive,
+        responsibilities: user.responsibilities,
+        pinEnabled: Boolean(user.pinHash),
+        pinUpdatedAt: user.pinUpdatedAt,
+        pinLockedUntil: user.pinLockedUntil,
+        pinLastLoginAt: user.pinLastLoginAt
+    };
+}
+
+async function assertPinAvailable({ pin, wineryId, excludeUserId = null }) {
+    if (!pin) return;
+
+    if (!validatePin(pin)) {
+        throw new AppError('PIN must be 4 to 12 letters or numbers.', 400, 'INVALID_PIN');
+    }
+
+    const where = {
+        wineryId,
+        isActive: true,
+        role: { [Op.in]: ['staff', 'manager'] },
+        pinHash: { [Op.ne]: null }
+    };
+
+    if (excludeUserId) {
+        where.id = { [Op.ne]: excludeUserId };
+    }
+
+    const usersWithPins = await User.findAll({ where });
+    const duplicate = usersWithPins.find(user => verifyPin(pin, user.pinHash));
+    if (duplicate) {
+        throw new AppError('That PIN is already assigned to another staff member in this winery.', 409, 'PIN_TAKEN');
+    }
+}
+
+async function applyPinUpdate(user, { pin, clearPin = false }) {
+    const cleanPin = typeof pin === 'string' ? pin.trim() : '';
+
+    if (clearPin) {
+        user.pinHash = null;
+        user.pinUpdatedAt = null;
+        user.pinFailedAttempts = 0;
+        user.pinLockedUntil = null;
+        return;
+    }
+
+    if (cleanPin) {
+        await assertPinAvailable({
+            pin: cleanPin,
+            wineryId: user.wineryId,
+            excludeUserId: user.id
+        });
+        user.pinHash = hashPin(cleanPin);
+        user.pinUpdatedAt = new Date();
+        user.pinFailedAttempts = 0;
+        user.pinLockedUntil = null;
+    }
+}
 
 /**
  * Create a new Managed Staff account.
@@ -9,6 +76,7 @@ const AppError = require('../utils/AppError');
 exports.createStaff = async (req, res, next) => {
     try {
         const { username, password } = req.body;
+        const pin = typeof req.body.pin === 'string' ? req.body.pin.trim() : '';
         const requester = req.user; // From authMiddleware
 
         // RBAC: Only Manager/Admin can create staff
@@ -38,6 +106,9 @@ exports.createStaff = async (req, res, next) => {
         }
 
         const email = `${cleanUsername}.w${wineryId}@vinagent.internal`;
+        if (pin) {
+            await assertPinAvailable({ pin, wineryId });
+        }
 
         // 2. Create in Firebase
         let uid;
@@ -62,16 +133,16 @@ exports.createStaff = async (req, res, next) => {
             email: email,
             displayName: username,
             role: 'staff',
-            wineryId: wineryId
+            wineryId: wineryId,
+            pinHash: pin ? hashPin(pin) : null,
+            pinUpdatedAt: pin ? new Date() : null
         });
 
         res.status(201).json({
             message: 'Staff account created successfully.',
             staff: {
-                id: newUser.id,
-                username: cleanUsername,
-                email: email,
-                role: 'staff'
+                ...staffPayload(newUser),
+                username: cleanUsername
             }
         });
 
@@ -95,10 +166,23 @@ exports.listStaff = async (req, res, next) => {
             where: {
                 wineryId: requester.wineryId,
             },
-            attributes: ['id', 'displayName', 'email', 'createdAt', 'role', 'isActive', 'responsibilities']
+            attributes: [
+                'id',
+                'displayName',
+                'email',
+                'createdAt',
+                'role',
+                'isActive',
+                'responsibilities',
+                'pinHash',
+                'pinUpdatedAt',
+                'pinLockedUntil',
+                'pinLastLoginAt'
+            ],
+            order: [['displayName', 'ASC']]
         });
 
-        res.json({ staff: staffMembers });
+        res.json({ staff: staffMembers.map(staffPayload) });
     } catch (error) {
         next(error);
     }
@@ -158,16 +242,73 @@ exports.updateStaff = async (req, res, next) => {
 
         res.json({
             message: 'Staff updated successfully.',
-            staff: {
-                id: staffToUpdate.id,
-                displayName: staffToUpdate.displayName,
-                email: staffToUpdate.email,
-                role: staffToUpdate.role,
-                isActive: staffToUpdate.isActive,
-                responsibilities: staffToUpdate.responsibilities
-            }
+            staff: staffPayload(staffToUpdate)
         });
 
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * Reset a staff member's access code.
+ * Only accessible by Managers or Admins for users in the same winery.
+ */
+exports.resetStaffPassword = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { password, clearPin = false } = req.body;
+        const pin = typeof req.body.pin === 'string' ? req.body.pin.trim() : '';
+        const requester = req.user;
+
+        if (!requester.wineryId) {
+            throw new AppError('User not associated with a winery.', 400, 'WINERY_REQUIRED');
+        }
+
+        const cleanPassword = typeof password === 'string' ? password.trim() : '';
+        if (!cleanPassword && !pin && !clearPin) {
+            throw new AppError('Provide an access code, a PIN, or choose to clear the PIN.', 400, 'MISSING_CREDENTIAL_UPDATE');
+        }
+
+        if (cleanPassword && cleanPassword.length < 8) {
+            throw new AppError('Access code must be at least 8 characters.', 400, 'WEAK_PASSWORD');
+        }
+        if (cleanPassword && !/\d/.test(cleanPassword)) {
+            throw new AppError('Access code must contain at least one number.', 400, 'WEAK_PASSWORD');
+        }
+
+        const staffToUpdate = await User.findByPk(id);
+        if (!staffToUpdate) {
+            throw new AppError('Staff member not found.', 404, 'NOT_FOUND');
+        }
+
+        if (staffToUpdate.wineryId !== requester.wineryId) {
+            throw new AppError('Unauthorized to modify this staff member.', 403, 'FORBIDDEN');
+        }
+
+        if (staffToUpdate.role === 'admin') {
+            throw new AppError('Cannot reset admin credentials through this endpoint.', 403, 'INVALID_ROLE');
+        }
+
+        if (pin && !clearPin) {
+            await assertPinAvailable({
+                pin,
+                wineryId: staffToUpdate.wineryId,
+                excludeUserId: staffToUpdate.id
+            });
+        }
+
+        if (cleanPassword) {
+            await admin.auth().updateUser(staffToUpdate.firebaseUid, { password: cleanPassword });
+        }
+
+        await applyPinUpdate(staffToUpdate, { pin, clearPin });
+        await staffToUpdate.save();
+
+        res.json({
+            message: 'Staff credentials updated successfully.',
+            staff: staffPayload(staffToUpdate)
+        });
     } catch (error) {
         next(error);
     }

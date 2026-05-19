@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { auth } from '../../lib/firebase';
-import { getMyProfile } from '../../lib/api';
+import { clearPinSession, getMyProfile, getPinSession, saveDefaultWineryContext } from '../../lib/api';
 import Navbar from '../../components/Navbar';
 
 export default function DashboardLayout({
@@ -19,6 +19,7 @@ export default function DashboardLayout({
     useEffect(() => {
         const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
             if (currentUser) {
+                clearPinSession();
                 setUser(currentUser);
 
                 try {
@@ -30,25 +31,87 @@ export default function DashboardLayout({
 
                 setLoading(false);
             } else {
-                router.push('/login');
+                const pinSession = getPinSession();
+                if (!pinSession) {
+                    setLoading(false);
+                    router.push('/login');
+                    return;
+                }
+
+                setUser({
+                    uid: `pin-${pinSession.user.id}`,
+                    email: pinSession.user.email,
+                    displayName: pinSession.user.displayName,
+                    isPinSession: true
+                });
+
+                try {
+                    const profileData = await getMyProfile();
+                    setFullProfile(profileData.user);
+                    if (profileData.user?.wineryId) {
+                        saveDefaultWineryContext({
+                            wineryId: profileData.user.wineryId,
+                            wineryName: profileData.user.wineryName
+                        });
+                    }
+                } catch (e) {
+                    console.error("Failed to load PIN profile", e);
+                    clearPinSession();
+                    router.push('/login');
+                } finally {
+                    setLoading(false);
+                }
             }
         });
 
         return () => unsubscribe();
     }, [router]);
 
+    useEffect(() => {
+        if (!fullProfile?.isPinSession) return;
+
+        const pinSession = getPinSession();
+        if (!pinSession) return;
+
+        const timeoutMs = Math.max(60, pinSession.idleTimeoutSeconds || 300) * 1000;
+        let timer: ReturnType<typeof setTimeout>;
+
+        const lockSession = () => {
+            clearPinSession();
+            router.push('/login');
+        };
+
+        const resetTimer = () => {
+            clearTimeout(timer);
+            timer = setTimeout(lockSession, timeoutMs);
+        };
+
+        const events = ['click', 'keydown', 'mousemove', 'touchstart', 'scroll'];
+        events.forEach(eventName => window.addEventListener(eventName, resetTimer, { passive: true }));
+        resetTimer();
+
+        return () => {
+            clearTimeout(timer);
+            events.forEach(eventName => window.removeEventListener(eventName, resetTimer));
+        };
+    }, [fullProfile?.isPinSession, router]);
+
     if (loading) {
         return (
-            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-                <div className="animate-spin rounded-full h-8 w-8 border-4 border-gray-300 border-t-indigo-600"></div>
+            <div className="min-h-screen flex items-center justify-center bg-[var(--background)]">
+                <div className="h-9 w-9 animate-spin rounded-full border-4 border-[#d9dfd2] border-t-[var(--brand)]"></div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-gray-50">
-            <Navbar user={user} fullProfile={fullProfile} />
-            <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        <div className="min-h-screen bg-[var(--background)] text-[#1c231f]">
+            <Navbar
+                user={user}
+                fullProfile={fullProfile}
+                onProfileUpdated={(updatedProfile) => setFullProfile(updatedProfile)}
+            />
+            <main className="mx-auto max-w-[1440px] px-4 py-5 sm:px-6 lg:px-8">
                 {children}
             </main>
         </div>

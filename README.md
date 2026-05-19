@@ -2,7 +2,7 @@
 
 VinAgent is an AI-assisted operations platform for winery teams. The current build centers on one core loop:
 
-`inbound message -> triage -> task -> human action -> optional automation / secure member follow-up -> audit trail`
+`inbound message -> triage -> task -> human action -> optional automation / secure member follow-up -> audit trail -> managed follow-up case when needed`
 
 The repository now contains both:
 
@@ -19,6 +19,7 @@ The current task model has two layers:
 
 * coarse business outcome on `Task.status`
 * structured operational progression through `TaskStep`
+* task-centric communication timeline through linked inbound and outbound `Message` records
 
 The task status enum is still intentionally coarse:
 
@@ -30,12 +31,32 @@ More detailed workflow state is now represented through:
 
 * `Task.workflowState` and related summary fields
 * ordered `TaskStep` records inside the task
+* structured closure fields such as `resolvedAs`, `resolutionType`, `customerOutcome`, and follow-up metadata
+* `payload.manualIntake` for structured external-intake identity data
 * `TaskAction` records for the immutable audit trail
 * `MemberActionToken` records for secure self-service flows
 
 Initial step plans are now sourced from a centralized workflow-template registry in `src/services/taskWorkflowTemplates.js`. AI can still propose steps, but the backend always has deterministic subtype/category templates to fall back on.
 
+Manual external tasks and webhook-created external tasks now use the same conservative identity-resolution layer. High-confidence matches can auto-link to an existing member, weak matches are surfaced as `REVIEW_REQUIRED`, and booking/order/account intake can create a new contact record when no safe existing match is found.
+
+That layer now supports ranked review candidates, winery-tunable matching thresholds, and customer merge tooling in the dashboard.
+
+Tasks now also own a communication timeline. Webhook-ingested inbound messages and execution-triggered outbound notifications are linked back to the case so staff and AI can reason over the same thread.
+
+Closed tasks now also carry a structured outcome taxonomy. Instead of relying only on freeform `resolutionSummary`, the live build records normalized closure semantics like `resolvedAs`, `resolutionType`, `customerOutcome`, `followUpRequired`, and `followUpDueAt`. That gives analytics and future automation a cleaner backbone.
+
+That closure layer now drives deterministic follow-up automation too. When a closed case explicitly requires follow-up, ends in customer no response, or closes as an escalation, the backend can create or update a managed child follow-up task linked through `parentTaskId`. Reopening the parent task or clearing the follow-up need cancels the pending automated child task instead of leaving stale reminders behind.
+
+The execution layer is now deeper too. Address changes still use secure member-confirmation links, booking tasks can write through the configured booking provider, order tasks can record CRM-backed writeback results, and outbound customer notifications now have email parity with SMS. Those external effects are persisted back onto the task through outbound `Message` rows, `payload.executionResults`, and task audit events.
+
+When a managed follow-up task is created, the assignee can also receive a system notification so the next case does not depend on someone remembering to revisit the parent task manually.
+
+Analytics now reads from the same operational case record instead of only counting tasks. The dashboard surfaces workflow state, waiting and blocked work, response latency, handoffs, identity-review load, and follow-up automation conversion alongside the older customer and booking charts.
+
 Example: an address-change task starts `PENDING`, triage proposes a step plan, a manager actions it, the system creates a secure token and sends the member a link, the task returns to `PENDING` while the workflow is `WAITING`, and becomes `ACTIONED` again once the member confirms.
+
+Example: an external order call can capture requester details, suggest a likely existing customer without auto-linking if confidence is weak, and enrich the linked member record once the task is actioned.
 
 ## Repository Layout
 
@@ -109,6 +130,7 @@ Start here if you need the current backend contract:
 * `docs/TASK_WORKFLOW_PLAN.md`
 * `docs/GOLDEN_PATH.md`
 * `docs/TEST_PLAN.md`
+* `docs/FUTURE_PRODUCT_PASSES.md`
 
 Supporting references:
 

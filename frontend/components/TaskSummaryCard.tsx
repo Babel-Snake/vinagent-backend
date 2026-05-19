@@ -17,11 +17,16 @@ export default function TaskSummaryCard({
     onToggleFlag,
     onClick
 }: TaskSummaryCardProps) {
+    const formatLabel = (value?: string | null) => {
+        if (!value) return '';
+        return value.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, char => char.toUpperCase());
+    };
 
-    // Helper to get formatted date
-    const formatDate = (dateString: string) => {
+    const formatDate = (dateString?: string | null) => {
+        if (!dateString) return 'Not set';
         const date = new Date(dateString);
-        return new Intl.DateTimeFormat('en-US', {
+        if (Number.isNaN(date.getTime())) return 'Not set';
+        return new Intl.DateTimeFormat('en-AU', {
             month: 'short',
             day: 'numeric',
             hour: '2-digit',
@@ -29,127 +34,168 @@ export default function TaskSummaryCard({
         }).format(date);
     };
 
-    // Helper for assignee name
     const getAssigneeName = () => {
         if (!task.assigneeId) return 'Unassigned';
         const user = users.find(u => u.id === task.assigneeId);
         return user ? user.displayName : 'Unknown';
     };
 
-    // Extract summary if available
-    const getSummary = () => {
+    const getPayload = () => {
         let raw = task.payload;
-        if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch (e) { } }
-        if (raw && typeof raw === 'object' && raw.summary) return raw.summary;
-        return null; // Don't show if no summary
+        if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch { } }
+        return raw && typeof raw === 'object' ? raw : {};
     };
 
+    const getSummary = () => {
+        const raw = getPayload();
+        if (typeof raw.summary === 'string') return raw.summary;
+        if (task.Message?.body) return task.Message.body;
+        return null;
+    };
+
+    const payload = getPayload();
+    const manualIntake = payload.manualIntake;
+    const identityNeedsReview = manualIntake?.identityResolutionStatus === 'REVIEW_REQUIRED';
+    const followUpAutomation = payload.followUpAutomation;
     const summaryText = getSummary();
     const workflowText = task.nextStepSummary || task.blockedReason || null;
+    const title = formatLabel(task.subType || task.type || task.category || 'Task');
+    const customerName = task.Member
+        ? `${task.Member.firstName || ''} ${task.Member.lastName || ''}`.trim()
+        : manualIntake?.requesterName || 'No customer linked';
+    const priorityLabel = formatLabel(task.priority || 'normal');
+    const deadlineLabel = task.isOverdue ? 'Overdue' : task.isDueSoon ? 'Due soon' : null;
+    const dueTone = task.isOverdue ? 'danger' : task.isDueSoon || task.dueAt ? 'warning' : 'normal';
+    const isCleanlyActioned = task.status === 'ACTIONED' && task.workflowState === 'COMPLETED';
+    const showWorkflowPill = Boolean(task.workflowState && task.workflowState !== 'NOT_STARTED' && !isCleanlyActioned);
+    const showResolvedAsPill = Boolean(task.resolvedAs && !(task.status === 'ACTIONED' && task.resolvedAs === 'COMPLETED'));
 
     return (
-        <div
+        <article
             onClick={onClick}
-            className={`bg-white border-y border-r border-l-4 border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow cursor-pointer flex items-start gap-4 group mb-4
-                ${task.priority === 'high' ? 'border-l-red-500 hover:border-l-red-600' : ''}
-                ${task.priority === 'normal' || !task.priority ? 'border-l-amber-500 hover:border-l-amber-600' : ''}
-                ${task.priority === 'low' ? 'border-l-blue-400 hover:border-l-blue-500' : ''}
+            className={`group cursor-pointer rounded-lg border bg-[var(--surface)] p-4 shadow-sm transition hover:border-[#c6d1c1] hover:shadow-md
+                ${task.priority === 'high' ? 'border-l-4 border-l-red-500' : ''}
+                ${task.priority === 'normal' || !task.priority ? 'border-l-4 border-l-amber-500' : ''}
+                ${task.priority === 'low' ? 'border-l-4 border-l-teal-500' : ''}
+                ${task.isOverdue ? 'ring-1 ring-red-200 bg-red-50/30' : ''}
             `}
         >
-            {/* Main Content */}
-            <div className="flex-1 min-w-0">
-                <div className="flex justify-between items-start">
-                    <div className="min-w-0 flex-1 pr-4">
-                        <div className="flex items-center gap-3 mb-2">
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation(); // Don't open modal
-                                    if (onToggleFlag) onToggleFlag(task.id);
-                                }}
-                                className={`text-2xl hover:scale-110 transition-transform ${isFlagged ? 'text-yellow-400' : 'text-gray-200 group-hover:text-gray-300'}`}
-                                title={isFlagged ? "Unflag" : "Flag for follow-up"}
-                            >
-                                {isFlagged ? '★' : '☆'}
-                            </button>
-                            <span className="text-lg font-bold text-gray-900 truncate tracking-tight">
-                                {task.subType ? task.subType.replace(/_/g, ' ') : task.type}
-                            </span>
-                            {task.Member && (
-                                <span className="text-sm font-semibold text-gray-600 truncate bg-gray-100 px-2.5 py-0.5 rounded-full">
-                                    {task.Member.firstName} {task.Member.lastName}
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0 flex-1">
+                    <div className="flex items-start gap-3">
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if (onToggleFlag) onToggleFlag(task.id);
+                            }}
+                            className={`icon-button -ml-1 -mt-1 ${isFlagged ? 'text-amber-500' : 'text-[#a4aea0] hover:text-amber-500'}`}
+                            title={isFlagged ? 'Unflag' : 'Flag for follow-up'}
+                            aria-label={isFlagged ? 'Unflag task' : 'Flag task'}
+                        >
+                            <svg className="h-5 w-5" fill={isFlagged ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 16.9 6.6 19.8l1-6.1-4.4-4.3 6.1-.9L12 3Z" />
+                            </svg>
+                        </button>
+
+                        <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <h2 className="min-w-0 truncate text-base font-semibold text-[#1c231f] sm:text-lg">
+                                    {title}
+                                </h2>
+                                <span className="rounded-md bg-[#eef1e8] px-2 py-0.5 text-xs font-semibold text-[#536158]">
+                                    #{task.id}
                                 </span>
-                            )}
-                        </div>
-
-                        {/* Summary / Snippet */}
-                        {summaryText && (
-                            <p className="text-sm text-gray-600 line-clamp-2 leading-relaxed mb-3">
-                                {summaryText}
-                            </p>
-                        )}
-
-                        {workflowText && (
-                            <div className="mb-3 text-sm text-slate-700">
-                                <span className="font-semibold text-slate-500 uppercase tracking-wider text-[11px] mr-2">Next</span>
-                                {workflowText}
+                                {identityNeedsReview && (
+                                    <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">
+                                        Identity review
+                                    </span>
+                                )}
+                                {(task.followUpRequired || followUpAutomation || task.parentTaskId) && (
+                                    <span className="rounded-md border border-teal-200 bg-teal-50 px-2 py-0.5 text-xs font-semibold text-teal-800">
+                                        Follow-up
+                                    </span>
+                                )}
+                                {deadlineLabel && (
+                                    <span className={`rounded-md border px-2 py-0.5 text-xs font-semibold ${task.isOverdue ? 'border-red-200 bg-red-50 text-red-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+                                        {deadlineLabel}
+                                    </span>
+                                )}
                             </div>
-                        )}
 
-                        {/* Meta Row */}
-                        <div className="flex items-center gap-4 text-sm text-gray-500 font-medium mt-2">
-                            <span className="flex items-center gap-1.5">
-                                <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                                {formatDate(task.createdAt)}
-                            </span>
-                            <span className="text-gray-300">•</span>
-                            <span className={`flex items-center gap-1.5 ${!task.assigneeId ? 'text-red-500 font-bold' : ''}`}>
-                                <svg className="w-4 h-4 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                                </svg>
-                                {getAssigneeName()}
-                            </span>
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
+                                <span className="font-medium text-[#344039]">{customerName}</span>
+                                {task.Member?.email && <span>{task.Member.email}</span>}
+                                {manualIntake?.inboundMethod && <span>{formatLabel(manualIntake.inboundMethod)}</span>}
+                            </div>
+
+                            {summaryText && (
+                                <p className="mt-3 line-clamp-2 text-sm leading-6 text-[#536158]">
+                                    {summaryText}
+                                </p>
+                            )}
                         </div>
                     </div>
 
-                    {/* Right Side Actions/Badges */}
-                    <div className="flex flex-col items-end gap-3 shrink-0">
-                        {/* Status Row */}
-                        <div className="flex items-center gap-3">
-                            <span className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider
-                                ${task.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800 border border-yellow-200' : ''}
-                                ${task.status === 'ACTIONED' ? 'bg-green-100 text-green-800 border border-green-200' : ''}
-                                ${task.status === 'REJECTED' ? 'bg-red-100 text-red-800 border border-red-200' : ''}
-                            `}>
-                                {task.status.replace(/_/g, ' ')}
+                    {workflowText && (
+                        <div className={`mt-4 rounded-md border px-3 py-2 text-sm ${task.workflowState === 'BLOCKED' ? 'border-red-200 bg-red-50 text-red-800' : 'border-[#dce4d7] bg-[#f8faf6] text-[#344039]'}`}>
+                            <span className="mr-2 text-xs font-bold uppercase text-[var(--muted)]">
+                                {task.blockedReason ? 'Blocked' : 'Next'}
                             </span>
-                            {task.workflowState && task.workflowState !== 'NOT_STARTED' && (
-                                <span className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider
-                                    ${task.workflowState === 'IN_PROGRESS' ? 'bg-blue-100 text-blue-800 border border-blue-200' : ''}
-                                    ${task.workflowState === 'WAITING' ? 'bg-amber-100 text-amber-800 border border-amber-200' : ''}
-                                    ${task.workflowState === 'BLOCKED' ? 'bg-red-100 text-red-800 border border-red-200' : ''}
-                                    ${task.workflowState === 'COMPLETED' ? 'bg-green-100 text-green-800 border border-green-200' : ''}
-                                    ${task.workflowState === 'CANCELLED' ? 'bg-gray-100 text-gray-700 border border-gray-200' : ''}
-                                `}>
-                                    {task.workflowState.replace(/_/g, ' ')}
-                                </span>
-                            )}
+                            {workflowText}
                         </div>
+                    )}
 
-                        {/* Category Row */}
-                        <span className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider
-                            ${task.category === 'OPERATIONS' ? 'bg-purple-50 text-purple-700 border border-purple-200' : ''}
-                            ${task.category === 'ORDER' ? 'bg-sky-50 text-sky-700 border border-sky-200' : ''}
-                            ${task.category === 'BOOKING' ? 'bg-pink-50 text-pink-700 border border-pink-200' : ''}
-                            ${task.category === 'ACCOUNT' ? 'bg-orange-50 text-orange-700 border border-orange-200' : ''}
-                            ${task.category === 'GENERAL' ? 'bg-gray-50 text-gray-700 border border-gray-200' : ''}
-                        `}>
-                            {task.category || 'GENERAL'}
-                        </span>
+                    <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-[#e2e8dd] pt-4 text-sm md:grid-cols-4">
+                        <MetaItem label="Assignee" value={getAssigneeName()} tone={!task.assigneeId ? 'danger' : 'normal'} />
+                        <MetaItem label="Created" value={formatDate(task.createdAt)} />
+                        <MetaItem label={task.isOverdue ? 'Overdue' : task.isDueSoon ? 'Due Soon' : 'Due'} value={formatDate(task.dueAt)} tone={dueTone} />
+                        <MetaItem label="Waiting On" value={formatLabel(task.waitingOn || 'NONE')} tone={task.waitingOn && task.waitingOn !== 'NONE' ? 'warning' : 'normal'} />
                     </div>
                 </div>
+
+                <div className="flex shrink-0 flex-wrap items-start gap-2 lg:max-w-[280px] lg:justify-end">
+                    <Pill label={formatLabel(task.status)} tone={task.status === 'PENDING' ? 'warning' : task.status === 'ACTIONED' ? 'success' : 'danger'} />
+                    {showWorkflowPill && (
+                        <Pill
+                            label={formatLabel(task.workflowState)}
+                            tone={task.workflowState === 'BLOCKED' ? 'danger' : task.workflowState === 'WAITING' ? 'warning' : task.workflowState === 'COMPLETED' ? 'success' : 'info'}
+                        />
+                    )}
+                    <Pill label={formatLabel(task.category || 'GENERAL')} tone="neutral" />
+                    <Pill label={`${priorityLabel} priority`} tone={task.priority === 'high' ? 'danger' : task.priority === 'low' ? 'info' : 'warning'} />
+                    {deadlineLabel && <Pill label={deadlineLabel} tone={task.isOverdue ? 'danger' : 'warning'} />}
+                    {showResolvedAsPill && <Pill label={formatLabel(task.resolvedAs)} tone="neutral" />}
+                </div>
             </div>
+        </article>
+    );
+}
+
+function MetaItem({ label, value, tone = 'normal' }: { label: string; value: string; tone?: 'normal' | 'warning' | 'danger' }) {
+    const valueClass = tone === 'danger'
+        ? 'text-red-700'
+        : tone === 'warning'
+            ? 'text-amber-700'
+            : 'text-[#344039]';
+    return (
+        <div className="min-w-0">
+            <div className="text-xs font-semibold uppercase text-[var(--muted)]">{label}</div>
+            <div className={`mt-0.5 truncate font-medium ${valueClass}`}>{value}</div>
         </div>
+    );
+}
+
+function Pill({ label, tone }: { label: string; tone: 'success' | 'warning' | 'danger' | 'info' | 'neutral' }) {
+    const classes = {
+        success: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+        warning: 'border-amber-200 bg-amber-50 text-amber-800',
+        danger: 'border-red-200 bg-red-50 text-red-800',
+        info: 'border-teal-200 bg-teal-50 text-teal-800',
+        neutral: 'border-[#dce4d7] bg-[#f8faf6] text-[#536158]'
+    };
+    return (
+        <span className={`rounded-md border px-2.5 py-1 text-xs font-bold uppercase ${classes[tone]}`}>
+            {label}
+        </span>
     );
 }

@@ -76,6 +76,42 @@ module.exports = (sequelize, DataTypes) => {
                 type: DataTypes.TEXT,
                 allowNull: true
             },
+            suggestedReplyBody: {
+                type: DataTypes.TEXT,
+                allowNull: true
+            },
+            suggestedReplySubject: {
+                type: DataTypes.STRING,
+                allowNull: true
+            },
+            suggestedChannel: {
+                type: DataTypes.STRING,
+                allowNull: true
+            },
+            suggestedAction: {
+                type: DataTypes.TEXT,
+                allowNull: true
+            },
+            suggestedRecipientEmail: {
+                type: DataTypes.STRING,
+                allowNull: true
+            },
+            suggestedCc: {
+                type: DataTypes.STRING,
+                allowNull: true
+            },
+            suggestionStatus: {
+                type: DataTypes.STRING,
+                allowNull: true
+            },
+            suggestionGeneratedAt: {
+                type: DataTypes.DATE,
+                allowNull: true
+            },
+            suggestionError: {
+                type: DataTypes.TEXT,
+                allowNull: true
+            },
             completedAt: {
                 type: DataTypes.DATE,
                 allowNull: true

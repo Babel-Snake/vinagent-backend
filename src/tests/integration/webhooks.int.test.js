@@ -4,6 +4,7 @@ jest.mock('../../models', () => ({
     Message: { create: jest.fn(), findOne: jest.fn() },
     Winery: { findOne: jest.fn() },
     Member: { findOne: jest.fn() },
+    WinerySettings: { findOne: jest.fn() },
     sequelize: {
         transaction: jest.fn(() => ({
             commit: jest.fn(),
@@ -21,6 +22,17 @@ jest.mock('../../services/taskService', () => ({
     createTask: jest.fn()
 }));
 
+jest.mock('../../services/customerIdentity.service', () => ({
+    getIdentityMatchingConfig: jest.fn(() => ({
+        autoLinkThreshold: 180,
+        reviewThreshold: 120,
+        maxReviewCandidates: 3,
+        allowPhoneSuffixNameAutoLink: true,
+        allowNameOnlyReview: true
+    })),
+    resolveExternalIdentity: jest.fn()
+}));
+
 jest.mock('twilio', () => ({
     validateRequest: jest.fn(() => true)
 }));
@@ -30,9 +42,10 @@ process.env.EMAIL_WEBHOOK_SECRET = 'secret';
 process.env.TWILIO_AUTH_TOKEN = 'token';
 
 const app = require('../../app');
-const { Winery, Member, Message } = require('../../models');
+const { Winery, Member, Message, WinerySettings } = require('../../models');
 const triageService = require('../../services/triage.service');
 const taskService = require('../../services/taskService');
+const customerIdentityService = require('../../services/customerIdentity.service');
 const twilio = require('twilio');
 
 describe('Webhook routes', () => {
@@ -43,7 +56,8 @@ describe('Webhook routes', () => {
     describe('POST /api/webhooks/email', () => {
         it('creates a task from an email webhook', async () => {
             Winery.findOne.mockResolvedValue({ id: 1 });
-            Member.findOne.mockResolvedValue({ id: 2 });
+            WinerySettings.findOne.mockResolvedValue(null);
+            customerIdentityService.resolveExternalIdentity.mockResolvedValue({ memberId: 2, matchedMember: { id: 2 }, suggestedCandidates: [] });
             Message.create.mockResolvedValue({ id: 10 });
             taskService.createTask.mockResolvedValue({ id: 20 });
             triageService.triageMessage.mockResolvedValue({
@@ -106,7 +120,8 @@ describe('Webhook routes', () => {
     describe('POST /api/webhooks/voice', () => {
         it('creates a task from a voice webhook', async () => {
             Winery.findOne.mockResolvedValue({ id: 3 });
-            Member.findOne.mockResolvedValue({ id: 4 });
+            WinerySettings.findOne.mockResolvedValue(null);
+            customerIdentityService.resolveExternalIdentity.mockResolvedValue({ memberId: 4, matchedMember: { id: 4 }, suggestedCandidates: [] });
             Message.create.mockResolvedValue({ id: 30 });
             taskService.createTask.mockResolvedValue({ id: 40 });
             triageService.triageMessage.mockResolvedValue({

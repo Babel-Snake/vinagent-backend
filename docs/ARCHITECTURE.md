@@ -4,7 +4,7 @@ This document describes the current VinAgent architecture as implemented in the 
 
 ## 1. System Overview
 
-VinAgent is a winery operations platform built around a task workflow. It receives inbound communications, classifies them, stores them as tasks, lets staff act on them, and performs safe follow-up actions such as secure self-service links or outbound notifications.
+VinAgent is a winery operations platform built around a task workflow. It receives inbound communications, classifies them, stores them as tasks, lets staff act on them, and performs safe follow-up actions such as secure self-service links, outbound notifications, or managed child follow-up cases.
 
 The main subsystems are:
 
@@ -16,6 +16,7 @@ The main subsystems are:
 * Execution layer for safe automations
 * Winery knowledge/configuration services
 * Public token-based self-service flows
+* Operational analytics over workflow, response, identity, and follow-up data
 * Dashboard frontend (`frontend/`)
 * MySQL persistence via `Sequelize`
 
@@ -27,10 +28,13 @@ The canonical backend flow is:
 2. A webhook route validates the request and normalizes it into a `Message`.
 3. `triage.service` classifies intent and proposes task metadata.
 4. The backend creates a `Task` and, where available, an initial `TaskStep` plan.
-5. Staff review, annotate, assign, action, or reject the task through `/api/tasks`.
-6. If a task is actioned, `execution.service` may perform best-effort automation.
-7. All staff actions are written to `TaskAction`.
-8. If the task requires a secure member confirmation, a `MemberActionToken` is created and the member completes the action through `/api/public/...`.
+5. The inbound `Message` is linked onto the task communication timeline.
+6. Staff review, annotate, assign, action, or reject the task through `/api/tasks`.
+7. If a task is actioned, `execution.service` may perform best-effort automation.
+8. Outbound notifications are logged back onto the same task as outbound `Message` records.
+9. If the case closes with explicit follow-up, customer no response, or escalation semantics, `taskService` can create or update a managed child follow-up task.
+10. All staff actions and automation linkage events are written to `TaskAction`.
+11. If the task requires a secure member confirmation, a `MemberActionToken` is created and the member completes the action through `/api/public/...`.
 
 ## 3. Routing Surface
 
@@ -113,7 +117,9 @@ Important consequence:
 Task status alone does not describe every stage of work. Fine-grained state now lives in:
 
 * task workflow summary fields on `Task`
+* linked `Message` records on the case communication timeline
 * ordered `TaskStep` rows
+* parent/child task links for managed follow-up cases
 * `TaskAction`
 * token tables for secure member actions
 
@@ -149,8 +155,11 @@ The task also stores a derived workflow summary:
 * `nextStepSummary`
 * `blockedReason`
 * `dueAt`
+* structured closure fields such as `resolvedAs`, `resolutionType`, `customerOutcome`, `followUpRequired`, `followUpDueAt`, and `resolutionSummary`
 
 This gives the system a way to represent staged work without exploding the coarse task status enum.
+
+Managed follow-up tasks are intentionally represented as child `Task` records instead of extra status values. That keeps post-closure work as a real queue item with its own assignee, due date, steps, and audit trail.
 
 ## 6. Execution Model
 
@@ -160,10 +169,32 @@ Actioning a task is not the same as finishing all downstream work.
 
 1. persists the task update
 2. writes a `TaskAction`
-3. if the new status is `ACTIONED`, calls `execution.service.executeTask(...)`
-4. re-derives the task workflow summary from its steps
+3. records normalized closure outcome fields when the task ends in `ACTIONED` or `REJECTED`
+4. if the new status is `ACTIONED`, calls `execution.service.executeTask(...)`
+5. syncs managed follow-up automation based on closure semantics
+6. re-derives the task workflow summary from its steps
 
 Execution is best-effort. If execution fails validation or the provider logic throws, the status change is not rolled back.
+
+When execution sends a customer-facing message, that message is persisted back onto the task timeline so the case record remains complete.
+Provider results are also captured structurally through `payload.executionResults` and `EXECUTION_RECORDED` audit events.
+
+### 6.0 Follow-Up Automation
+
+Closed tasks can now create or manage a child follow-up case when:
+
+* `followUpRequired = true`
+* `resolutionType = CUSTOMER_NO_RESPONSE`
+* `resolvedAs = ESCALATED` or the resolution type is an escalation variant
+
+The managed child task:
+
+* links back to the parent through `parentTaskId`
+* stores automation metadata in `payload.followUpAutomation`
+* receives its own `TaskStep` plan and due date
+* can notify the assigned staff member through a `SYSTEM` notification
+
+If the parent task is reopened or its follow-up semantics change, the backend updates or cancels the managed child task instead of creating duplicates.
 
 ### 6.1 Address Change Flow
 
@@ -175,7 +206,7 @@ For `ACCOUNT_ADDRESS_CHANGE` / legacy `ADDRESS_CHANGE` tasks:
 4. the task is set back to `PENDING`
 5. `EXECUTION_TRIGGERED` is logged
 6. a secure link is sent through the selected channel
-7. when the member confirms, `addressUpdateService` updates the member and marks the task `ACTIONED`
+7. when the member confirms, `addressUpdateService` updates the member, marks the task `ACTIONED`, and records a normalized completion outcome
 
 This is why a secure-link task can look `PENDING` after a manager has already actioned it.
 
@@ -183,8 +214,9 @@ This is why a secure-link task can look `PENDING` after a manager has already ac
 
 Current execution paths:
 
-* order tasks use a stub execution path and remain `ACTIONED`
-* booking tasks call the configured booking provider and remain `ACTIONED` on success
+* order tasks can write back into the configured CRM provider, persist `payload.orderWriteback`, and remain `ACTIONED` on success
+* booking tasks call the configured booking provider and record structured reservation results
+* outbound notifications now support both SMS and email, and are logged back into the task timeline as outbound `Message` rows
 * unsupported task types are logged and left without automatic side effects
 
 ### 6.3 Feature Flags
@@ -197,6 +229,12 @@ Important examples:
 * `enableOrdersModule`
 * `enableBookingModule`
 * `enableSecureLinks`
+
+Execution gating is now feature-specific:
+
+* secure-link flows depend on `enableSecureLinks`
+* booking execution depends on `enableBookingModule`
+* order writeback depends on `enableOrdersModule`
 
 ## 7. AI Architecture
 
@@ -221,11 +259,36 @@ The triage output includes:
 
 In `NODE_ENV=test`, the AI service now forces the deterministic mock adapter unless `AI_ALLOW_LIVE_TESTS=true`. That keeps integration tests stable even when developer machines have live API keys configured.
 
+Webhook intake now also shares the same customer identity-resolution engine used by manual external task creation. That keeps auto-link, review-required, and conservative auto-create behavior materially consistent across inbound channels.
+
 ### 7.2 Reply/Action Suggestions
 
-`aiSuggestion.service` can regenerate suggested replies/actions using task context, winery context, task history, member context, and the current ordered step plan.
+`aiSuggestion.service` can regenerate suggested replies/actions using task context, winery context, task history, member context, the current ordered step plan, the task communication timeline, and any already-recorded structured task outcome.
 
-## 8. Winery Context
+## 8. Analytics Model
+
+`analytics.controller.js` now reports both classic counts and operational flow metrics.
+
+Classic analytics still include:
+
+* task status/category/sentiment/priority
+* outcome breakdowns
+* customer source, loyalty, and spend
+* booking task/event counts
+* communication channel and direction counts
+
+The richer operational layer is returned under `operations` and is derived from:
+
+* `Task.workflowState`, `waitingOn`, `dueAt`, and closure fields
+* `TaskStep.status` for period step progress
+* `TaskAction` assignment and step-owner changes for handoff count
+* linked inbound/outbound `Message` rows for first-response latency
+* `payload.manualIntake.identityResolutionStatus` for identity-review workload
+* child tasks with `payload.followUpAutomation` for follow-up automation conversion
+
+This makes analytics a management surface for where work is slowing, not just a volume dashboard.
+
+## 9. Winery Context
 
 The current backend models winery context as a core winery record plus modular profiles:
 
@@ -240,7 +303,7 @@ The current backend models winery context as a core winery record plus modular p
 
 This data is used both by the dashboard and by the AI layer.
 
-## 9. Security Model
+## 10. Security Model
 
 Current security controls include:
 
@@ -251,15 +314,17 @@ Current security controls include:
 * request correlation IDs and centralized error responses
 * redaction/scrubbing in parts of the ingestion path
 
-## 10. Observed Constraints
+## 11. Observed Constraints
 
 A few design realities matter when changing the system:
 
 * `Task.type` still exists for backward compatibility, but `category` + `subType` are the preferred classification fields.
 * `Task.status` is not the workflow engine. `TaskStep` + workflow summary fields now carry staged progression.
+* post-closure automation now uses child tasks rather than hidden reminder state; preserve that shape when extending follow-up logic.
+* analytics currently approximates waiting/blocked age from the current task update timestamp; if exact state-duration reporting becomes critical, add explicit state-transition timestamps.
 * The audit trail is richer than the status model; do not try to reintroduce old fine-grained statuses without checking current services first.
 * Several user-facing behaviours depend on feature flags in `WinerySettings`.
 
-## 11. Summary
+## 12. Summary
 
 The current VinAgent architecture is best understood as a task-centric workflow engine for winery operations. The simplified status model is intentional, and structured workflow progression now lives in `TaskStep`. If you need exact behaviour, read `taskService`, `execution.service`, and `addressUpdateService` together; that is the live contract the docs and tests should follow.

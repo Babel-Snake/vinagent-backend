@@ -15,6 +15,9 @@ router.get('/', requireRole(['manager', 'admin']), staffController.listStaff);
 // Update staff (PUT /api/staff/:id) - Manager/Admin only
 router.put('/:id', requireRole(['manager', 'admin']), staffController.updateStaff);
 
+// Reset staff access code (POST /api/staff/:id/reset-password) - Manager/Admin only
+router.post('/:id/reset-password', requireRole(['manager', 'admin']), staffController.resetStaffPassword);
+
 // Delete staff (DELETE /api/staff/:id) - Manager/Admin only
 router.delete('/:id', requireRole(['manager', 'admin']), staffController.deleteStaff);
 
