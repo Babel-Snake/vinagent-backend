@@ -1,4 +1,4 @@
-const { UserTaskFlag, Task } = require('../models');
+const { UserTaskFlag } = require('../models');
 
 async function toggleFlag(req, res, next) {
     try {
@@ -21,7 +21,7 @@ async function toggleFlag(req, res, next) {
     }
 }
 
-async function listFlaggedTasks(req, res, next) {
+async function listFlaggedTasks(req, res) {
     try {
         if (!UserTaskFlag) {
             console.error('CRITICAL: UserTaskFlag model is undefined!');

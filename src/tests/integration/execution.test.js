@@ -4,12 +4,10 @@
 process.env.ALLOW_TEST_AUTH_BYPASS = 'true';
 process.env.NODE_ENV = 'test';
 
-const request = require('supertest');
-const app = require('../../app');
 const { sequelize, Task, Winery, User, TaskAction, WinerySettings, Member, MemberActionToken, Message } = require('../../models');
 
 describe('Task Execution Integration', () => {
-    let wineryId, userId, token;
+    let wineryId, userId;
 
     beforeAll(async () => {
         // Setup Winery, User, and Settings

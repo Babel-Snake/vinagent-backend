@@ -19,7 +19,7 @@ async function startServer() {
     }
     logger.info('Database connection established successfully.');
 
-    const server = app.listen(PORT, () => {
+    app.listen(PORT, () => {
       logger.info(`VinAgent API listening on port ${PORT}`);
     });
 

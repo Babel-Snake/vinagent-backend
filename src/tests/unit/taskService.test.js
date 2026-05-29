@@ -57,7 +57,7 @@ jest.mock('../../services/audit.service', () => ({
     logTaskAction: jest.fn()
 }));
 
-const { Task, TaskAction, TaskStep, WinerySettings, Notification } = require('../../models');
+const { Task, TaskStep, WinerySettings, Notification } = require('../../models');
 const executionService = require('../../services/execution.service');
 
 describe('TaskService Unit Tests', () => {

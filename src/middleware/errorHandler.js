@@ -4,7 +4,7 @@
 
 const logger = require('../config/logger');
 
-function errorHandler(err, req, res, next) {
+function errorHandler(err, req, res, _next) {
   // Capture request ID
   const requestId = req.id;
 

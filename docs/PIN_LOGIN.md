@@ -43,3 +43,5 @@ PINs are assigned or reset from each staff member's action menu in `Staff & Acce
 ## Security Notes
 
 PIN login is designed for convenience on trusted staff devices, not for elevated administration. Keep short idle timeouts enabled, use manager login for manager/admin work, and rotate a staff member's PIN if a shared device is lost or a PIN is disclosed.
+
+PIN session tokens are stored in browser `localStorage` for the MVP kiosk flow. This keeps the browser-only frontend simple, but it means an XSS issue on the dashboard origin could read the active PIN session. The current compensating controls are short session lifetimes, idle lock clearing, staff-level role downgrading for manager PIN sessions, production-only strong `PIN_SESSION_SECRET`/`SESSION_SECRET` enforcement, and normal React escaping for rendered user content. Revisit secure HTTP-only same-site cookies before broad multi-tenant production rollout.

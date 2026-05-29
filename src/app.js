@@ -9,6 +9,7 @@ const requestId = require('./middleware/requestId');
 
 const app = express();
 const cors = require('cors');
+const publicUrl = process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL) : null;
 
 // Trust proxy for HTTPS detection behind load balancers
 if (process.env.NODE_ENV === 'production') {
@@ -19,7 +20,12 @@ if (process.env.NODE_ENV === 'production') {
 app.use((req, res, next) => {
   if (process.env.NODE_ENV === 'production' &&
     req.headers['x-forwarded-proto'] !== 'https') {
-    return res.redirect(301, `https://${req.headers.host}${req.url}`);
+    if (!publicUrl) {
+      return res.status(500).json({ error: 'Server configuration error' });
+    }
+    const redirectUrl = new URL(req.originalUrl || req.url, publicUrl);
+    redirectUrl.protocol = 'https:';
+    return res.redirect(301, redirectUrl.toString());
   }
   next();
 });
@@ -49,8 +55,12 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: process.env.JSON_BODY_LIMIT || '10mb' }));
+function captureRawBody(req, _res, buf) {
+  req.rawBody = Buffer.from(buf);
+}
+
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '10mb', verify: captureRawBody }));
+app.use(express.urlencoded({ extended: true, limit: process.env.JSON_BODY_LIMIT || '10mb', verify: captureRawBody }));
 
 // Root health check for "Cannot GET /" fix
 app.get('/', (req, res) => {

@@ -10,12 +10,6 @@ const firebaseConfig = {
     appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
 };
 
-console.log('Firebase Config Loaded:', {
-    apiKey: firebaseConfig.apiKey ? '***' + firebaseConfig.apiKey.slice(-4) : 'UNDEFINED',
-    projectId: firebaseConfig.projectId,
-    authDomain: firebaseConfig.authDomain
-});
-
 // Initialize Firebase (Singleton pattern)
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);

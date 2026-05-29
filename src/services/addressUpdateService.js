@@ -2,7 +2,7 @@
 // Applies confirmed address changes using a valid MemberActionToken.
 
 const logger = require('../config/logger');
-const { Member, Task, TaskAction } = require('../models');
+const { Member, TaskAction } = require('../models');
 const memberActionTokenService = require('./memberActionTokenService');
 const { getDefaultTaskOutcome } = require('../utils/taskOutcome');
 

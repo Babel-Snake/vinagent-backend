@@ -7,10 +7,70 @@ const AppError = require('../utils/AppError');
 const {
     validate, wineryBrandSchema, wineryBookingsSchema,
     wineryPolicySchema, wineryIntegrationSchema, wineryIntegrationTestSchema,
-    emailSyncSchema, winerySopSchema, winerySettingsSchema
+    emailSyncSchema, winerySopSchema, winerySettingsSchema, wineryContactSchema
 } = require('../utils/validation');
 const emailSyncService = require('../services/emailSync.service');
 const integrationConnectionService = require('../services/integrationConnection.service');
+
+const OVERVIEW_FIELDS = [
+    'name',
+    'shortName',
+    'keyDescriptors',
+    'region',
+    'contactEmail',
+    'contactPhone',
+    'publicEmail',
+    'publicPhone',
+    'website',
+    'addressLine1',
+    'addressLine2',
+    'suburb',
+    'state',
+    'postcode',
+    'country',
+    'openingHours',
+    'socialLinks',
+    'timeZone'
+];
+
+const PRODUCT_FIELDS = [
+    'name',
+    'category',
+    'vintage',
+    'price',
+    'stockStatus',
+    'tastingNotes',
+    'keySellingPoints',
+    'pairingSuggestions',
+    'awards',
+    'isFeatured',
+    'isActive'
+];
+
+const BOOKING_TYPE_FIELDS = [
+    'name',
+    'description',
+    'durationMinutes',
+    'priceCents',
+    'currency',
+    'minGuests',
+    'maxGuests',
+    'daysAvailable',
+    'requiresDeposit',
+    'depositCents',
+    'notesForGuests',
+    'isActive'
+];
+
+const FAQ_FIELDS = ['question', 'answer', 'tags', 'isActive'];
+
+function pickAllowedFields(body, allowedFields) {
+    const picked = {};
+    for (const field of allowedFields) {
+        if (body[field] !== undefined) picked[field] = body[field];
+    }
+    return picked;
+}
 
 // --- GET FULL PROFILE ---
 exports.getWinery = async (req, res, next) => {
@@ -47,7 +107,7 @@ exports.updateOverview = async (req, res, next) => {
         const winery = await Winery.findByPk(wineryId);
         if (!winery) throw new AppError('Winery not found', 404, 'NOT_FOUND');
 
-        await winery.update(req.body); // Safe-list fields in real app
+        await winery.update(pickAllowedFields(req.body, OVERVIEW_FIELDS));
         res.json({ success: true, data: winery });
     } catch (err) { next(err); }
 };
@@ -141,7 +201,10 @@ exports.updateSettings = async (req, res, next) => {
 // --- CRUD: PRODUCTS ---
 exports.createProduct = async (req, res, next) => {
     try {
-        const product = await WineryProduct.create({ ...req.body, wineryId: req.user.wineryId });
+        const product = await WineryProduct.create({
+            ...pickAllowedFields(req.body, PRODUCT_FIELDS),
+            wineryId: req.user.wineryId
+        });
         res.status(201).json({ success: true, data: product });
     } catch (err) { next(err); }
 };
@@ -150,26 +213,7 @@ exports.updateProduct = async (req, res, next) => {
         const product = await WineryProduct.findOne({ where: { id: req.params.id, wineryId: req.user.wineryId } });
         if (!product) throw new AppError('Product not found', 404, 'NOT_FOUND');
 
-        const updates = {};
-        const allowedFields = [
-            'name',
-            'category',
-            'vintage',
-            'price',
-            'stockStatus',
-            'tastingNotes',
-            'keySellingPoints',
-            'pairingSuggestions',
-            'awards',
-            'isFeatured',
-            'isActive'
-        ];
-
-        for (const field of allowedFields) {
-            if (req.body[field] !== undefined) updates[field] = req.body[field];
-        }
-
-        await product.update(updates);
+        await product.update(pickAllowedFields(req.body, PRODUCT_FIELDS));
         res.json({ success: true, data: product });
     } catch (err) { next(err); }
 };
@@ -183,7 +227,10 @@ exports.deleteProduct = async (req, res, next) => {
 // --- CRUD: BOOKING TYPES ---
 exports.createBookingType = async (req, res, next) => {
     try {
-        const type = await WineryBookingType.create({ ...req.body, wineryId: req.user.wineryId });
+        const type = await WineryBookingType.create({
+            ...pickAllowedFields(req.body, BOOKING_TYPE_FIELDS),
+            wineryId: req.user.wineryId
+        });
         res.status(201).json({ success: true, data: type });
     } catch (err) { next(err); }
 };
@@ -192,27 +239,7 @@ exports.updateBookingType = async (req, res, next) => {
         const type = await WineryBookingType.findOne({ where: { id: req.params.id, wineryId: req.user.wineryId } });
         if (!type) throw new AppError('Booking type not found', 404, 'NOT_FOUND');
 
-        const updates = {};
-        const allowedFields = [
-            'name',
-            'description',
-            'durationMinutes',
-            'priceCents',
-            'currency',
-            'minGuests',
-            'maxGuests',
-            'daysAvailable',
-            'requiresDeposit',
-            'depositCents',
-            'notesForGuests',
-            'isActive'
-        ];
-
-        for (const field of allowedFields) {
-            if (req.body[field] !== undefined) updates[field] = req.body[field];
-        }
-
-        await type.update(updates);
+        await type.update(pickAllowedFields(req.body, BOOKING_TYPE_FIELDS));
         res.json({ success: true, data: type });
     } catch (err) { next(err); }
 };
@@ -226,7 +253,10 @@ exports.deleteBookingType = async (req, res, next) => {
 // --- CRUD: FAQS ---
 exports.createFAQ = async (req, res, next) => {
     try {
-        const faq = await WineryFAQItem.create({ ...req.body, wineryId: req.user.wineryId });
+        const faq = await WineryFAQItem.create({
+            ...pickAllowedFields(req.body, FAQ_FIELDS),
+            wineryId: req.user.wineryId
+        });
         res.status(201).json({ success: true, data: faq });
     } catch (err) { next(err); }
 };
@@ -235,13 +265,7 @@ exports.updateFAQ = async (req, res, next) => {
         const faq = await WineryFAQItem.findOne({ where: { id: req.params.id, wineryId: req.user.wineryId } });
         if (!faq) throw new AppError('FAQ not found', 404, 'NOT_FOUND');
 
-        const updates = {};
-        const allowedFields = ['question', 'answer', 'tags', 'isActive'];
-        for (const field of allowedFields) {
-            if (req.body[field] !== undefined) updates[field] = req.body[field];
-        }
-
-        await faq.update(updates);
+        await faq.update(pickAllowedFields(req.body, FAQ_FIELDS));
         res.json({ success: true, data: faq });
     } catch (err) { next(err); }
 };

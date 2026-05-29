@@ -4,7 +4,7 @@
 const dotenv = require('dotenv');
 dotenv.config();
 
-const logger = require('./logger'); // Load simple logger for boot errors
+const { assertPinSessionSecret } = require('../utils/pinAuth');
 
 // Fail-Fast for Production
 if (process.env.NODE_ENV === 'production') {
@@ -15,10 +15,17 @@ if (process.env.NODE_ENV === 'production') {
     'DB_HOST',
     'DB_USER',
     'DB_PASSWORD',
-    'DB_NAME'
+    'DB_NAME',
+    'PUBLIC_URL',
+    'EMAIL_WEBHOOK_SECRET',
+    'RETELL_WEBHOOK_SECRET',
+    'TWILIO_AUTH_TOKEN'
   ];
 
   const missing = requiredVars.filter(key => !process.env[key]);
+  if (!process.env.PIN_SESSION_SECRET && !process.env.SESSION_SECRET) {
+    missing.push('PIN_SESSION_SECRET or SESSION_SECRET');
+  }
 
   if (missing.length > 0) {
     // Use console.error because logger might depend on invalid config or not be initialized fully
@@ -29,6 +36,13 @@ if (process.env.NODE_ENV === 'production') {
   // CRITICAL: Reject any attempt to enable test bypass in production
   if (process.env.ALLOW_TEST_AUTH_BYPASS === 'true') {
     console.error('FATAL: ALLOW_TEST_AUTH_BYPASS=true is forbidden in production. Exiting.');
+    process.exit(1);
+  }
+
+  try {
+    assertPinSessionSecret();
+  } catch (error) {
+    console.error(`FATAL: ${error.message}`);
     process.exit(1);
   }
 }

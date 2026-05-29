@@ -5,6 +5,17 @@ const { getAuth, signInWithEmailAndPassword } = require('firebase/auth');
 const axios = require('axios');
 const { User } = require('../src/models');
 
+function readRequiredEnv(name, { minLength = 8 } = {}) {
+    const value = process.env[name];
+    if (!value || value.trim().length < minLength) {
+        throw new Error(`${name} must be set and at least ${minLength} characters long.`);
+    }
+    return value.trim();
+}
+
+const TEST_AUTH_EMAIL = process.env.TEST_AUTH_EMAIL || 'test.admin@vinagent.com';
+const TEST_AUTH_PASSWORD = readRequiredEnv('TEST_AUTH_PASSWORD');
+
 // Client Config (from User)
 const clientConfig = {
     apiKey: process.env.FIREBASE_API_KEY,
@@ -18,8 +29,8 @@ async function test() {
         console.log('--- Testing Firebase Auth Flow ---');
 
         // 1. Ensure Test User exists in Firebase (via Admin)
-        const email = 'test.admin@vinagent.com';
-        const password = 'TestPassword123!';
+        const email = TEST_AUTH_EMAIL;
+        const password = TEST_AUTH_PASSWORD;
         let uid;
 
         try {
@@ -89,8 +100,8 @@ async function testWithSupertest() {
     try {
         // ... (User setup code same as above) ...
         // Re-implementing User Setup to be safe
-        const email = 'test.admin@vinagent.com';
-        const password = 'TestPassword123!';
+        const email = TEST_AUTH_EMAIL;
+        const password = TEST_AUTH_PASSWORD;
 
         // Initialize Admin if not already
         if (admin.apps.length === 0) {

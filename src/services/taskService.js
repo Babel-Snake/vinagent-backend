@@ -19,28 +19,6 @@ const noticeService = require('./notice.service');
  * Centralizes business logic, logging, and side effects.
  */
 
-// Pre-actioning payload validation per task type
-function validatePayloadForActioning(task) {
-  const errors = [];
-
-  if (task.subType === 'ACCOUNT_ADDRESS_CHANGE' || task.type === 'ADDRESS_CHANGE') {
-    const p = task.payload && task.payload.newAddress ? task.payload.newAddress : (task.payload || {});
-    if (!p.addressLine1) errors.push('Address Line 1 is required');
-    if (!p.suburb) errors.push('Suburb is required');
-    if (!p.postcode) errors.push('Postcode is required');
-    if (!task.memberId) errors.push('Member ID is required for address change');
-  }
-
-  if (task.subType === 'BOOKING_NEW') {
-    const p = task.payload || {};
-    if (!p.date) errors.push('Booking date is required');
-    if (!p.time) errors.push('Booking time is required');
-    if (!p.pax) errors.push('Party size (pax) is required');
-  }
-
-  return errors;
-}
-
 const ACTIVE_WORKFLOW_WAITING_ON = new Set(['CUSTOMER', 'MANAGER', 'EXTERNAL']);
 const STEP_TERMINAL_STATUSES = new Set(['COMPLETED', 'SKIPPED', 'CANCELLED']);
 const CLOSED_TASK_STATUSES = new Set(['ACTIONED', 'REJECTED']);

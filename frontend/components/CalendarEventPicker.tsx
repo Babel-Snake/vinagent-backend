@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CalendarEvent, searchCalendarEvents } from '../lib/api';
 
 export type CalendarEventSelection = {
@@ -47,26 +47,29 @@ export default function CalendarEventPicker({
     const [search, setSearch] = useState('');
     const [suggestions, setSuggestions] = useState<CalendarEvent[]>([]);
     const [showSuggestions, setShowSuggestions] = useState(false);
-    const searchTimeout = useRef<NodeJS.Timeout | null>(null);
-
     useEffect(() => {
-        if (searchTimeout.current) clearTimeout(searchTimeout.current);
+        const query = search.trim();
 
-        if (search.trim().length < 2) {
-            setSuggestions([]);
-            return;
+        if (query.length < 2) {
+            const timer = window.setTimeout(() => {
+                setSuggestions([]);
+                setShowSuggestions(false);
+            }, 0);
+            return () => window.clearTimeout(timer);
         }
 
-        searchTimeout.current = setTimeout(async () => {
+        const timer = window.setTimeout(async () => {
             try {
                 const selectedIds = new Set(selected.map(event => event.id));
-                const events = await searchCalendarEvents(search, 8);
+                const events = await searchCalendarEvents(query, 8);
                 setSuggestions(events.filter(event => !selectedIds.has(event.id)));
                 setShowSuggestions(true);
             } catch (err) {
                 console.error('Failed to search calendar events', err);
             }
         }, 300);
+
+        return () => window.clearTimeout(timer);
     }, [search, selected]);
 
     function addEvent(event: CalendarEvent) {

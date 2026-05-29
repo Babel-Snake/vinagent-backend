@@ -1,4 +1,4 @@
-const { TaskAction, Task } = require('../models');
+const { TaskAction } = require('../models');
 const logger = require('../config/logger');
 
 /**

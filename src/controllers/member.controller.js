@@ -45,7 +45,7 @@ function mergeNotes(targetNotes, sourceNotes, preference = 'combine') {
 async function listMembers(req, res, next) {
     try {
         const { wineryId } = req.user;
-        const { q, source, state, tag, loyaltyTier, isWineClubMember, customerType, sortBy, page = 1, limit = 50 } = req.query;
+        const { q, source, state, loyaltyTier, isWineClubMember, customerType, sortBy, page = 1, limit = 50 } = req.query;
         const parsedPage = Math.max(parseInt(page, 10) || 1, 1);
         const parsedLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 100);
 

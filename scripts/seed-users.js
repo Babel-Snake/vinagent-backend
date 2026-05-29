@@ -2,7 +2,15 @@ require('dotenv').config();
 const admin = require('../src/config/firebase');
 const { User, Winery } = require('../src/models');
 
-const SEED_PASSWORD = 'Password123!';
+function readRequiredEnv(name, { minLength = 8 } = {}) {
+    const value = process.env[name];
+    if (!value || value.trim().length < minLength) {
+        throw new Error(`${name} must be set and at least ${minLength} characters long.`);
+    }
+    return value.trim();
+}
+
+const SEED_PASSWORD = readRequiredEnv('SEED_USER_PASSWORD');
 
 const USERS = [
     {
@@ -13,18 +21,14 @@ const USERS = [
         wineryId: 1
     },
     {
-        // Kiosk-compatible Staff User 1
-        // Username: Sarah
         email: 'sarah.w1@vinagent.internal',
         role: 'staff',
         firstName: 'Sarah',
-        lastName: '', // Display Name will be just "Sarah" usually, or "Sarah "
+        lastName: '',
         displayName: 'Sarah',
         wineryId: 1
     },
     {
-        // Kiosk-compatible Staff User 2
-        // Username: Tom
         email: 'tom.w1@vinagent.internal',
         role: 'staff',
         firstName: 'Tom',
@@ -37,15 +41,14 @@ const USERS = [
         role: 'admin',
         firstName: 'Alice',
         lastName: 'Admin',
-        wineryId: null // Global Admin
+        wineryId: null
     }
 ];
 
 async function seed() {
-    console.log('🌱 Starting User Seeding...');
+    console.log('Starting user seeding...');
 
     try {
-        // Ensure Winery 1 exists
         const [winery] = await Winery.findOrCreate({
             where: { id: 1 },
             defaults: {
@@ -53,12 +56,11 @@ async function seed() {
                 timeZone: 'Australia/Adelaide'
             }
         });
-        console.log(`✅ Ensured Winery: ${winery.name}`);
+        console.log(`Ensured winery: ${winery.name}`);
 
         for (const u of USERS) {
             console.log(`Processing ${u.email}...`);
 
-            // 1. Firebase Auth
             let uid;
             try {
                 const userRecord = await admin.auth().getUserByEmail(u.email);
@@ -79,7 +81,6 @@ async function seed() {
                 }
             }
 
-            // 2. MySQL DB
             const [dbUser, created] = await User.findOrCreate({
                 where: { email: u.email },
                 defaults: {
@@ -93,7 +94,6 @@ async function seed() {
             });
 
             if (!created) {
-                // Update key fields ensuring sync
                 dbUser.role = u.role;
                 dbUser.firebaseUid = uid;
                 dbUser.wineryId = u.wineryId;
@@ -104,12 +104,11 @@ async function seed() {
             }
         }
 
-        console.log('✅ Seeding Complete.');
-        console.log(`\ncredentials:\nDefault Password: ${SEED_PASSWORD}`);
+        console.log('Seeding complete.');
+        console.log('Seed user password was read from SEED_USER_PASSWORD and was not printed.');
         process.exit(0);
-
     } catch (e) {
-        console.error('❌ Seeding Failed:', e);
+        console.error('Seeding failed:', e);
         process.exit(1);
     }
 }

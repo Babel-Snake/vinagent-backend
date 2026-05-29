@@ -95,7 +95,7 @@ export function BrandTab({ winery, onUpdate }: { winery: any, onUpdate: () => vo
                     <textarea rows={4} value={formData.doSayExamples} onChange={e => handleChange('doSayExamples', e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm border p-2 font-mono text-xs" placeholder='["guests", "cellar door"]' />
                 </div>
                 <div>
-                    <label className="block text-sm font-medium text-gray-700">Don't Say (JSON Array)</label>
+                    <label className="block text-sm font-medium text-gray-700">Don&apos;t Say (JSON Array)</label>
                     <textarea rows={4} value={formData.dontSayExamples} onChange={e => handleChange('dontSayExamples', e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm border p-2 font-mono text-xs" placeholder='["customers", "shop"]' />
                 </div>
             </div>

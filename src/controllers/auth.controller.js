@@ -29,7 +29,7 @@ function attemptKey(req, wineryId) {
     return `${wineryId}:${req.ip || req.headers['x-forwarded-for'] || 'unknown'}`;
 }
 
-function checkWineryAttemptLock(req, wineryId, authConfig) {
+function checkWineryAttemptLock(req, wineryId) {
     const key = attemptKey(req, wineryId);
     const state = wineryAttemptState.get(key);
     if (!state?.lockedUntil) return;
@@ -113,7 +113,7 @@ exports.pinLogin = async (req, res, next) => {
             throw new AppError('PIN login is not enabled for this winery.', 403, 'PIN_LOGIN_DISABLED');
         }
 
-        checkWineryAttemptLock(req, wineryId, authConfig);
+        checkWineryAttemptLock(req, wineryId);
 
         const roles = authConfig.allowManagerBasicPin ? ['staff', 'manager'] : ['staff'];
         const candidates = await User.findAll({

@@ -16,9 +16,11 @@ Dashboard APIs require:
 Authorization: Bearer <firebase-id-token>
 ```
 
+The backend also accepts valid PIN session bearer tokens for supported staff/PIN flows. Firebase-backed users must exist in the local VinAgent database and must be active; inactive users receive `403 ACCESS_DENIED`.
+
 Public self-service APIs use `MemberActionToken` instead of Firebase auth.
 
-Webhook endpoints use provider-specific signature validation.
+Webhook endpoints use provider-specific signature validation. Retell HMAC verification uses the raw request body captured by the Express parser.
 
 ### 1.2 Current User Profile
 
@@ -745,11 +747,61 @@ Response:
 }
 ```
 
-## 5. Public Address Update APIs
+### 4.12 Notice links
+
+Manager/admin only:
+
+* `POST /api/tasks/:id/notices`
+* `DELETE /api/tasks/:id/notices/:noticeId`
+
+`POST /api/tasks/:id/notices` accepts:
+
+```json
+{
+  "noticeId": 10
+}
+```
+
+These endpoints create or remove the task-to-notice relationship used by task detail and noticeboard views.
+
+### 4.13 Task flags
+
+Mounted under `/api/tasks/flags`.
+
+* `GET /api/tasks/flags`
+* `POST /api/tasks/flags/:taskId/toggle`
+
+Flags are scoped to the authenticated user and winery.
+
+## 5. Public And PIN APIs
 
 Mounted under `/api/public`.
 
-### 5.1 `GET /api/public/address-update/validate?token=...`
+### 5.1 `GET /api/public/resolve-staff?username=...`
+
+Resolves a staff login username for the PIN/staff login flow.
+
+### 5.2 `GET /api/public/pin-config?wineryId=...`
+
+Returns the public PIN-login configuration for the requested winery when PIN login is enabled.
+
+### 5.3 `POST /api/public/pin-login`
+
+Authenticates a staff PIN/access code and returns a short-lived PIN session token.
+
+Request:
+
+```json
+{
+  "wineryId": 1,
+  "username": "cellardoor",
+  "accessCode": "123456"
+}
+```
+
+Response includes the authenticated user context, token expiry, and idle timeout.
+
+### 5.4 `GET /api/public/address-update/validate?token=...`
 
 Validates a token and returns current/proposed address data.
 
@@ -788,7 +840,7 @@ Error cases:
 * expired token -> `TOKEN_EXPIRED`
 * already used token -> `TOKEN_ALREADY_USED`
 
-### 5.2 `POST /api/public/address-update/confirm`
+### 5.5 `POST /api/public/address-update/confirm`
 
 Confirms and applies the address change.
 
@@ -941,10 +993,13 @@ Current limitations:
 Currently exposed:
 
 * `POST /api/winery/products`
+* `PUT /api/winery/products/:id`
 * `DELETE /api/winery/products/:id`
 * `POST /api/winery/bookings/types`
+* `PUT /api/winery/bookings/types/:id`
 * `DELETE /api/winery/bookings/types/:id`
 * `POST /api/winery/faqs`
+* `PUT /api/winery/faqs/:id`
 * `DELETE /api/winery/faqs/:id`
 * `POST /api/winery/sops`
 * `PUT /api/winery/sops/:id`
@@ -953,13 +1008,13 @@ Currently exposed:
 * `PUT /api/winery/contacts/:id`
 * `DELETE /api/winery/contacts/:id`
 
-### 6.4 Staff access APIs
+## 7. Staff APIs
 
 Mounted under `/api/staff`.
 
 All staff management endpoints require manager/admin auth and are scoped to the authenticated user's winery.
 
-#### `POST /api/staff/:id/reset-password`
+### 7.1 `POST /api/staff/:id/reset-password`
 
 Resets the Firebase password for an internal staff account. The UI refers to this as an access code because staff log in through the Staff Login path.
 
@@ -993,11 +1048,24 @@ Response:
 }
 ```
 
-## 7. Member APIs
+## 8. Member APIs
 
 Mounted under `/api/members`.
 
-### 7.1 `POST /api/members/:id/merge`
+### 8.1 Search and CRUD
+
+All member routes require dashboard authentication. `GET /api/members/search` is available to all authenticated users. Full member CRUD is manager/admin only.
+
+Currently exposed:
+
+* `GET /api/members/search?q=...`
+* `GET /api/members`
+* `GET /api/members/:id`
+* `POST /api/members`
+* `PUT /api/members/:id`
+* `DELETE /api/members/:id`
+
+### 8.2 `POST /api/members/:id/merge`
 
 Merges another customer record into the target customer `:id`.
 
@@ -1039,13 +1107,84 @@ Response:
 }
 ```
 
-## 8. Analytics APIs
+## 9. User APIs
+
+Mounted under `/api/users`.
+
+### 9.1 `GET /api/users`
+
+Returns authenticated-winery users for assignment dropdowns and staff-selection UI.
+
+## 10. Noticeboard APIs
+
+Mounted under `/api/notices`.
+
+All noticeboard routes require dashboard authentication. Staff can read visible notices and create comments. Manager/admin roles can create, update, archive, delete comments, and manage task links.
+
+Currently exposed:
+
+* `GET /api/notices`
+* `GET /api/notices/:id`
+* `POST /api/notices`
+* `PATCH /api/notices/:id`
+* `DELETE /api/notices/:id`
+* `GET /api/notices/:id/comments`
+* `POST /api/notices/:id/comments`
+* `DELETE /api/notices/:id/comments/:commentId`
+* `POST /api/notices/:id/tasks`
+* `DELETE /api/notices/:id/tasks/:taskId`
+
+## 11. Attachment APIs
+
+Mounted under `/api/attachments`.
+
+All attachment routes require dashboard authentication and are scoped by winery plus linked entity permissions.
+
+Currently exposed:
+
+* `GET /api/attachments`
+* `POST /api/attachments`
+* `GET /api/attachments/:id/download`
+* `DELETE /api/attachments/:id`
+
+Attachments can be linked to task, task-step, task-outcome, task-follow-up, and notice entities.
+
+## 12. Calendar And Notification APIs
+
+### 12.1 Calendar
+
+Mounted under `/api/calendar`.
+
+Staff can read events. Manager/admin roles can create, update, and delete events.
+
+Currently exposed:
+
+* `GET /api/calendar`
+* `POST /api/calendar`
+* `PUT /api/calendar/:id`
+* `DELETE /api/calendar/:id`
+
+Calendar events can link to tasks and notices where the UI supports those relationships.
+
+### 12.2 Notifications
+
+Mounted under `/api/notifications`.
+
+Currently exposed:
+
+* `GET /api/notifications`
+* `PATCH /api/notifications/:id/read`
+* `DELETE /api/notifications/:id`
+
+Notifications are scoped to the authenticated user.
+
+## 13. Analytics APIs
 
 Mounted under `/api/analytics`.
 
 All analytics endpoints require manager/admin auth.
 
-### 8.1 `GET /api/analytics`
+### 13.1 `GET /api/analytics`
 
 Returns period-scoped dashboard analytics plus current operational-flow metrics.
 
@@ -1146,6 +1285,6 @@ Notes:
 * first-response latency uses linked inbound/outbound `Message` rows on the same task timeline
 * follow-up automation metrics count managed child tasks stamped with `payload.followUpAutomation`
 
-## 9. Notes on Truth
+## 14. Notes on Truth
 
 The task lifecycle in the current implementation is not the older `APPROVED / EXECUTED / AWAITING_MEMBER_ACTION` model. If you are updating clients, tests, or docs, use the current `PENDING / ACTIONED / REJECTED` contract plus audit events and tokens as the authoritative model.

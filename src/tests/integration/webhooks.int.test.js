@@ -42,7 +42,7 @@ process.env.EMAIL_WEBHOOK_SECRET = 'secret';
 process.env.TWILIO_AUTH_TOKEN = 'token';
 
 const app = require('../../app');
-const { Winery, Member, Message, WinerySettings } = require('../../models');
+const { Winery, Message, WinerySettings } = require('../../models');
 const triageService = require('../../services/triage.service');
 const taskService = require('../../services/taskService');
 const customerIdentityService = require('../../services/customerIdentity.service');

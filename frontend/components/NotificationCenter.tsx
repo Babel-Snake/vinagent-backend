@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { dismissNotification, getNotifications, markNotificationRead, Notification } from '../lib/api';
 
@@ -11,7 +11,7 @@ export default function NotificationCenter() {
     const dropdownRef = useRef<HTMLDivElement>(null);
     const router = useRouter();
 
-    async function loadNotifications() {
+    const loadNotifications = useCallback(async () => {
         try {
             const data = await getNotifications();
             setNotifications(data);
@@ -19,13 +19,20 @@ export default function NotificationCenter() {
         } catch (err) {
             console.error('Failed to load notifications', err);
         }
-    }
+    }, []);
 
     useEffect(() => {
-        loadNotifications();
-        const interval = setInterval(loadNotifications, 30000); // Poll every 30s
-        return () => clearInterval(interval);
-    }, []);
+        const initial = window.setTimeout(() => {
+            void loadNotifications();
+        }, 0);
+        const interval = window.setInterval(() => {
+            void loadNotifications();
+        }, 30000);
+        return () => {
+            window.clearTimeout(initial);
+            window.clearInterval(interval);
+        };
+    }, [loadNotifications]);
 
     // Close dropdown when clicking outside
     useEffect(() => {

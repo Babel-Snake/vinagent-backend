@@ -2,9 +2,26 @@ const crypto = require('crypto');
 
 const PIN_PATTERN = /^[A-Za-z0-9]{4,12}$/;
 const HASH_PREFIX = 'scrypt';
+const DEV_SESSION_SECRET = 'vinagent-dev-pin-session-secret';
+const MIN_PRODUCTION_SECRET_LENGTH = 32;
 
 function getSecret() {
-  return process.env.PIN_SESSION_SECRET || process.env.SESSION_SECRET || 'vinagent-dev-pin-session-secret';
+  const secret = process.env.PIN_SESSION_SECRET || process.env.SESSION_SECRET;
+
+  if (process.env.NODE_ENV === 'production') {
+    if (!secret) {
+      throw new Error('PIN_SESSION_SECRET or SESSION_SECRET is required in production.');
+    }
+    if (secret === DEV_SESSION_SECRET || secret.length < MIN_PRODUCTION_SECRET_LENGTH) {
+      throw new Error(`PIN session secret must be at least ${MIN_PRODUCTION_SECRET_LENGTH} characters and cannot use the development fallback.`);
+    }
+  }
+
+  return secret || DEV_SESSION_SECRET;
+}
+
+function assertPinSessionSecret() {
+  getSecret();
 }
 
 function base64UrlEncode(value) {
@@ -97,6 +114,7 @@ function verifyPinSessionToken(token) {
 }
 
 module.exports = {
+  assertPinSessionSecret,
   createPinSessionToken,
   hashPin,
   validatePin,

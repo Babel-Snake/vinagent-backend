@@ -5,14 +5,14 @@ const { sequelize, Winery, Task, TaskStep, User, Message, Member, Notification, 
 
 describe('Task Routes', () => {
     let winery;
-    let authToken = 'Bearer mock-token';
+    const authToken = 'Bearer mock-token';
 
     beforeAll(async () => {
         // Create Winery
         try {
             await sequelize.sync({ force: true });
             // Try to find or create ID 1 to match the stub auth middleware
-            const [w, created] = await Winery.findOrCreate({
+            const [w] = await Winery.findOrCreate({
                 where: { id: 1 },
                 defaults: {
                     name: 'Task Test Winery',

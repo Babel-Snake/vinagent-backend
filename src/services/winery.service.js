@@ -1,7 +1,7 @@
 const { 
     Winery, WineryBrandProfile, WineryBookingsConfig, 
-    WineryBookingType, WineryProduct, WineryPolicyProfile, 
-    WineryFAQItem, WineryIntegrationConfig, WinerySettings,
+    WineryBookingType, WineryProduct, WineryPolicyProfile,
+    WineryFAQItem, WinerySettings,
     WineryContact, User
 } = require('../models');
 

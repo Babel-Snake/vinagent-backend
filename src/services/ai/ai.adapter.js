@@ -9,7 +9,7 @@ class AIAdapter {
      * @param {Object} context - Additional context (e.g., available categories, member info).
      * @returns {Promise<Object>} - { category, subType, sentiment, summary, ... }
      */
-    async classify(text, context = {}) {
+    async classify(text, _context = {}) {
         throw new Error('classify() must be implemented by subclass');
     }
 
@@ -18,7 +18,7 @@ class AIAdapter {
      * @param {string} prompt - The user prompt.
      * @returns {Promise<string>} - The generated text.
      */
-    async generate(prompt) {
+    async generate(_prompt) {
         throw new Error('generate() must be implemented by subclass');
     }
 }

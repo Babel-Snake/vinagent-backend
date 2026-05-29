@@ -232,7 +232,7 @@ export default function EventModal({
             await deleteCalendarEvent(existingEvent.id);
             onRefresh();
             onClose();
-        } catch (error) {
+        } catch {
             alert('Failed to delete event');
         } finally {
             setLoading(false);

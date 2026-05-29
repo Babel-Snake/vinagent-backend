@@ -129,7 +129,7 @@ async function authMiddleware(req, res, next) {
     }
 
     // 4. Find Internal User
-    let user = await User.findOne({
+    const user = await User.findOne({
       where: { email },
       include: [{ model: Winery, attributes: ['name'] }]
     });
@@ -138,6 +138,11 @@ async function authMiddleware(req, res, next) {
       // Strict: Reject users not in our DB
       logger.warn(`Auth: User not found in DB for email: ${email}`, { uid });
       return res.status(403).json({ error: { code: 'ACCESS_DENIED', message: `User ${email} not registered in system.` } });
+    }
+
+    if (!user.isActive) {
+      logger.warn(`Auth: Inactive user denied access: ${email}`, { uid, userId: user.id });
+      return res.status(403).json({ error: { code: 'ACCESS_DENIED', message: 'User account is inactive.' } });
     }
 
     req.user = {

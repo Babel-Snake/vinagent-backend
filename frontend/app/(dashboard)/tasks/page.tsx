@@ -41,8 +41,6 @@ export default function TasksPage() {
     const router = useRouter();
 
     const highlightedTaskId = searchParams.get('taskId');
-    const autoExpand = searchParams.get('expandNotes') === '1';
-
     useEffect(() => {
         if (highlightedTaskId) {
             setActiveTaskId(parseInt(highlightedTaskId));
@@ -87,7 +85,7 @@ export default function TasksPage() {
             try {
                 const usersData = await getUsers();
                 setUsers(usersData);
-            } catch (ignore) {
+            } catch {
                 setUsers([]);
             }
             setError('');
@@ -231,9 +229,6 @@ export default function TasksPage() {
                 <TaskBoard
                     tasks={sortedTasks}
                     users={users}
-                    onRefresh={loadTasks}
-                    canAssign={userRole !== 'staff'}
-                    userRole={userRole}
                     flaggedTaskIds={flaggedTaskIds}
                     onToggleFlag={async (id) => {
                         const isFlagged = await toggleTaskFlag(id);

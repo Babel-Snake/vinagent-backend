@@ -1,13 +1,13 @@
 // src/tests/unit/addressUpdateService.test.js
 const addressUpdateService = require('../../services/addressUpdateService');
 const memberActionTokenService = require('../../services/memberActionTokenService');
-const { Member, Task, TaskAction } = require('../../models');
+const { TaskAction } = require('../../models');
 
 jest.mock('../../services/memberActionTokenService');
 jest.mock('../../models', () => ({
     Member: {
         sequelize: {
-            transaction: jest.fn(async (cb) => {
+            transaction: jest.fn(async () => {
                 const t = {
                     commit: jest.fn(),
                     rollback: jest.fn()

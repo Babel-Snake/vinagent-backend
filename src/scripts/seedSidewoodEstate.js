@@ -349,13 +349,12 @@ const users = [
         email: 'serena@sidewood.com.au',
         displayName: 'Serena',
         role: 'manager',
-        password: 'Darcy2406',
         responsibilities: 'Main Sidewood demo manager account.'
     },
-    { username: 'jacob', displayName: 'Jacob', role: 'staff', password: '12341234' },
-    { username: 'nick', displayName: 'Nick', role: 'staff', password: '12341234' },
-    { username: 'james', displayName: 'James', role: 'staff', password: '12341234' },
-    { username: 'joanna', displayName: 'Joanna', role: 'staff', password: '12341234' }
+    { username: 'jacob', displayName: 'Jacob', role: 'staff' },
+    { username: 'nick', displayName: 'Nick', role: 'staff' },
+    { username: 'james', displayName: 'James', role: 'staff' },
+    { username: 'joanna', displayName: 'Joanna', role: 'staff' }
 ];
 
 const customers = [
@@ -729,6 +728,14 @@ function internalStaffEmail(username, wineryId) {
     return `${username.toLowerCase().replace(/[^a-z0-9]/g, '')}.w${wineryId}@vinagent.internal`;
 }
 
+function readRequiredEnv(name, { minLength = 8 } = {}) {
+    const value = process.env[name];
+    if (!value || value.trim().length < minLength) {
+        throw new Error(`${name} must be set and at least ${minLength} characters long.`);
+    }
+    return value.trim();
+}
+
 async function upsertOne(model, where, values, transaction) {
     const existing = await model.findOne({ where, transaction });
     if (existing) {
@@ -766,6 +773,8 @@ async function ensureFirebaseUser({ email, password, displayName }) {
 
 async function seedSidewoodEstate() {
     const transaction = await db.sequelize.transaction();
+    const managerPassword = readRequiredEnv('SIDEWOOD_MANAGER_PASSWORD');
+    const staffAccessCode = readRequiredEnv('SIDEWOOD_STAFF_ACCESS_CODE');
 
     try {
         const [winery] = await db.Winery.findOrCreate({
@@ -932,9 +941,10 @@ async function seedSidewoodEstate() {
 
         for (const user of users) {
             const email = user.email || internalStaffEmail(user.username, winery.id);
+            const password = user.role === 'manager' ? managerPassword : staffAccessCode;
             const firebaseUid = await ensureFirebaseUser({
                 email,
-                password: user.password,
+                password,
                 displayName: user.displayName
             });
 
@@ -950,8 +960,8 @@ async function seedSidewoodEstate() {
 
         console.log(`Seeded Sidewood Estate demo winery (id=${winery.id}).`);
         console.log(`Seeded Sidewood demo customers: ${customers.filter(customer => (customer.customerType || (customer.isWineClubMember ? 'member' : 'guest')) === 'member').length} members, ${customers.filter(customer => (customer.customerType || (customer.isWineClubMember ? 'member' : 'guest')) === 'guest').length} guests, ${customers.filter(customer => customer.customerType === 'tour_operator').length} tour operators.`);
-        console.log('Manager login: serena@sidewood.com.au / Darcy2406');
-        console.log(`Staff login usernames: Jacob, Nick, James, Joanna. Effective access code: 12341234 (current app minimum is 8 characters).`);
+        console.log('Manager login email: serena@sidewood.com.au. Password was read from SIDEWOOD_MANAGER_PASSWORD and was not printed.');
+        console.log('Staff login usernames: Jacob, Nick, James, Joanna. Access code was read from SIDEWOOD_STAFF_ACCESS_CODE and was not printed.');
     } catch (error) {
         await transaction.rollback();
         console.error('Failed to seed Sidewood Estate demo winery:', error);

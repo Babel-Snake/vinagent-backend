@@ -3,6 +3,13 @@ const crypto = require('crypto');
 const config = require('../config');
 const logger = require('../config/logger');
 
+function timingSafeStringEqual(candidate, expected) {
+    const candidateBuffer = Buffer.from(String(candidate || ''), 'utf8');
+    const expectedBuffer = Buffer.from(String(expected || ''), 'utf8');
+    return candidateBuffer.length === expectedBuffer.length &&
+        crypto.timingSafeEqual(candidateBuffer, expectedBuffer);
+}
+
 function validateEmailSignature(req, res, next) {
     const secret = process.env.EMAIL_WEBHOOK_SECRET;
 
@@ -23,7 +30,7 @@ function validateEmailSignature(req, res, next) {
         return res.status(403).json({ error: 'Missing signature' });
     }
 
-    if (signature !== secret) {
+    if (!timingSafeStringEqual(signature, secret)) {
         logger.warn('Invalid email webhook signature');
         return res.status(403).json({ error: 'Invalid signature' });
     }
@@ -63,7 +70,7 @@ function validateRetellSignature(req, res, next) {
     }
 
     try {
-        const payload = JSON.stringify(req.body);
+        const payload = req.rawBody || Buffer.from(JSON.stringify(req.body));
         const computed = crypto
             .createHmac('sha256', secret)
             .update(payload)

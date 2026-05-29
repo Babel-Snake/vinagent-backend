@@ -20,7 +20,7 @@ class BookingAdapter {
      * @param {Object} criteria - { date, time, pax }
      * @returns {Promise<Object>} - { available: boolean, slots: [] }
      */
-    async findAvailability(criteria) {
+    async findAvailability(_criteria) {
         throw new Error('findAvailability() not implemented');
     }
 
@@ -29,7 +29,7 @@ class BookingAdapter {
      * @param {Object} details - { memberId, firstName, lastName, phone, email, date, time, pax, notes }
      * @returns {Promise<Object>} - { referenceCode: string, status: 'CONFIRMED' }
      */
-    async createReservation(details) {
+    async createReservation(_details) {
         throw new Error('createReservation() not implemented');
     }
 }

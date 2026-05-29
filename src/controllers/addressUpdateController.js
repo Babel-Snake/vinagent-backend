@@ -18,7 +18,7 @@ async function validateToken(req, res, next) {
       throw new AppError('Token is required', 400, 'INVALID_TOKEN');
     }
 
-    const { tokenRecord, member, task } = await memberActionTokenService.validateToken(token);
+    const { tokenRecord, member } = await memberActionTokenService.validateToken(token);
 
     logger.info('Address update token validated', { tokenId: tokenRecord.id });
 

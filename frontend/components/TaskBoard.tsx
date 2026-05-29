@@ -6,11 +6,6 @@ import TaskSummaryCard from './TaskSummaryCard';
 interface TaskBoardProps {
     tasks: Task[];
     users: Staff[];
-    onRefresh: () => void;
-    canAssign?: boolean;
-    userRole?: string | null;
-    highlightedTaskId?: number;
-    autoExpand?: boolean;
     flaggedTaskIds?: number[];
     onToggleFlag?: (taskId: number) => void;
     onTaskClick?: (taskId: number) => void;
@@ -19,11 +14,6 @@ interface TaskBoardProps {
 export default function TaskBoard({
     tasks,
     users,
-    onRefresh,
-    canAssign = true,
-    userRole,
-    highlightedTaskId,
-    autoExpand,
     flaggedTaskIds = [],
     onToggleFlag,
     onTaskClick

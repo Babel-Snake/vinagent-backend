@@ -187,7 +187,7 @@ async function classifyStaffNote(input) {
     const message = { body: text, source, suggestedChannel };
 
     // Fetch member if ID provided to help context
-    let context = {
+    const context = {
         wineryId,
         taskOrigin,
         inboundMethod,

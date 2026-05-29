@@ -20,7 +20,7 @@ class CrmAdapter {
      * @param {Object} query - { email, phone }
      * @returns {Promise<Object|null>} - Member details or null
      */
-    async getMember(query) {
+    async getMember(_query) {
         throw new Error('getMember() not implemented');
     }
 
@@ -30,7 +30,7 @@ class CrmAdapter {
      * @param {Object} updates - Fields to update
      * @returns {Promise<Object>} - Updated member details
      */
-    async updateMember(externalId, updates) {
+    async updateMember(_externalId, _updates) {
         throw new Error('updateMember() not implemented');
     }
 
@@ -40,7 +40,7 @@ class CrmAdapter {
      * @param {string} note
      * @returns {Promise<void>}
      */
-    async addNote(externalId, note) {
+    async addNote(_externalId, _note) {
         throw new Error('addNote() not implemented');
     }
 
@@ -49,7 +49,7 @@ class CrmAdapter {
      * @param {Object} profile
      * @returns {Promise<Object>} - { id, created, ... }
      */
-    async upsertMember(profile) {
+    async upsertMember(_profile) {
         throw new Error('upsertMember() not implemented');
     }
 
@@ -59,7 +59,7 @@ class CrmAdapter {
      * @param {Object} event
      * @returns {Promise<Object>}
      */
-    async recordOrderEvent(externalId, event) {
+    async recordOrderEvent(_externalId, _event) {
         throw new Error('recordOrderEvent() not implemented');
     }
 }

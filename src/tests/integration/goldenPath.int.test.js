@@ -38,8 +38,6 @@ let app;
 let sequelize, Winery, Member, User, Task, MemberActionToken, WinerySettings;
 
 describe('Golden Path E2E: Address Change Flow', () => {
-    let winery, member, manager;
-
     beforeAll(async () => {
         // Reset modules to ensure mocks apply and fresh DB connection
         jest.resetModules();
@@ -59,7 +57,7 @@ describe('Golden Path E2E: Address Change Flow', () => {
         await sequelize.sync({ force: true });
 
         // Setup Data
-        winery = await Winery.create({
+        await Winery.create({
             id: 1,
             name: 'Sunrise Ridge Winery',
             timeZone: 'Australia/Adelaide',
@@ -73,7 +71,7 @@ describe('Golden Path E2E: Address Change Flow', () => {
             enableWineClubModule: true
         });
 
-        member = await Member.create({
+        await Member.create({
             id: 42,
             wineryId: 1,
             firstName: 'Emma',
@@ -87,7 +85,7 @@ describe('Golden Path E2E: Address Change Flow', () => {
             country: 'Australia'
         });
 
-        manager = await User.create({
+        await User.create({
             id: 7,
             email: 'stub@example.com',
             wineryId: 1,

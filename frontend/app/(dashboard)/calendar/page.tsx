@@ -2,7 +2,7 @@
 'use client';
 
 
-import { Suspense, useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 
 import CalendarView from '../../../components/Calendar/CalendarView';
 import { getMyProfile, getUsers } from '../../../lib/api';

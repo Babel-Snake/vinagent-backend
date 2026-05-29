@@ -125,12 +125,12 @@ function DonutChart({ data, labelKey, valueKey, colorFn, labelMap }: {
     const total = data.reduce((sum, d) => sum + (parseInt(d[valueKey]) || 0), 0);
     if (total === 0) return <p className="text-sm text-gray-400 text-center py-8">No data for this period</p>;
 
-    let cumulative = 0;
-    const segments = data.map(d => {
+    const segments = data.map((d, index) => {
         const val = parseInt(d[valueKey]) || 0;
         const pct = (val / total) * 100;
-        const start = cumulative;
-        cumulative += pct;
+        const start = data
+            .slice(0, index)
+            .reduce((sum, item) => sum + ((parseInt(item[valueKey]) || 0) / total) * 100, 0);
         return { label: labelMap?.[d[labelKey]] || d[labelKey], val, pct, start, color: colorFn?.(d[labelKey]) || '#6366f1' };
     });
 
@@ -220,7 +220,12 @@ export default function AnalyticsPage() {
             .finally(() => setLoading(false));
     }, [period, offset]);
 
-    useEffect(() => { load(); }, [load]);
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            load();
+        }, 0);
+        return () => window.clearTimeout(timer);
+    }, [load]);
 
     const goBack = () => setOffset(o => o + 1);
     const goForward = () => setOffset(o => Math.max(0, o - 1));

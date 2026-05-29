@@ -75,7 +75,7 @@ export default function CreateStaffModal({ onClose }: CreateStaffModalProps) {
                             className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:text-sm"
                         />
                         <p className="mt-1 text-xs text-gray-500">
-                            Simple, case-insensitive ID (e.g. "sarah" or "bar_team").
+                            Simple, case-insensitive ID (e.g. &quot;sarah&quot; or &quot;bar_team&quot;).
                         </p>
                     </div>
 

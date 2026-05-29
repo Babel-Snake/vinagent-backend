@@ -10,6 +10,7 @@ const {
     WineryPolicyProfile,
     WineryIntegrationConfig,
     WineryBookingType,
+    WineryProduct,
     WinerySettings
 } = require('../../models');
 
@@ -180,6 +181,41 @@ describe('Winery Routes', () => {
 
         const deletedType = await WineryBookingType.findByPk(bookingTypeId);
         expect(deletedType).toBeNull();
+    });
+
+    it('should ignore protected winery and product fields from request bodies', async () => {
+        await request(app)
+            .put('/api/winery')
+            .set('Authorization', authToken)
+            .send({
+                id: 999,
+                name: 'Updated Winery Name',
+                createdAt: '2000-01-01T00:00:00.000Z',
+                timeZone: 'Australia/Adelaide'
+            })
+            .expect(200);
+
+        const winery = await Winery.findByPk(1);
+        expect(winery.name).toBe('Updated Winery Name');
+        expect(winery.id).toBe(1);
+
+        const createRes = await request(app)
+            .post('/api/winery/products')
+            .set('Authorization', authToken)
+            .send({
+                id: 999,
+                wineryId: 999,
+                name: 'Mass Assignment Test Wine',
+                category: 'Red',
+                createdAt: '2000-01-01T00:00:00.000Z'
+            })
+            .expect(201);
+
+        expect(createRes.body.data.wineryId).toBe(1);
+        expect(createRes.body.data.id).not.toBe(999);
+
+        const product = await WineryProduct.findByPk(createRes.body.data.id);
+        expect(product.wineryId).toBe(1);
     });
 
     it('should update winery identity matching settings', async () => {

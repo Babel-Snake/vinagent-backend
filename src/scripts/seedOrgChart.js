@@ -66,7 +66,7 @@ async function seedOrgChart() {
         });
 
         // 5. Wine Club Coordinator (Hospitality)
-        const clubCoordinator = await db.WineryContact.create({
+        await db.WineryContact.create({
             wineryId: 1,
             name: "Emily Chen",
             role: "Wine Club Coordinator",
@@ -78,7 +78,7 @@ async function seedOrgChart() {
         });
 
         // 6. Vineyard Supervisor (Production)
-        const vineyardSup = await db.WineryContact.create({
+        await db.WineryContact.create({
             wineryId: 1,
             name: "Marco Silva",
             role: "Vineyard Supervisor",
