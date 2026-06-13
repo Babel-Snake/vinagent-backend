@@ -271,6 +271,11 @@ export interface Notice {
     effectiveFrom?: string | null;
     expiresAt?: string | null;
     archivedAt?: string | null;
+    externalSource?: string | null;
+    externalId?: string | null;
+    externalPostedAt?: string | null;
+    externalAuthorName?: string | null;
+    sourceEventId?: number | null;
     wineryId: number;
     createdBy?: number | null;
     updatedBy?: number | null;
@@ -343,6 +348,127 @@ export interface NoticeListResponse {
         total: number;
         totalPages: number;
     };
+}
+
+export type IntegrationEventType =
+    | 'call.intake'
+    | 'notice.imported'
+    | 'task.suggested'
+    | 'message.imported'
+    | 'file.imported'
+    | 'unknown.received';
+
+export type IntegrationEventStatus =
+    | 'RECEIVED'
+    | 'NORMALIZED'
+    | 'PENDING_REVIEW'
+    | 'PROCESSED'
+    | 'IGNORED'
+    | 'ARCHIVED'
+    | 'FAILED'
+    | 'DUPLICATE';
+
+export type IntegrationIntakeMethod =
+    | 'webhook'
+    | 'api'
+    | 'automation'
+    | 'email'
+    | 'manual'
+    | 'import'
+    | 'provider_adapter';
+
+export interface IntegrationEvent {
+    id: number;
+    provider: string;
+    intakeMethod: IntegrationIntakeMethod | string;
+    eventType: IntegrationEventType | string;
+    externalEventId?: string | null;
+    rawPayload?: Record<string, unknown>;
+    normalizedPayload?: Record<string, unknown>;
+    status: IntegrationEventStatus;
+    processingError?: string | null;
+    receivedAt: string;
+    processedAt?: string | null;
+    reviewedAt?: string | null;
+    relatedRecordType?: string | null;
+    relatedRecordId?: number | null;
+    metadata?: Record<string, unknown>;
+    wineryId: number;
+    createdBy?: number | null;
+    reviewedBy?: number | null;
+    createdAt: string;
+    updatedAt: string;
+    isTerminal?: boolean;
+    Creator?: {
+        id: number;
+        displayName?: string | null;
+        email?: string | null;
+        role?: string;
+    } | null;
+    Reviewer?: {
+        id: number;
+        displayName?: string | null;
+        email?: string | null;
+        role?: string;
+    } | null;
+}
+
+export interface IntegrationEventListResponse {
+    events: IntegrationEvent[];
+    pagination: {
+        page: number;
+        pageSize: number;
+        total: number;
+        totalPages: number;
+    };
+}
+
+export interface IntegrationEventFilters {
+    status?: IntegrationEventStatus | 'all' | string;
+    eventType?: IntegrationEventType | 'all' | string;
+    provider?: string;
+    search?: string;
+    page?: number;
+    pageSize?: number;
+}
+
+export interface IntegrationEventCreateInput {
+    provider: string;
+    intakeMethod?: IntegrationIntakeMethod;
+    eventType: IntegrationEventType;
+    externalEventId?: string | null;
+    rawPayload: Record<string, unknown>;
+    normalizedPayload?: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
+    receivedAt?: string | null;
+}
+
+export type IntegrationReviewAction = 'publish_notice' | 'create_task' | 'link_task' | 'ignore' | 'archive';
+
+export interface IntegrationEventReviewInput {
+    action: IntegrationReviewAction;
+    reason?: string | null;
+    taskId?: number;
+    taskIds?: number[];
+    notice?: Partial<NoticeInput>;
+    task?: {
+        requesterName?: string | null;
+        requesterPhone?: string | null;
+        category?: string;
+        subType?: string;
+        priority?: string;
+        dueAt?: string | null;
+        suggestedAction?: string | null;
+        steps?: TaskStepInput[];
+    };
+}
+
+export interface IntegrationEventReviewResponse {
+    event: IntegrationEvent;
+    noticeId?: number;
+    taskId?: number;
+    notice?: Notice;
+    task?: Task;
 }
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000') + '/api';
@@ -831,6 +957,83 @@ export async function unlinkTaskNotice(taskId: number, noticeId: number): Promis
     return json.task;
 }
 
+export async function fetchIntegrationEvents(filters: IntegrationEventFilters = {}): Promise<IntegrationEventListResponse> {
+    const params = new URLSearchParams();
+    if (filters.status && filters.status !== 'all') params.append('status', filters.status);
+    if (filters.eventType && filters.eventType !== 'all') params.append('eventType', filters.eventType);
+    if (filters.provider && filters.provider !== 'all') params.append('provider', filters.provider);
+    if (filters.search) params.append('search', filters.search);
+    if (filters.page) params.append('page', String(filters.page));
+    if (filters.pageSize) params.append('pageSize', String(filters.pageSize));
+
+    const res = await fetch(`${API_BASE}/integration-events?${params.toString()}`, {
+        headers: {
+            'Authorization': await getAuthToken()
+        },
+        cache: 'no-store'
+    });
+
+    if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.error?.message || 'Failed to fetch integration events');
+    }
+
+    return await res.json();
+}
+
+export async function getIntegrationEvent(eventId: number): Promise<IntegrationEvent> {
+    const res = await fetch(`${API_BASE}/integration-events/${eventId}`, {
+        headers: {
+            'Authorization': await getAuthToken()
+        },
+        cache: 'no-store'
+    });
+
+    if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.error?.message || 'Failed to fetch integration event');
+    }
+
+    const json = await res.json();
+    return json.event;
+}
+
+export async function createIntegrationEvent(data: IntegrationEventCreateInput): Promise<{ event: IntegrationEvent; duplicate: boolean }> {
+    const res = await fetch(`${API_BASE}/integration-events`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': await getAuthToken()
+        },
+        body: JSON.stringify(data)
+    });
+
+    if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.error?.message || 'Failed to create integration event');
+    }
+
+    return await res.json();
+}
+
+export async function reviewIntegrationEvent(eventId: number, data: IntegrationEventReviewInput): Promise<IntegrationEventReviewResponse> {
+    const res = await fetch(`${API_BASE}/integration-events/${eventId}/review`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': await getAuthToken()
+        },
+        body: JSON.stringify(data)
+    });
+
+    if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.error?.message || 'Failed to review integration event');
+    }
+
+    return await res.json();
+}
+
 export interface Staff {
     id: number;
     displayName: string;
@@ -1135,6 +1338,9 @@ export interface IntegrationConnection {
     baseUrl?: string | null;
     webhookUrl?: string | null;
     webhookSigningConfigured?: boolean;
+    webhookSecret?: string | null;
+    clearWebhookSecret?: boolean;
+    webhookSecretLastRotatedAt?: string | null;
     capabilities?: string[];
     lastTestedAt?: string | null;
     lastError?: string | null;

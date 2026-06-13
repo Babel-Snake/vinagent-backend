@@ -1,5 +1,6 @@
 process.env.ALLOW_TEST_AUTH_BYPASS = 'true';
 process.env.PIN_SESSION_SECRET = 'pin-auth-test-secret';
+process.env.RESOLVE_STAFF_RATE_LIMIT_MAX = '2';
 
 const request = require('supertest');
 const app = require('../../app');
@@ -75,6 +76,25 @@ describe('PIN Auth Routes', () => {
         expect(res.body.allowManagerBasicPin).toBe(true);
         expect(res.body.pinIdleTimeoutSeconds).toBe(120);
         expect(res.body.wineryName).toBe('PIN Route Test Winery');
+    });
+
+    it('rate-limits repeated public staff resolution attempts', async () => {
+        await request(app)
+            .get('/api/public/resolve-staff')
+            .query({ username: 'Missing Staff' })
+            .expect(404);
+
+        await request(app)
+            .get('/api/public/resolve-staff')
+            .query({ username: 'Missing Staff' })
+            .expect(404);
+
+        const limited = await request(app)
+            .get('/api/public/resolve-staff')
+            .query({ username: 'Missing Staff' })
+            .expect(429);
+
+        expect(limited.body.error).toMatch(/too many staff resolution attempts/i);
     });
 
     it('creates a staff PIN session that can fetch the current profile', async () => {

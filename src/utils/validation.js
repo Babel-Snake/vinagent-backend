@@ -407,6 +407,26 @@ const winerySopSchema = Joi.object({
 const INTEGRATION_DOMAINS = ['sms', 'email', 'pos', 'crm', 'booking', 'delivery'];
 const INTEGRATION_STATUSES = ['not_connected', 'connected', 'error', 'needs_reauth'];
 const INTEGRATION_AUTH_METHODS = ['none', 'api_key', 'oauth', 'webhook', 'manual'];
+const INTEGRATION_EVENT_TYPES = [
+    'call.intake',
+    'notice.imported',
+    'task.suggested',
+    'message.imported',
+    'file.imported',
+    'unknown.received'
+];
+const INTEGRATION_EVENT_STATUSES = [
+    'RECEIVED',
+    'NORMALIZED',
+    'PENDING_REVIEW',
+    'PROCESSED',
+    'IGNORED',
+    'ARCHIVED',
+    'FAILED',
+    'DUPLICATE'
+];
+const INTEGRATION_INTAKE_METHODS = ['webhook', 'api', 'automation', 'email', 'manual', 'import', 'provider_adapter'];
+const INTEGRATION_REVIEW_ACTIONS = ['publish_notice', 'create_task', 'link_task', 'ignore', 'archive'];
 
 const providerConnectionSchema = Joi.object({
     provider: Joi.string().max(100).allow('', null),
@@ -419,6 +439,9 @@ const providerConnectionSchema = Joi.object({
     baseUrl: Joi.string().max(500).allow('', null),
     webhookUrl: Joi.string().max(500).allow('', null),
     webhookSigningConfigured: Joi.boolean().default(false),
+    webhookSecret: Joi.string().min(16).max(500).allow('', null),
+    clearWebhookSecret: Joi.boolean().default(false),
+    webhookSecretLastRotatedAt: Joi.date().iso().allow(null),
     capabilities: Joi.array().items(Joi.string().max(100)).default([]),
     lastTestedAt: Joi.date().iso().allow(null),
     lastError: Joi.string().max(1000).allow('', null),
@@ -449,6 +472,60 @@ const wineryIntegrationTestSchema = Joi.object({
 const emailSyncSchema = Joi.object({
     limit: Joi.number().integer().min(1).max(100).optional()
 });
+
+const integrationEventCreateSchema = Joi.object({
+    provider: Joi.string().trim().min(1).max(100).required(),
+    intakeMethod: Joi.string().valid(...INTEGRATION_INTAKE_METHODS).default('manual'),
+    eventType: Joi.string().valid(...INTEGRATION_EVENT_TYPES).required(),
+    externalEventId: Joi.string().trim().max(255).allow('', null),
+    rawPayload: Joi.object().unknown(true).default({}),
+    normalizedPayload: Joi.object().unknown(true).optional(),
+    metadata: Joi.object().unknown(true).optional(),
+    receivedAt: Joi.date().iso().allow(null)
+});
+
+const integrationEventListSchema = Joi.object({
+    status: Joi.string().valid(...INTEGRATION_EVENT_STATUSES, 'all').default('all'),
+    eventType: Joi.string().valid(...INTEGRATION_EVENT_TYPES, 'all').default('all'),
+    provider: Joi.string().trim().max(100).allow('all').default('all'),
+    search: Joi.string().trim().max(200).allow('', null),
+    page: Joi.number().integer().min(1).optional(),
+    pageSize: Joi.number().integer().min(1).max(100).optional()
+});
+
+const integrationEventReviewSchema = Joi.object({
+    action: Joi.string().valid(...INTEGRATION_REVIEW_ACTIONS).required(),
+    reason: Joi.string().trim().max(1000).allow('', null),
+    taskId: Joi.number().integer().positive().optional(),
+    taskIds: Joi.array().items(Joi.number().integer().positive()).max(50).default([]),
+    notice: Joi.object({
+        title: Joi.string().trim().max(200),
+        body: Joi.string().trim().max(10000),
+        category: Joi.string().valid(...NOTICE_CATEGORIES),
+        priority: Joi.string().valid(...NOTICE_PRIORITIES),
+        isPinned: Joi.boolean(),
+        audienceType: Joi.string().valid(...NOTICE_AUDIENCE_TYPES),
+        audienceRoles: Joi.array().items(Joi.string().valid(...NOTICE_AUDIENCE_ROLES)).max(10),
+        audienceUserIds: Joi.array().items(Joi.number().integer().positive()).max(100),
+        effectiveFrom: Joi.date().iso().allow(null),
+        expiresAt: Joi.date().iso().allow(null)
+    }).unknown(false).default({}),
+    task: Joi.object({
+        requesterName: Joi.string().max(200).allow('', null),
+        requesterPhone: Joi.string().max(30).allow('', null),
+        category: Joi.string().valid(...CATEGORIES),
+        subType: Joi.string().max(50),
+        priority: Joi.string().valid(...PRIORITIES),
+        dueAt: Joi.date().iso().allow(null),
+        suggestedAction: Joi.string().max(4000).allow('', null),
+        steps: Joi.array().items(taskStepCreateSchema).max(20)
+    }).unknown(false).default({})
+}).custom((value, helpers) => {
+    if (value.action === 'link_task' && !value.taskId) {
+        return helpers.message('A taskId is required when linking an event to an existing task.');
+    }
+    return value;
+}, 'integration event review validation');
 
 const winerySettingsSchema = Joi.object({
     identityMatchingConfig: Joi.object({
@@ -582,6 +659,9 @@ module.exports = {
     wineryIntegrationSchema,
     wineryIntegrationTestSchema,
     emailSyncSchema,
+    integrationEventCreateSchema,
+    integrationEventListSchema,
+    integrationEventReviewSchema,
     winerySettingsSchema,
     wineryContactSchema,
     createMemberSchema,
@@ -598,6 +678,9 @@ module.exports = {
     INTEGRATION_DOMAINS,
     INTEGRATION_STATUSES,
     INTEGRATION_AUTH_METHODS,
+    INTEGRATION_EVENT_TYPES,
+    INTEGRATION_EVENT_STATUSES,
+    INTEGRATION_INTAKE_METHODS,
     WAITING_ON,
     STEP_TYPES,
     STEP_STATUSES,

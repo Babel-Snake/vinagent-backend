@@ -1,7 +1,7 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const webhookController = require('../controllers/webhook.controller');
-const { validateTwilioSignature, validateEmailSignature } = require('../middleware/webhookValidation');
+const { validateTwilioSignature, validateEmailSignature, validateIntegrationWebhookSignature } = require('../middleware/webhookValidation');
 const { validate, smsWebhookSchema, emailWebhookSchema, voiceWebhookSchema } = require('../utils/validation');
 
 const router = express.Router();
@@ -55,12 +55,21 @@ router.post('/voice',
     webhookController.handleVoice
 );
 
-// Retell Webhook (Voice AI)
-router.post('/retell',
+const retellWebhookHandlers = [
     webhookLimiter, // Use shared or dedicated limiter? Shared is fine for now
     require('../middleware/webhookValidation').validateRetellSignature,
     // No schema validation yet, as Retell payload shape is TBD
     webhookController.handleRetell
+];
+
+// Retell Webhook (Voice AI)
+router.post('/retell', ...retellWebhookHandlers);
+router.post('/retell/:wineryId', ...retellWebhookHandlers);
+
+router.post('/integration/:wineryId/:domain',
+    webhookLimiter,
+    validateIntegrationWebhookSignature,
+    webhookController.handleIntegrationEvent
 );
 
 module.exports = router;

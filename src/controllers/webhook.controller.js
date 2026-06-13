@@ -2,10 +2,21 @@ const { Message, Winery, Member, WinerySettings, sequelize } = require('../model
 const triageService = require('../services/triage.service');
 const taskService = require('../services/taskService');
 const customerIdentityService = require('../services/customerIdentity.service');
+const integrationEventService = require('../services/integrationEvent.service');
+const retellAdapter = require('../services/integrations/inbound/providers/retell');
 const logger = require('../config/logger');
 const AppError = require('../utils/AppError');
 const { redact, scrubPII } = require('../utils/sanitizer');
 const telemetry = require('../services/telemetry');
+
+const INTEGRATION_EVENT_TYPES = new Set([
+    'call.intake',
+    'notice.imported',
+    'task.suggested',
+    'message.imported',
+    'file.imported',
+    'unknown.received'
+]);
 
 async function resolveWineryByContact(contact) {
     return Winery.findOne({ where: contact });
@@ -25,6 +36,61 @@ async function resolveWebhookIdentity({ wineryId, inboundMethod, requesterEmail 
         transaction,
         allowAutoCreate: false
     });
+}
+
+function pickString(...values) {
+    for (const value of values) {
+        if (typeof value === 'string' && value.trim()) return value.trim();
+        if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    }
+    return null;
+}
+
+function pickObject(value) {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+}
+
+function normalizeIntegrationWebhookPayload(body, context) {
+    const payload = pickObject(body) || {};
+    const provider = pickString(
+        payload.provider,
+        payload.source,
+        context.providerConnection?.provider,
+        context.domain
+    ) || context.domain;
+    const requestedEventType = pickString(payload.eventType, payload.type, payload.event_type);
+    const eventType = INTEGRATION_EVENT_TYPES.has(requestedEventType)
+        ? requestedEventType
+        : 'unknown.received';
+    const rawPayload = pickObject(payload.rawPayload) || pickObject(payload.payload) || payload;
+    const normalizedPayload = pickObject(payload.normalizedPayload) || undefined;
+    const externalEventId = pickString(
+        payload.externalEventId,
+        payload.external_id,
+        payload.eventId,
+        payload.id,
+        rawPayload.id,
+        rawPayload.eventId,
+        rawPayload.externalEventId
+    );
+    const metadata = {
+        ...(pickObject(payload.metadata) || {}),
+        webhook: {
+            domain: context.domain,
+            configuredProvider: context.providerConnection?.provider || null
+        }
+    };
+
+    return {
+        provider,
+        intakeMethod: 'webhook',
+        eventType,
+        externalEventId,
+        rawPayload,
+        normalizedPayload,
+        metadata,
+        receivedAt: pickString(payload.receivedAt, payload.timestamp, payload.createdAt)
+    };
 }
 
 async function handleSms(req, res, next) {
@@ -295,13 +361,100 @@ async function handleVoice(req, res, next) {
     }
 }
 
+async function handleIntegrationEvent(req, res, next) {
+    const start = Date.now();
+    try {
+        const context = req.integrationWebhook;
+        const data = normalizeIntegrationWebhookPayload(req.body, context);
+        const result = await integrationEventService.createIntegrationEvent({
+            wineryId: context.wineryId,
+            userId: null,
+            data
+        });
+
+        telemetry.recordIngestion('integration_event', result.duplicate ? telemetry.STATUS.DUPLICATE : telemetry.STATUS.SUCCESS, Date.now() - start, {
+            domain: context.domain,
+            provider: data.provider,
+            eventType: data.eventType,
+            duplicate: result.duplicate
+        });
+        logger.info('Created integration event from generic webhook', {
+            wineryId: context.wineryId,
+            domain: context.domain,
+            provider: data.provider,
+            eventType: data.eventType,
+            eventId: result.event.id,
+            duplicate: result.duplicate
+        });
+
+        res.status(result.duplicate ? 200 : 201).json({
+            success: true,
+            ...result
+        });
+    } catch (err) {
+        telemetry.recordIngestion('integration_event', telemetry.STATUS.FAILURE, Date.now() - start, { error: err.message });
+        next(err);
+    }
+}
+
+async function handleRetell(req, res, next) {
+    const start = Date.now();
+    try {
+        const adapted = retellAdapter.buildRetellIntegrationEvent(req.body, {
+            wineryId: req.params.wineryId || req.query.wineryId
+        });
+
+        logger.info('Received Retell webhook', {
+            event: adapted.retellEvent,
+            externalCallId: adapted.externalCallId,
+            shouldStore: adapted.shouldStore
+        });
+
+        if (!adapted.shouldStore) {
+            telemetry.recordIngestion('retell', telemetry.STATUS.PARTIAL, Date.now() - start, {
+                retellEvent: adapted.retellEvent,
+                reason: adapted.reason
+            });
+            return res.json({
+                success: true,
+                received: true,
+                skipped: true,
+                reason: adapted.reason
+            });
+        }
+
+        if (!adapted.wineryId) {
+            throw new AppError('Retell webhook could not be mapped to a winery.', 400, 'WINERY_CONTEXT_REQUIRED');
+        }
+
+        const result = await integrationEventService.createIntegrationEvent({
+            wineryId: adapted.wineryId,
+            userId: null,
+            data: adapted.event
+        });
+
+        telemetry.recordIngestion('retell', result.duplicate ? telemetry.STATUS.DUPLICATE : telemetry.STATUS.SUCCESS, Date.now() - start, {
+            wineryId: adapted.wineryId,
+            eventType: adapted.event.eventType,
+            retellEvent: adapted.retellEvent,
+            duplicate: result.duplicate
+        });
+
+        return res.status(result.duplicate ? 200 : 201).json({
+            success: true,
+            received: true,
+            ...result
+        });
+    } catch (err) {
+        telemetry.recordIngestion('retell', telemetry.STATUS.FAILURE, Date.now() - start, { error: err.message });
+        return next(err);
+    }
+}
+
 module.exports = {
     handleSms,
     handleEmail,
     handleVoice,
-    handleRetell: async (req, res) => {
-        logger.info('Received Retell webhook', { event: req.body.event_type });
-        // TODO: Implement Retell logic (Message creation -> Triage -> Task)
-        res.json({ success: true, received: true });
-    }
+    handleIntegrationEvent,
+    handleRetell
 };

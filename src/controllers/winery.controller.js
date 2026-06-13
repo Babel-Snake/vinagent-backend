@@ -93,7 +93,12 @@ exports.getWinery = async (req, res, next) => {
 
         if (!winery) throw new AppError('Winery not found', 404, 'NOT_FOUND');
 
-        res.json({ success: true, data: winery });
+        const data = winery.toJSON();
+        if (data.integrationConfig) {
+            data.integrationConfig = integrationConnectionService.serializeIntegrationConfig(data.integrationConfig);
+        }
+
+        res.json({ success: true, data });
     } catch (err) {
         next(err);
     }
@@ -158,7 +163,11 @@ exports.updateIntegrationConfig = async (req, res, next) => {
             integrationConfig: config
         });
 
-        res.json({ success: true, data: config, settings });
+        res.json({
+            success: true,
+            data: integrationConnectionService.serializeIntegrationConfig(config),
+            settings
+        });
     } catch (err) { next(err); }
 };
 

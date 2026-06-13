@@ -24,6 +24,7 @@ export default function Navbar({ user, fullProfile, onProfileUpdated }: NavbarPr
         { href: '/home', label: 'Home', icon: 'home', visible: true },
         { href: '/tasks', label: 'Tasks', icon: 'tasks', visible: true },
         { href: '/noticeboard', label: 'NoticeBoard', icon: 'noticeboard', visible: true },
+        { href: '/integration-events', label: 'Intake', icon: 'intake', visible: isManagerOrAdmin },
         { href: '/calendar', label: 'Calendar', icon: 'calendar', visible: true },
         { href: '/customers', label: 'Customers', icon: 'customers', visible: isManagerOrAdmin },
         { href: '/winery', label: 'Winery', icon: 'winery', visible: isManagerOrAdmin },
@@ -135,6 +136,13 @@ function NavIcon({ name }: { name: string }) {
         return (
             <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h10M4 18h16M18 10l2 2-2 2" />
+            </svg>
+        );
+    }
+    if (name === 'intake') {
+        return (
+            <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5h16v5H4V5Zm3 9h10m-7 4h4M8 10l4 3 4-3" />
             </svg>
         );
     }

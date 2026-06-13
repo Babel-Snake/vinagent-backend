@@ -64,6 +64,7 @@ AI_SKIP=false
 
 TWILIO_ACCOUNT_SID=...
 TWILIO_AUTH_TOKEN=...
+TWILIO_PHONE_NUMBER=...
 RETELL_WEBHOOK_SECRET=...
 ```
 
@@ -71,6 +72,7 @@ Important:
 
 * the repo uses `DB_*` variable names, not `DATABASE_*`
 * `ALLOW_TEST_AUTH_BYPASS` should only be enabled for local test/dev scenarios
+* production outbound SMS requires `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_PHONE_NUMBER`; otherwise SMS sends fail closed
 
 ## 4. Create the Database
 
@@ -140,6 +142,9 @@ Check:
 * `FIREBASE_PROJECT_ID`
 * `FIREBASE_CLIENT_EMAIL`
 * `FIREBASE_PRIVATE_KEY`
+
+The backend initializes Firebase Admin from these environment variables. The ignored
+`src/config/serviceAccountKey.json` file is only a local fallback.
 
 ### Webhook signature failures in local development
 

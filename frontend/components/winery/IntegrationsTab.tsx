@@ -95,16 +95,20 @@ const DEFAULT_CAPABILITIES: Record<IntegrationDomain, string[]> = {
 const DEFAULT_WEBHOOKS: Record<IntegrationDomain, string> = {
     sms: '/api/webhooks/sms',
     email: '/api/webhooks/email',
-    pos: '/api/webhooks/pos',
-    crm: '/api/webhooks/crm',
-    booking: '/api/webhooks/booking',
-    delivery: '/api/webhooks/delivery'
+    pos: '/api/webhooks/integration/{wineryId}/pos',
+    crm: '/api/webhooks/integration/{wineryId}/crm',
+    booking: '/api/webhooks/integration/{wineryId}/booking',
+    delivery: '/api/webhooks/integration/{wineryId}/delivery'
 };
 
 const DOMAINS: IntegrationDomain[] = ['sms', 'email', 'crm', 'booking', 'pos', 'delivery'];
 const CHANNELS = ['sms', 'email'];
 
-function defaultConnection(domain: IntegrationDomain, provider: string): IntegrationConnection {
+function webhookPath(domain: IntegrationDomain, wineryId?: number) {
+    return DEFAULT_WEBHOOKS[domain].replace('{wineryId}', String(wineryId || '{wineryId}'));
+}
+
+function defaultConnection(domain: IntegrationDomain, provider: string, wineryId?: number): IntegrationConnection {
     return {
         provider,
         status: 'not_connected',
@@ -112,8 +116,10 @@ function defaultConnection(domain: IntegrationDomain, provider: string): Integra
         externalAccountId: '',
         externalLocationId: '',
         baseUrl: '',
-        webhookUrl: DEFAULT_WEBHOOKS[domain],
+        webhookUrl: webhookPath(domain, wineryId),
         webhookSigningConfigured: false,
+        webhookSecret: '',
+        clearWebhookSecret: false,
         capabilities: DEFAULT_CAPABILITIES[domain],
         lastTestedAt: null,
         lastError: null,
@@ -121,14 +127,17 @@ function defaultConnection(domain: IntegrationDomain, provider: string): Integra
     };
 }
 
-function normalizeConnections(config: any, baseProviders: Record<IntegrationDomain, string>) {
+function normalizeConnections(config: any, baseProviders: Record<IntegrationDomain, string>, wineryId?: number) {
     const stored = config.providerConnections || {};
 
     return DOMAINS.reduce((connections, domain) => {
         connections[domain] = {
-            ...defaultConnection(domain, baseProviders[domain]),
+            ...defaultConnection(domain, baseProviders[domain], wineryId),
             ...(stored[domain] || {}),
-            provider: baseProviders[domain]
+            provider: baseProviders[domain],
+            webhookUrl: stored[domain]?.webhookUrl || webhookPath(domain, wineryId),
+            webhookSecret: '',
+            clearWebhookSecret: false
         };
         return connections;
     }, {} as Record<IntegrationDomain, IntegrationConnection>);
@@ -173,7 +182,7 @@ export function IntegrationsTab({ winery, onUpdate }: { winery: any, onUpdate: (
         crmProvider: baseProviders.crm,
         bookingProvider: baseProviders.booking,
         deliveryProvider: baseProviders.delivery,
-        providerConnections: normalizeConnections(config, baseProviders)
+        providerConnections: normalizeConnections(config, baseProviders, winery.id)
     });
     const [saving, setSaving] = useState(false);
     const [testingDomain, setTestingDomain] = useState<IntegrationDomain | null>(null);
@@ -223,6 +232,21 @@ export function IntegrationsTab({ winery, onUpdate }: { winery: any, onUpdate: (
         setSaving(true);
         try {
             await updateIntegrationConfig(formData);
+            setFormData((current) => ({
+                ...current,
+                providerConnections: DOMAINS.reduce((connections, domain) => {
+                    const connection = current.providerConnections[domain];
+                    connections[domain] = {
+                        ...connection,
+                        webhookSigningConfigured: connection.clearWebhookSecret
+                            ? false
+                            : Boolean(connection.webhookSecret || connection.webhookSigningConfigured),
+                        webhookSecret: '',
+                        clearWebhookSecret: false
+                    };
+                    return connections;
+                }, {} as Record<IntegrationDomain, IntegrationConnection>)
+            }));
             onUpdate();
         } catch {
             alert('Failed to save integrations');
@@ -421,16 +445,30 @@ export function IntegrationsTab({ winery, onUpdate }: { winery: any, onUpdate: (
                                             className="mt-1 w-full rounded-md border border-gray-300 p-2 text-sm"
                                         />
                                     </div>
-                                    <div className="flex items-end">
-                                        <label className="mb-2 inline-flex items-center gap-2 text-sm text-gray-700">
-                                            <input
-                                                type="checkbox"
-                                                checked={Boolean(connection.webhookSigningConfigured)}
-                                                onChange={(e) => updateConnection(domain, { webhookSigningConfigured: e.target.checked })}
-                                                className="h-4 w-4 rounded border-gray-300 text-indigo-600"
-                                            />
-                                            Signed webhooks
-                                        </label>
+                                    <div>
+                                        <label className="block text-xs font-bold uppercase text-gray-600">Webhook Secret</label>
+                                        <input
+                                            type="password"
+                                            value={connection.webhookSecret || ''}
+                                            onChange={(e) => updateConnection(domain, { webhookSecret: e.target.value, clearWebhookSecret: false })}
+                                            className="mt-1 w-full rounded-md border border-gray-300 p-2 text-sm"
+                                            placeholder={connection.webhookSigningConfigured ? 'Configured; enter new secret to rotate' : 'Minimum 16 characters'}
+                                        />
+                                        <div className="mt-1 text-xs text-gray-500">
+                                            {connection.webhookSigningConfigured ? 'Signing configured' : 'Signing not configured'}
+                                            {connection.webhookSecretLastRotatedAt ? ` - Rotated ${new Date(connection.webhookSecretLastRotatedAt).toLocaleDateString()}` : ''}
+                                        </div>
+                                        {connection.webhookSigningConfigured && (
+                                            <label className="mt-2 inline-flex items-center gap-2 text-xs text-gray-700">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={Boolean(connection.clearWebhookSecret)}
+                                                    onChange={(e) => updateConnection(domain, { clearWebhookSecret: e.target.checked, webhookSecret: '' })}
+                                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600"
+                                                />
+                                                Clear saved secret
+                                            </label>
+                                        )}
                                     </div>
                                     <div className="lg:col-span-3">
                                         <label className="block text-xs font-bold uppercase text-gray-600">Capabilities</label>

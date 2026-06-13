@@ -19,7 +19,9 @@ if (process.env.NODE_ENV === 'production') {
     'PUBLIC_URL',
     'EMAIL_WEBHOOK_SECRET',
     'RETELL_WEBHOOK_SECRET',
-    'TWILIO_AUTH_TOKEN'
+    'TWILIO_ACCOUNT_SID',
+    'TWILIO_AUTH_TOKEN',
+    'TWILIO_PHONE_NUMBER'
   ];
 
   const missing = requiredVars.filter(key => !process.env[key]);

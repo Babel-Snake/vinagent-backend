@@ -34,7 +34,9 @@ Before treating this build as production-ready, verify:
 * docs, tests, and implementation all agree on the simplified task lifecycle
 * webhook signature validation is enforced in production
 * Firebase auth bypass is disabled outside test/dev
+* Firebase Admin initializes from production environment variables, not a local service-account file
 * production boot fails without required security secrets
+* outbound SMS cannot silently use mock mode in production
 * no debug-file writes remain on hot request paths
 * analytics and dashboard routes do not rely on retired statuses
 * operational analytics use the current task workflow fields and not stale status assumptions
@@ -45,11 +47,14 @@ Before treating this build as production-ready, verify:
 ### Security
 
 * secrets live in environment variables
+* `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and `FIREBASE_PRIVATE_KEY` are set for Firebase Admin
 * webhook secrets are configured
+* `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_PHONE_NUMBER` are set before enabling outbound SMS
 * `ALLOW_TEST_AUTH_BYPASS` is off in production
 * `PIN_SESSION_SECRET` or `SESSION_SECRET` is strong and set in production
 * `PUBLIC_URL` is set to the deployed public backend origin
 * HTTPS / proxy handling is configured correctly
+* public staff username resolution is protected by the endpoint-specific rate limiter
 
 ### Testing
 

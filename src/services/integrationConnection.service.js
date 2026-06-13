@@ -1,4 +1,6 @@
+const crypto = require('crypto');
 const { WineryIntegrationConfig, WinerySettings } = require('../models');
+const { ValidationError } = require('../utils/errors');
 
 const DOMAINS = ['sms', 'email', 'pos', 'crm', 'booking', 'delivery'];
 
@@ -41,11 +43,13 @@ const DEFAULT_CAPABILITIES = {
 const WEBHOOK_PATHS = {
   sms: '/api/webhooks/sms',
   email: '/api/webhooks/email',
-  booking: '/api/webhooks/booking',
-  crm: '/api/webhooks/crm',
-  pos: '/api/webhooks/pos',
-  delivery: '/api/webhooks/delivery'
+  booking: '/api/webhooks/integration/{wineryId}/booking',
+  crm: '/api/webhooks/integration/{wineryId}/crm',
+  pos: '/api/webhooks/integration/{wineryId}/pos',
+  delivery: '/api/webhooks/integration/{wineryId}/delivery'
 };
+
+const WEBHOOK_SECRET_MIN_LENGTH = 16;
 
 function parseJsonObject(value) {
   if (!value) return {};
@@ -59,6 +63,53 @@ function parseJsonObject(value) {
     }
   }
   return {};
+}
+
+function digestWebhookSecret(secret) {
+  return crypto
+    .createHash('sha256')
+    .update(String(secret || '').trim(), 'utf8')
+    .digest('hex');
+}
+
+function hashWebhookSecret(secret) {
+  const normalized = String(secret || '').trim();
+  if (!normalized) return null;
+  if (normalized.length < WEBHOOK_SECRET_MIN_LENGTH) {
+    throw new ValidationError(`Webhook signing secrets must be at least ${WEBHOOK_SECRET_MIN_LENGTH} characters.`);
+  }
+  return digestWebhookSecret(normalized);
+}
+
+function sanitizeProviderConnection(connection = {}) {
+  const parsed = parseJsonObject(connection);
+  const webhookSigningConfigured = Boolean(parsed.webhookSecretHash || parsed.webhookSigningConfigured);
+  const safeConnection = { ...parsed };
+  delete safeConnection.webhookSecret;
+  delete safeConnection.webhookSecretHash;
+  delete safeConnection.clearWebhookSecret;
+
+  return {
+    ...safeConnection,
+    webhookSigningConfigured
+  };
+}
+
+function sanitizeProviderConnections(providerConnections) {
+  const connections = parseJsonObject(providerConnections);
+  return Object.keys(connections).reduce((safe, domain) => {
+    safe[domain] = sanitizeProviderConnection(connections[domain]);
+    return safe;
+  }, {});
+}
+
+function serializeIntegrationConfig(config) {
+  if (!config) return null;
+  const plain = config.toJSON ? config.toJSON() : { ...config };
+  return {
+    ...plain,
+    providerConnections: sanitizeProviderConnections(plain.providerConnections)
+  };
 }
 
 function mapCrmProviderToExecution(provider) {
@@ -86,6 +137,7 @@ function hasLiveAdapter(domain, provider) {
 function normalizeProviderConnections(payload = {}, existingConfig = null) {
   const incomingConnections = parseJsonObject(payload.providerConnections);
   const existingConnections = parseJsonObject(existingConfig?.providerConnections);
+  const now = new Date().toISOString();
 
   return DOMAINS.reduce((connections, domain) => {
     const providerField = PROVIDER_FIELDS[domain];
@@ -93,6 +145,13 @@ function normalizeProviderConnections(payload = {}, existingConfig = null) {
     const incoming = parseJsonObject(incomingConnections[domain]);
     const existing = parseJsonObject(existingConnections[domain]);
     const executionProvider = getExecutionProvider(domain, provider);
+    const incomingSecret = typeof incoming.webhookSecret === 'string' ? incoming.webhookSecret.trim() : '';
+    const webhookSecretHash = incoming.clearWebhookSecret
+      ? null
+      : (incomingSecret ? hashWebhookSecret(incomingSecret) : existing.webhookSecretHash || null);
+    const webhookSecretLastRotatedAt = incoming.clearWebhookSecret
+      ? null
+      : (incomingSecret ? now : existing.webhookSecretLastRotatedAt || null);
 
     connections[domain] = {
       provider,
@@ -104,7 +163,9 @@ function normalizeProviderConnections(payload = {}, existingConfig = null) {
       externalLocationId: incoming.externalLocationId ?? existing.externalLocationId ?? '',
       baseUrl: incoming.baseUrl ?? existing.baseUrl ?? '',
       webhookUrl: incoming.webhookUrl ?? existing.webhookUrl ?? WEBHOOK_PATHS[domain],
-      webhookSigningConfigured: incoming.webhookSigningConfigured ?? existing.webhookSigningConfigured ?? false,
+      webhookSigningConfigured: Boolean(webhookSecretHash),
+      webhookSecretHash,
+      webhookSecretLastRotatedAt,
       capabilities: Array.isArray(incoming.capabilities)
         ? incoming.capabilities
         : (Array.isArray(existing.capabilities) ? existing.capabilities : DEFAULT_CAPABILITIES[domain]),
@@ -243,7 +304,13 @@ async function testConnection({ wineryId, domain }) {
 module.exports = {
   DOMAINS,
   DEFAULT_CAPABILITIES,
+  digestWebhookSecret,
+  hashWebhookSecret,
   normalizeProviderConnections,
+  parseJsonObject,
+  sanitizeProviderConnection,
+  sanitizeProviderConnections,
+  serializeIntegrationConfig,
   syncExecutionSettings,
   testConnection,
   mapCrmProviderToExecution,

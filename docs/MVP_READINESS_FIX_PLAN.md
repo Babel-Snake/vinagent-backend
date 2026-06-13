@@ -15,6 +15,12 @@ Open blockers:
 * B3 staging migration verification is blocked because no reachable MySQL service is available from this workspace.
 * E2 staging smoke testing still needs a deployed backend/frontend pair and production-like environment values.
 
+Recent pre-upload hardening completed locally:
+
+* Firebase Admin now initializes from `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and `FIREBASE_PRIVATE_KEY`, with the ignored `serviceAccountKey.json` file only retained as a local dev fallback.
+* Production outbound SMS now fails closed when Twilio credentials are incomplete instead of reporting mock delivery success.
+* `/api/public/resolve-staff` now has an endpoint-specific rate limiter.
+
 Accepted narrow-trial risks to review before MVP:
 
 * Frontend lint exits successfully, but 162 warnings remain, mostly `@typescript-eslint/no-explicit-any` and hook-dependency debt.
@@ -28,10 +34,10 @@ Accepted narrow-trial risks to review before MVP:
 | Backend high/critical audit | Pass | `npm audit --omit=dev --audit-level=high` exits `0` when run with system CA certs | Monitor moderate `uuid` transitive advisories |
 | Frontend high/critical audit | Pass | `npm audit --omit=dev --audit-level=high` exits `0` in `frontend/` when run with system CA certs | Monitor moderate `postcss` advisory |
 | Backend lint | Pass | `npm run lint` exits `0` | None |
-| Backend tests | Pass | `npm test -- --runInBand` passes with 27 suites / 152 tests | None |
+| Backend tests | Pass | `npm test -- --runInBand` passes with 32 suites / 169 tests | None |
 | Frontend lint | Pass with warnings | `npm run lint` exits `0` with 162 warnings | Reduce type/hook warnings before scaling |
 | Frontend build | Pass | `npm run build` passes with Next 16.2.6 and all dashboard routes generated | None |
-| Runtime security hardening | Pass for code changes | Focused auth/webhook/winery tests pass; full backend suite passes | Re-check in staging with production env |
+| Runtime security hardening | Pass for code changes | Focused auth/webhook/winery/Firebase/Twilio tests pass; full backend suite passes | Re-check in staging with production env |
 | Staging migrations | Blocked | `npx sequelize-cli db:migrate:status` fails with `connect ECONNREFUSED 127.0.0.1:3306`; `Start-Service MySQL80` fails | Run against staging MySQL |
 | Staging smoke test | Pending | Not runnable from this workspace without deployed services | Execute final smoke checklist |
 | Docs | Pass for current local build | API spec, frontend README, production readiness, PIN docs, env examples, and this file updated | Keep in sync during final fixes |
@@ -41,11 +47,11 @@ Accepted narrow-trial risks to review before MVP:
 
 | Date | Item | Status | Evidence | Notes |
 | --- | --- | --- | --- | --- |
-| 2026-05-29 | A1 backend dependency vulnerabilities | Complete for high/critical release gate | Backend audit exits `0` with `NODE_OPTIONS=--use-system-ca`; backend tests pass with 27 suites / 152 tests | Remaining moderate `uuid` transitive advisories have no safe non-breaking fix from npm. |
+| 2026-05-29 | A1 backend dependency vulnerabilities | Complete for high/critical release gate | Backend audit exits `0` with `NODE_OPTIONS=--use-system-ca`; backend tests pass with 32 suites / 169 tests | Remaining moderate `uuid` transitive advisories have no safe non-breaking fix from npm. |
 | 2026-05-29 | A2 frontend dependency vulnerabilities | Complete for high/critical release gate | Frontend audit exits `0` with `NODE_OPTIONS=--use-system-ca`; build passes with Next 16.2.6 | Remaining moderate `postcss` advisory has no safe non-breaking fix through the current Next dependency chain. |
 | 2026-05-29 | A3 hardcoded script credentials | Complete for tracked release files | Secret scan returns only placeholder private-key examples in `.env.example` and `docs/SETUP_BEGINNER.md` | Seed/test/debug credentials now come from env vars. Local ignored Firebase service account material must not be committed and should be rotated if ever used outside disposable local setup. |
 | 2026-05-29 | B1 backend lint compatibility | Complete | `npm run lint` exits `0` | Replaced legacy `.eslintrc.js` with ESLint 9 flat config and fixed real lint findings. |
-| 2026-05-29 | B2 backend regression tests | Complete | `npm test -- --runInBand` passes with 27 suites / 152 tests | Full suite remains green after dependency, lint, credential, auth, webhook, and winery hardening changes. |
+| 2026-05-29 | B2 backend regression tests | Complete | `npm test -- --runInBand` passes with 32 suites / 169 tests | Full suite remains green after dependency, lint, credential, auth, webhook, winery, Firebase env, Twilio, and public limiter hardening changes. |
 | 2026-05-29 | B3 migration verification | Blocked by database access | Sequelize CLI loads then fails with `connect ECONNREFUSED 127.0.0.1:3306`; MySQL80 service is unavailable | Added `db:migrate` and `db:migrate:status` scripts. Requires reachable staging MySQL. |
 | 2026-05-29 | C1 frontend lint failures | Complete for command gate | `npm run lint` exits `0` with 162 warnings | Errors fixed. Remaining warnings are tracked as type/hook debt. |
 | 2026-05-29 | C2 deterministic frontend build | Complete | `npm run build` exits `0`; no Firebase debug logging; no remote font dependency; Turbopack root configured | Added frontend-local `firebase` dependency and removed build-time debug logging. |
@@ -56,6 +62,9 @@ Accepted narrow-trial risks to review before MVP:
 | 2026-05-29 | D4 webhook signatures | Complete | Webhook security tests pass | Email comparisons use timing-safe comparison; Retell HMAC uses raw request body when present. |
 | 2026-05-29 | D5 PIN browser storage review | Complete for current MVP docs | `docs/PIN_LOGIN.md` updated | HTTP-only same-site cookies remain the recommended future hardening path. |
 | 2026-05-29 | D6 HTTPS/proxy handling | Complete | Backend tests pass | Production HTTPS redirect uses configured `PUBLIC_URL` instead of untrusted Host header. |
+| 2026-06-12 | D7 Firebase Admin env credentials | Complete | Focused Firebase config unit tests added; full backend suite passes | Production can initialize Firebase Admin from env vars and no longer requires the ignored local JSON file. Partial production env credentials fail fast. |
+| 2026-06-12 | D8 Twilio production SMS guard | Complete | Focused Twilio provider unit tests added; full backend suite passes | Production outbound SMS fails closed when `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, or `TWILIO_PHONE_NUMBER` is missing. |
+| 2026-06-12 | D9 public staff resolver limiter | Complete | PIN/public route integration test added; full backend suite passes | `/api/public/resolve-staff` has an endpoint-specific per-IP limiter configurable with `RESOLVE_STAFF_RATE_LIMIT_*`. |
 | 2026-05-29 | E1 production config completeness | Complete | `.env.example` includes security, webhook, attachment, telemetry, AI/test, and utility-script env vars | Production boot fails fast for required security/env settings. |
 | 2026-05-29 | E2 staging deployment smoke test | Pending external environment | Not runnable locally | Requires deployed API, frontend, Firebase, Twilio/email/Retell test secrets where applicable, and staging DB. |
 | 2026-05-29 | E3 logging/debug review | Complete for tracked build | Frontend build logs are clean; tracked debug/log artifacts removed | Keep production logs free of auth tokens, secrets, and reusable credentials. |
@@ -143,7 +152,7 @@ Status: complete.
 
 Testable outcome:
 
-* `npm test -- --runInBand` passes with 27 suites / 152 tests.
+* `npm test -- --runInBand` passes with 32 suites / 169 tests.
 
 ### B3. Staging MySQL migrations
 
@@ -298,6 +307,50 @@ Testable outcomes:
 * Backend tests pass.
 * Staging proxy/health behavior still needs live validation.
 
+### D7. Firebase Admin environment credentials
+
+Status: complete.
+
+Fix completed:
+
+* Firebase Admin credential loading now prefers `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and `FIREBASE_PRIVATE_KEY`.
+* The ignored `src/config/serviceAccountKey.json` file remains available only as a local fallback when no Firebase env credentials are present.
+* Partial Firebase env credentials fail fast in production instead of falling through to the local file.
+
+Testable outcomes:
+
+* Focused Firebase config unit tests pass.
+* Full backend suite passes.
+
+### D8. Twilio production SMS guard
+
+Status: complete.
+
+Fix completed:
+
+* Production config now requires `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_PHONE_NUMBER`.
+* The Twilio provider still returns mock SMS results outside production when credentials are absent.
+* In production, incomplete Twilio configuration throws `TWILIO_NOT_CONFIGURED` instead of returning a mock success.
+
+Testable outcomes:
+
+* Focused Twilio provider unit tests pass.
+* Full backend suite passes.
+
+### D9. Public staff resolution rate limit
+
+Status: complete.
+
+Fix completed:
+
+* Added an endpoint-specific per-IP rate limiter to `/api/public/resolve-staff`.
+* The limit is configurable with `RESOLVE_STAFF_RATE_LIMIT_WINDOW_MS` and `RESOLVE_STAFF_RATE_LIMIT_MAX`.
+
+Testable outcomes:
+
+* Public/PIN route integration tests cover the limiter.
+* Full backend suite passes.
+
 ## Workstream E: Operational Readiness
 
 ### E1. Production configuration completeness
@@ -308,6 +361,7 @@ Fix completed:
 
 * `.env.example` includes backend security, webhook, public URL, body limit, attachment, telemetry, AI/test, Twilio, and utility-script variables.
 * `frontend/.env.example` documents the frontend API base URL and Firebase public config.
+* `.env.example` documents Firebase Admin env credentials, complete production Twilio SMS requirements, and the public staff-resolution limiter.
 
 Testable outcomes:
 
@@ -414,7 +468,7 @@ Complete this table immediately before starting MVP trials.
 
 | Item | Result | Evidence |
 | --- | --- | --- |
-| Backend tests | Pass | `npm test -- --runInBand` passes with 27 suites / 152 tests |
+| Backend tests | Pass | `npm test -- --runInBand` passes with 32 suites / 169 tests |
 | Backend lint | Pass | `npm run lint` exits `0` |
 | Backend audit | Pass for high/critical | `NODE_OPTIONS=--use-system-ca npm audit --omit=dev --audit-level=high` exits `0`; 9 moderate `uuid` advisories remain |
 | Frontend lint | Pass with warnings | `npm run lint` exits `0`; 162 warnings remain |

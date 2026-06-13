@@ -20,6 +20,9 @@ module.exports = (sequelize, DataTypes) => {
         otherKey: 'calendarEventId',
         as: 'CalendarEvents'
       });
+      if (models.IntegrationEvent) {
+        Notice.belongsTo(models.IntegrationEvent, { foreignKey: 'sourceEventId', as: 'SourceEvent' });
+      }
     }
   }
 
@@ -84,6 +87,27 @@ module.exports = (sequelize, DataTypes) => {
       archivedAt: {
         type: DataTypes.DATE,
         allowNull: true
+      },
+      externalSource: {
+        type: DataTypes.STRING,
+        allowNull: true
+      },
+      externalId: {
+        type: DataTypes.STRING,
+        allowNull: true
+      },
+      externalPostedAt: {
+        type: DataTypes.DATE,
+        allowNull: true
+      },
+      externalAuthorName: {
+        type: DataTypes.STRING,
+        allowNull: true
+      },
+      sourceEventId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: 'IntegrationEvents', key: 'id' }
       },
       wineryId: {
         type: DataTypes.INTEGER,

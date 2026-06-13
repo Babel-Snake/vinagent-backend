@@ -2,6 +2,12 @@ const client = require('twilio');
 const crypto = require('crypto');
 const config = require('../config');
 const logger = require('../config/logger');
+const { WineryIntegrationConfig } = require('../models');
+const {
+    DOMAINS,
+    digestWebhookSecret,
+    parseJsonObject
+} = require('../services/integrationConnection.service');
 
 function timingSafeStringEqual(candidate, expected) {
     const candidateBuffer = Buffer.from(String(candidate || ''), 'utf8');
@@ -93,6 +99,79 @@ function validateRetellSignature(req, res, next) {
     }
 }
 
+function getSingleHeader(headers, name) {
+    const value = headers[name];
+    return Array.isArray(value) ? value[0] : value;
+}
+
+function normalizeSignature(value) {
+    const signature = String(value || '').trim();
+    return signature.startsWith('sha256=') ? signature.slice('sha256='.length) : signature;
+}
+
+function validateHmacSignature({ secret, signature, payload }) {
+    const expected = crypto
+        .createHmac('sha256', String(secret || '').trim())
+        .update(payload)
+        .digest('hex');
+
+    return timingSafeStringEqual(normalizeSignature(signature), expected);
+}
+
+async function validateIntegrationWebhookSignature(req, res, next) {
+    try {
+        const wineryId = Number.parseInt(req.params.wineryId, 10);
+        const domain = String(req.params.domain || '').toLowerCase();
+
+        if (!Number.isInteger(wineryId) || wineryId < 1 || !DOMAINS.includes(domain)) {
+            return res.status(404).json({ error: 'Webhook not found' });
+        }
+
+        const integrationConfig = await WineryIntegrationConfig.findOne({ where: { wineryId } });
+        const connections = parseJsonObject(integrationConfig?.providerConnections);
+        const connection = parseJsonObject(connections[domain]);
+
+        if (!connection.webhookSecretHash || !connection.webhookSigningConfigured) {
+            logger.warn('Integration webhook signing is not configured', { wineryId, domain });
+            return res.status(403).json({ error: 'Webhook signing not configured' });
+        }
+
+        const secret = getSingleHeader(req.headers, 'x-vinagent-webhook-secret');
+        if (!secret) {
+            logger.warn('Missing integration webhook secret header', { wineryId, domain });
+            return res.status(403).json({ error: 'Missing webhook secret' });
+        }
+
+        if (!timingSafeStringEqual(digestWebhookSecret(secret), connection.webhookSecretHash)) {
+            logger.warn('Invalid integration webhook secret', { wineryId, domain });
+            return res.status(403).json({ error: 'Invalid webhook secret' });
+        }
+
+        const signature = getSingleHeader(req.headers, 'x-vinagent-webhook-signature');
+        if (!signature) {
+            logger.warn('Missing integration webhook signature header', { wineryId, domain });
+            return res.status(403).json({ error: 'Missing signature' });
+        }
+
+        const payload = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
+        if (!validateHmacSignature({ secret, signature, payload })) {
+            logger.warn('Invalid integration webhook signature', { wineryId, domain });
+            return res.status(403).json({ error: 'Invalid signature' });
+        }
+
+        req.integrationWebhook = {
+            wineryId,
+            domain,
+            providerConnection: connection
+        };
+
+        return next();
+    } catch (err) {
+        logger.error('Error validating integration webhook signature', err);
+        return res.status(500).json({ error: 'Validation error' });
+    }
+}
+
 /**
  * Validates that the incoming request is from Twilio
  */
@@ -138,5 +217,6 @@ module.exports = {
     validateTwilioSignature,
     validateEmailSignature,
     validateRetellSignature,
+    validateIntegrationWebhookSignature,
     constructWebhookUrl
 };

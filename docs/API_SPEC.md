@@ -186,20 +186,117 @@ Success response:
 }
 ```
 
-### 3.4 `POST /api/webhooks/retell`
+### 3.4 `POST /api/webhooks/retell` / `POST /api/webhooks/retell/:wineryId`
 
 Consumes Retell callbacks.
 
-Current implementation acknowledges receipt but does not yet create tasks from Retell-specific events.
+Retell signatures are validated with `x-retell-signature` against the exact raw request body. The winery-scoped URL is recommended for production setup:
+
+```text
+POST /api/webhooks/retell/:wineryId
+```
+
+`call_analyzed` callbacks are stored as reviewable `IntegrationEvent` records:
+
+* `provider`: `retell`
+* `intakeMethod`: `webhook`
+* `eventType`: `call.intake`
+* `status`: `PENDING_REVIEW`
+
+Transient callbacks such as `call_started` are acknowledged but skipped so the manager review queue is not flooded.
 
 Response:
 
 ```json
 {
   "success": true,
-  "received": true
+  "received": true,
+  "duplicate": false,
+  "event": {
+    "id": 42,
+    "provider": "retell",
+    "eventType": "call.intake",
+    "status": "PENDING_REVIEW"
+  }
 }
 ```
+
+### 3.5 Authenticated Integration Event Intake
+
+Generic integration intake and review endpoints are mounted under `/api/integration-events`. These routes require dashboard authentication and manager/admin role.
+
+Currently exposed:
+
+* `GET /api/integration-events`
+* `POST /api/integration-events`
+* `GET /api/integration-events/:id`
+* `POST /api/integration-events/:id/review`
+
+`POST /api/integration-events` stores a redacted raw payload, creates a normalized payload, and deduplicates by `wineryId + provider + externalEventId` when an external ID is supplied.
+
+Supported MVP `eventType` values:
+
+* `call.intake`
+* `notice.imported`
+* `task.suggested`
+* `message.imported`
+* `file.imported`
+* `unknown.received`
+
+Review actions:
+
+* `publish_notice`: creates a normal VinAgent notice with external source metadata and optional `taskIds` links
+* `create_task`: creates a draft task from a call intake or generic event
+* `link_task`: links the event to an existing task by `taskId`
+* `ignore`
+* `archive`
+
+See `docs/INTEGRATION_INTAKE.md` for normalized payload examples and rollout guidance.
+
+### 3.6 Signed Generic Integration Webhook
+
+`POST /api/webhooks/integration/:wineryId/:domain`
+
+Accepts signed third-party handoff payloads and creates reviewable `IntegrationEvent` records. The `domain` must match one configured integration domain: `crm`, `booking`, `pos`, `delivery`, `sms`, or `email`.
+
+Required headers:
+
+* `x-vinagent-webhook-secret`: the shared secret configured for that winery/domain
+* `x-vinagent-webhook-signature`: HMAC-SHA256 of the exact raw request body using the same shared secret. The value may be either `<hex>` or `sha256=<hex>`.
+
+The API stores only a SHA-256 hash of the shared secret in `WineryIntegrationConfig.providerConnections.<domain>.webhookSecretHash`; the hash and raw secret are never returned by dashboard APIs.
+
+Example payload:
+
+```json
+{
+  "provider": "zapier",
+  "eventType": "notice.imported",
+  "externalEventId": "zapier-notice-1",
+  "rawPayload": {
+    "title": "Distributor pickup changed",
+    "body": "Pickup moved to Friday morning.",
+    "posted_by": "Ops automation"
+  }
+}
+```
+
+New event response:
+
+```json
+{
+  "success": true,
+  "duplicate": false,
+  "event": {
+    "id": 42,
+    "provider": "zapier",
+    "eventType": "notice.imported",
+    "status": "PENDING_REVIEW"
+  }
+}
+```
+
+Duplicate external IDs return `200` with `duplicate: true`.
 
 ## 4. Task APIs
 
@@ -780,6 +877,10 @@ Mounted under `/api/public`.
 ### 5.1 `GET /api/public/resolve-staff?username=...`
 
 Resolves a staff login username for the PIN/staff login flow.
+
+This route is public by design and has an endpoint-specific per-IP limiter
+(`RESOLVE_STAFF_RATE_LIMIT_MAX`, default `20` per 15 minutes) in addition to
+the global API limiter.
 
 ### 5.2 `GET /api/public/pin-config?wineryId=...`
 

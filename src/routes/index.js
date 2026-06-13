@@ -19,6 +19,7 @@ router.use('/public', require('./public.routes'));
 router.use('/tasks/flags', authMiddleware, require('./taskFlag.routes'));
 router.use('/tasks', authMiddleware, taskRoutes);
 router.use('/notices', authMiddleware, require('./notice.routes'));
+router.use('/integration-events', authMiddleware, require('./integrationEvent.routes'));
 router.use('/attachments', authMiddleware, require('./attachment.routes'));
 router.use('/staff', authMiddleware, require('./staff.routes'));
 router.use('/users', authMiddleware, require('./user.routes'));
