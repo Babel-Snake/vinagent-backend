@@ -1,25 +1,68 @@
 const { 
     Winery, WineryBrandProfile, WineryBookingsConfig, 
     WineryBookingType, WineryProduct, WineryPolicyProfile,
-    WineryFAQItem, WinerySettings,
-    WineryContact, User
+    WineryFAQItem, WinerySop, WinerySettings,
+    WineryContact, User, OperationalArea, OperationalAreaProfile,
+    OperationalAreaBookingsConfig, AreaProductListing,
+    OperationalAreaIntegrationConfig
 } = require('../models');
+const integrationConnectionService = require('./integrationConnection.service');
 
 /**
  * Aggregates all winery data into a single context object for the AI.
  * This is the "Source of Truth" payload.
  */
-exports.getAiContext = async (wineryId) => {
+exports.getAiContext = async (wineryId, { areaIds = [] } = {}) => {
+    const scopedAreaIds = areaIds.map(Number).filter(Number.isInteger);
     const winery = await Winery.findByPk(wineryId, {
         include: [
             { model: WineryBrandProfile, as: 'brandProfile' },
             { model: WineryBookingsConfig, as: 'bookingsConfig' },
-            { model: WineryBookingType, as: 'bookingTypes' },
-            { model: WineryProduct, as: 'products', where: { isActive: true }, required: false },
+            { model: WineryBookingType, as: 'bookingTypes', separate: true },
+            { model: WineryProduct, as: 'products', where: { isActive: true }, required: false, separate: true },
             { model: WineryPolicyProfile, as: 'policyProfile' },
-            { model: WineryFAQItem, as: 'faqs', where: { isActive: true }, required: false },
+            { model: WineryFAQItem, as: 'faqs', where: { isActive: true, areaId: null }, required: false, separate: true },
+            { model: WinerySop, as: 'sops', where: { isActive: true, areaId: null }, required: false, separate: true },
             { model: WinerySettings, as: 'settings' },
-            { model: WineryContact, as: 'contacts', where: { isActive: true }, required: false }
+            {
+                model: WineryContact,
+                as: 'contacts',
+                where: { isActive: true },
+                required: false,
+                separate: true,
+                include: [{
+                    model: OperationalArea,
+                    as: 'OperationalAreas',
+                    attributes: ['id', 'name'],
+                    through: { attributes: ['relationshipType'] }
+                }]
+            },
+            {
+                model: OperationalArea,
+                as: 'OperationalAreas',
+                where: {
+                    isActive: true,
+                    ...(scopedAreaIds.length > 0 ? { id: scopedAreaIds } : {})
+                },
+                required: false,
+                separate: true,
+                include: [
+                    { model: OperationalAreaProfile, as: 'Profile', required: false },
+                    { model: OperationalAreaBookingsConfig, as: 'BookingsConfig', required: false },
+                    { model: OperationalAreaIntegrationConfig, as: 'IntegrationConfig', required: false },
+                    { model: WineryFAQItem, as: 'FAQs', where: { isActive: true }, required: false, separate: true },
+                    { model: WinerySop, as: 'Sops', where: { isActive: true }, required: false, separate: true },
+                    { model: WineryBookingType, as: 'BookingTypes', where: { isActive: true }, required: false, separate: true },
+                    {
+                        model: AreaProductListing,
+                        as: 'ProductListings',
+                        where: { isAvailable: true },
+                        required: false,
+                        separate: true,
+                        include: [{ model: WineryProduct, as: 'Product', where: { isActive: true }, required: true }]
+                    }
+                ]
+            }
         ]
     });
 
@@ -33,7 +76,28 @@ exports.getAiContext = async (wineryId) => {
 
     // Build the org chart with resolved manager names
     const contacts = winery.contacts || [];
-    const organisationMap = contacts.map(c => {
+    const visibleContactIds = new Set();
+    if (scopedAreaIds.length === 0) {
+        contacts.forEach(contact => visibleContactIds.add(contact.id));
+    } else {
+        contacts.forEach(contact => {
+            const contactAreas = contact.OperationalAreas || [];
+            if (contactAreas.length === 0 || contactAreas.some(area => scopedAreaIds.includes(Number(area.id)))) {
+                visibleContactIds.add(contact.id);
+            }
+        });
+        let changed = true;
+        while (changed) {
+            changed = false;
+            for (const contact of contacts) {
+                if (!visibleContactIds.has(contact.id) || !contact.reportsToId || visibleContactIds.has(contact.reportsToId)) continue;
+                visibleContactIds.add(contact.reportsToId);
+                changed = true;
+            }
+        }
+    }
+    const visibleContacts = contacts.filter(contact => visibleContactIds.has(contact.id));
+    const organisationMap = visibleContacts.map(c => {
         let reportsToName = null;
         if (c.reportsToId) {
             const mgr = contacts.find(x => x.id === c.reportsToId);
@@ -46,7 +110,12 @@ exports.getAiContext = async (wineryId) => {
             email: c.email || null,
             phone: c.phone || null,
             responsibilities: c.responsibilities || null,
-            reportsTo: reportsToName
+            reportsTo: reportsToName,
+            areas: (c.OperationalAreas || []).map(area => ({
+                id: area.id,
+                name: area.name,
+                relationshipType: area.WineryContactArea?.relationshipType || 'LINKED'
+            }))
         };
     });
 
@@ -92,9 +161,49 @@ exports.getAiContext = async (wineryId) => {
         })) : [],
         policies: {
             profile: winery.policyProfile,
-            faqs: winery.faqs ? winery.faqs.map(f => ({ q: f.question, a: f.answer })) : []
+            faqs: winery.faqs ? winery.faqs.map(f => ({ q: f.question, a: f.answer })) : [],
+            sops: winery.sops ? winery.sops.map(sop => ({ title: sop.title, body: sop.body })) : []
         },
         organisation: organisationMap,
+        areas: (winery.OperationalAreas || []).map(area => ({
+            id: area.id,
+            name: area.name,
+            description: area.description || null,
+            publicProfile: {
+                email: area.Profile?.publicEmail || winery.publicEmail || null,
+                phone: area.Profile?.publicPhone || winery.publicPhone || null,
+                openingHours: area.Profile?.openingHoursText || winery.openingHours || null,
+                guestDirections: area.Profile?.guestDirections || null,
+                serviceNotes: area.Profile?.serviceNotes || null
+            },
+            bookings: area.BookingsConfig ? {
+                policy: area.BookingsConfig,
+                experiences: area.BookingTypes || []
+            } : null,
+            products: (area.ProductListings || []).map(listing => ({
+                id: listing.Product.id,
+                name: listing.Product.name,
+                category: listing.Product.category,
+                vintage: listing.Product.vintage,
+                price: listing.priceOverride ?? listing.Product.price,
+                stock: listing.stockStatusOverride || listing.Product.stockStatus,
+                isFeatured: listing.isFeatured,
+                tastingNotes: listing.Product.tastingNotes,
+                sellingPoints: listing.Product.keySellingPoints,
+                salesNotes: listing.salesNotes || null
+            })),
+            integrations: Object.entries(integrationConnectionService.parseJsonObject(area.IntegrationConfig?.providerConnections))
+                .map(([domain, connection]) => ({
+                    domain,
+                    provider: connection.provider || 'other',
+                    status: connection.status || 'not_connected',
+                    capabilities: Array.isArray(connection.capabilities) ? connection.capabilities : []
+                })),
+            knowledge: {
+                faqs: (area.FAQs || []).map(faq => ({ q: faq.question, a: faq.answer, tags: faq.tags || [] })),
+                sops: (area.Sops || []).map(sop => ({ title: sop.title, body: sop.body }))
+            }
+        })),
         staff: staffUsers.map(u => ({
             id: u.id,
             name: u.displayName,

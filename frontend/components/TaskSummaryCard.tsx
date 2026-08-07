@@ -1,6 +1,8 @@
 'use client';
 
 import { Task, Staff } from '../lib/api';
+import InvolvementBadge from './InvolvementBadge';
+import { involvementSurfaceClass, taskInvolvement } from '../lib/involvement';
 
 interface TaskSummaryCardProps {
     task: Task;
@@ -8,6 +10,8 @@ interface TaskSummaryCardProps {
     isFlagged: boolean;
     onToggleFlag?: (taskId: number) => void;
     onClick: () => void;
+    currentUserId?: number | null;
+    currentUserAreaIds?: number[];
 }
 
 export default function TaskSummaryCard({
@@ -15,7 +19,9 @@ export default function TaskSummaryCard({
     users,
     isFlagged,
     onToggleFlag,
-    onClick
+    onClick,
+    currentUserId,
+    currentUserAreaIds = []
 }: TaskSummaryCardProps) {
     const formatLabel = (value?: string | null) => {
         if (!value) return '';
@@ -63,24 +69,27 @@ export default function TaskSummaryCard({
     const customerName = task.Member
         ? `${task.Member.firstName || ''} ${task.Member.lastName || ''}`.trim()
         : manualIntake?.requesterName || 'No customer linked';
-    const priorityLabel = formatLabel(task.priority || 'normal');
     const deadlineLabel = task.isOverdue ? 'Overdue' : task.isDueSoon ? 'Due soon' : null;
     const dueTone = task.isOverdue ? 'danger' : task.isDueSoon || task.dueAt ? 'warning' : 'normal';
     const isCleanlyActioned = task.status === 'ACTIONED' && task.workflowState === 'COMPLETED';
     const showWorkflowPill = Boolean(task.workflowState && task.workflowState !== 'NOT_STARTED' && !isCleanlyActioned);
     const showResolvedAsPill = Boolean(task.resolvedAs && !(task.status === 'ACTIONED' && task.resolvedAs === 'COMPLETED'));
+    const involvement = taskInvolvement(task, currentUserId ? { id: currentUserId, role: '', areaIds: currentUserAreaIds } : null);
 
     return (
         <article
-            onClick={onClick}
-            className={`group cursor-pointer rounded-lg border bg-[var(--surface)] p-4 shadow-sm transition hover:border-[#c6d1c1] hover:shadow-md
-                ${task.priority === 'high' ? 'border-l-4 border-l-red-500' : ''}
-                ${task.priority === 'normal' || !task.priority ? 'border-l-4 border-l-amber-500' : ''}
-                ${task.priority === 'low' ? 'border-l-4 border-l-teal-500' : ''}
+            className={`group relative rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition hover:border-[#c6d1c1] hover:shadow-md
+                ${involvementSurfaceClass(involvement)}
                 ${task.isOverdue ? 'ring-1 ring-red-200 bg-red-50/30' : ''}
             `}
         >
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <button
+                type="button"
+                onClick={onClick}
+                className="absolute inset-0 z-0 cursor-pointer rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)] focus-visible:ring-offset-2"
+                aria-label={`Open task ${task.id}: ${title}${customerName ? ` for ${customerName}` : ''}`}
+            />
+            <div className="pointer-events-none relative z-10 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="min-w-0 flex-1">
                     <div className="flex items-start gap-3">
                         <button
@@ -88,7 +97,7 @@ export default function TaskSummaryCard({
                                 e.stopPropagation();
                                 if (onToggleFlag) onToggleFlag(task.id);
                             }}
-                            className={`icon-button -ml-1 -mt-1 ${isFlagged ? 'text-amber-500' : 'text-[#a4aea0] hover:text-amber-500'}`}
+                            className={`pointer-events-auto icon-button -ml-1 -mt-1 ${isFlagged ? 'text-amber-500' : 'text-[#a4aea0] hover:text-amber-500'}`}
                             title={isFlagged ? 'Unflag' : 'Flag for follow-up'}
                             aria-label={isFlagged ? 'Unflag task' : 'Flag task'}
                         >
@@ -104,6 +113,10 @@ export default function TaskSummaryCard({
                                 </h2>
                                 <span className="rounded-md bg-[#eef1e8] px-2 py-0.5 text-xs font-semibold text-[#536158]">
                                     #{task.id}
+                                </span>
+                                <InvolvementBadge signal={involvement} />
+                                <span className={`rounded-md border px-2 py-0.5 text-xs font-semibold ${task.priority === 'high' ? 'border-red-200 bg-red-50 text-red-800' : task.priority === 'low' ? 'border-teal-200 bg-teal-50 text-teal-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+                                    {formatLabel(task.priority || 'normal')} priority
                                 </span>
                                 {identityNeedsReview && (
                                     <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">
@@ -161,9 +174,6 @@ export default function TaskSummaryCard({
                             tone={task.workflowState === 'BLOCKED' ? 'danger' : task.workflowState === 'WAITING' ? 'warning' : task.workflowState === 'COMPLETED' ? 'success' : 'info'}
                         />
                     )}
-                    <Pill label={formatLabel(task.category || 'GENERAL')} tone="neutral" />
-                    <Pill label={`${priorityLabel} priority`} tone={task.priority === 'high' ? 'danger' : task.priority === 'low' ? 'info' : 'warning'} />
-                    {deadlineLabel && <Pill label={deadlineLabel} tone={task.isOverdue ? 'danger' : 'warning'} />}
                     {showResolvedAsPill && <Pill label={formatLabel(task.resolvedAs)} tone="neutral" />}
                 </div>
             </div>

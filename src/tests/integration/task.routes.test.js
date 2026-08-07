@@ -76,6 +76,88 @@ describe('Task Routes', () => {
             expect(res.body.tasks[0].wineryId).toBe(1);
         });
 
+        it('returns stable pagination metadata and distinct task pages', async () => {
+            const firstCreatedAt = new Date('2026-07-01T08:00:00.000Z');
+            const secondCreatedAt = new Date('2026-07-01T08:01:00.000Z');
+            const firstTask = await Task.create({
+                type: 'GENERAL_QUERY',
+                status: 'PENDING',
+                wineryId: 1,
+                category: 'INTERNAL',
+                subType: 'TASK_PAGINATION_MATCH',
+                priority: 'normal',
+                createdAt: firstCreatedAt,
+                updatedAt: firstCreatedAt
+            });
+            const secondTask = await Task.create({
+                type: 'GENERAL_QUERY',
+                status: 'PENDING',
+                wineryId: 1,
+                category: 'INTERNAL',
+                subType: 'TASK_PAGINATION_MATCH',
+                priority: 'normal',
+                createdAt: secondCreatedAt,
+                updatedAt: secondCreatedAt
+            });
+
+            const firstPage = await request(app)
+                .get('/api/tasks?status=all&search=TASK_PAGINATION_MATCH&sortBy=feed_oldest&page=1&pageSize=1')
+                .set('Authorization', authToken)
+                .expect(200);
+            const secondPage = await request(app)
+                .get('/api/tasks?status=all&search=TASK_PAGINATION_MATCH&sortBy=feed_oldest&page=2&pageSize=1')
+                .set('Authorization', authToken)
+                .expect(200);
+
+            expect(firstPage.body.pagination).toEqual({ page: 1, pageSize: 1, total: 2, totalPages: 2 });
+            expect(secondPage.body.pagination).toEqual({ page: 2, pageSize: 1, total: 2, totalPages: 2 });
+            expect(firstPage.body.tasks.map((task) => task.id)).toEqual([firstTask.id]);
+            expect(secondPage.body.tasks.map((task) => task.id)).toEqual([secondTask.id]);
+        });
+
+        it('returns exact queue-wide summary metrics for the current filters', async () => {
+            await Task.create({
+                type: 'GENERAL_QUERY',
+                status: 'PENDING',
+                wineryId: 1,
+                category: 'INTERNAL',
+                subType: 'QUEUE_SUMMARY_MATCH',
+                priority: 'high',
+                workflowState: 'BLOCKED',
+                dueAt: new Date(Date.now() - 60 * 60 * 1000),
+                followUpRequired: true,
+                payload: { manualIntake: { identityResolutionStatus: 'REVIEW_REQUIRED' } }
+            });
+            await Task.create({
+                type: 'GENERAL_QUERY',
+                status: 'PENDING',
+                wineryId: 1,
+                category: 'INTERNAL',
+                subType: 'QUEUE_SUMMARY_MATCH',
+                priority: 'normal',
+                workflowState: 'WAITING',
+                assigneeId: 7,
+                dueAt: new Date(Date.now() + 60 * 60 * 1000)
+            });
+
+            const res = await request(app)
+                .get('/api/tasks/summary?status=all&search=QUEUE_SUMMARY_MATCH')
+                .set('Authorization', authToken)
+                .expect(200);
+
+            expect(res.body.summary).toMatchObject({
+                matching: 2,
+                highPriority: 1,
+                waiting: 1,
+                blocked: 1,
+                unassigned: 1,
+                overdue: 1,
+                dueSoon: 1,
+                identityReview: 1,
+                followUps: 1
+            });
+        });
+
         it('should 401 without token', async () => {
             await request(app)
                 .get('/api/tasks')

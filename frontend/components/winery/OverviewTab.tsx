@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { updateOverview } from '../../lib/api';
+import { updateOverview, type Winery } from '../../lib/api';
 
-export function OverviewTab({ winery, onUpdate }: { winery: any, onUpdate: () => void }) {
+export function OverviewTab({ winery, onUpdate }: { winery: Winery, onUpdate: () => void }) {
     const [formData, setFormData] = useState({
         name: winery.name,
         shortName: winery.shortName || '',
@@ -23,16 +23,18 @@ export function OverviewTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
         country: winery.country || 'Australia'
     });
     const [saving, setSaving] = useState(false);
+    const [feedback, setFeedback] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        setFeedback(null);
         setSaving(true);
         try {
             await updateOverview(formData);
-            alert('Settings Saved!');
+            setFeedback({ tone: 'success', message: 'Winery overview saved.' });
             onUpdate();
-        } catch (e) {
-            alert('Failed to save');
+        } catch (error) {
+            setFeedback({ tone: 'error', message: error instanceof Error ? error.message : 'Failed to save winery overview.' });
         } finally {
             setSaving(false);
         }
@@ -44,6 +46,7 @@ export function OverviewTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
 
     return (
         <form onSubmit={handleSubmit} className="space-y-8 max-w-4xl">
+            {feedback && <p role={feedback.tone === 'error' ? 'alert' : 'status'} className={`rounded-md border px-3 py-2 text-sm ${feedback.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-red-200 bg-red-50 text-red-800'}`}>{feedback.message}</p>}
             {/* Identity */}
             <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
                 <h3 className="text-lg font-medium text-gray-900 mb-4">Identity</h3>
@@ -121,7 +124,7 @@ export function OverviewTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
                 <button
                     type="submit"
                     disabled={saving}
-                    className="inline-flex justify-center rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:bg-gray-400"
+                    className="btn-primary"
                 >
                     {saving ? 'Saving...' : 'Save Changes'}
                 </button>

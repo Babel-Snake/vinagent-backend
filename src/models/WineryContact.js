@@ -7,6 +7,13 @@ module.exports = (sequelize, DataTypes) => {
             WineryContact.belongsTo(models.Winery, { foreignKey: 'wineryId' });
             WineryContact.belongsTo(models.WineryContact, { as: 'manager', foreignKey: 'reportsToId' });
             WineryContact.hasMany(models.WineryContact, { as: 'directReports', foreignKey: 'reportsToId' });
+            WineryContact.hasMany(models.WineryContactArea, { foreignKey: 'contactId', as: 'AreaLinks' });
+            WineryContact.belongsToMany(models.OperationalArea, {
+                through: models.WineryContactArea,
+                foreignKey: 'contactId',
+                otherKey: 'areaId',
+                as: 'OperationalAreas'
+            });
         }
     }
     WineryContact.init({

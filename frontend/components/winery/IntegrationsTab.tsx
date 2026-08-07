@@ -5,8 +5,12 @@ import {
     IntegrationConnection,
     syncEmailInbox,
     testIntegrationConnection,
-    updateIntegrationConfig
+    updateIntegrationConfig,
+    Winery,
+    WineryIntegrationConfig
 } from '../../lib/api';
+import { errorMessage } from '../../lib/errors';
+import { operationalLabel } from '../../lib/operationalPresentation';
 
 type IntegrationDomain = 'sms' | 'email' | 'pos' | 'crm' | 'booking' | 'delivery';
 
@@ -127,7 +131,7 @@ function defaultConnection(domain: IntegrationDomain, provider: string, wineryId
     };
 }
 
-function normalizeConnections(config: any, baseProviders: Record<IntegrationDomain, string>, wineryId?: number) {
+function normalizeConnections(config: Partial<WineryIntegrationConfig>, baseProviders: Record<IntegrationDomain, string>, wineryId?: number) {
     const stored = config.providerConnections || {};
 
     return DOMAINS.reduce((connections, domain) => {
@@ -161,8 +165,8 @@ function capabilitiesFromText(value: string) {
         .filter(Boolean);
 }
 
-export function IntegrationsTab({ winery, onUpdate }: { winery: any, onUpdate: () => void }) {
-    const config = winery.integrationConfig || {};
+export function IntegrationsTab({ winery, onUpdate }: { winery: Winery, onUpdate: () => void }) {
+    const config: Partial<WineryIntegrationConfig> = winery.integrationConfig || {};
     const baseProviders = {
         sms: config.smsProvider || 'twilio',
         email: config.emailProvider || 'sendgrid',
@@ -188,6 +192,7 @@ export function IntegrationsTab({ winery, onUpdate }: { winery: any, onUpdate: (
     const [testingDomain, setTestingDomain] = useState<IntegrationDomain | null>(null);
     const [syncingEmail, setSyncingEmail] = useState(false);
     const [emailSyncSummary, setEmailSyncSummary] = useState<string | null>(null);
+    const [feedback, setFeedback] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
 
     function updateConnection(domain: IntegrationDomain, updates: Partial<IntegrationConnection>) {
         setFormData((current) => ({
@@ -229,6 +234,7 @@ export function IntegrationsTab({ winery, onUpdate }: { winery: any, onUpdate: (
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
+        setFeedback(null);
         setSaving(true);
         try {
             await updateIntegrationConfig(formData);
@@ -247,9 +253,10 @@ export function IntegrationsTab({ winery, onUpdate }: { winery: any, onUpdate: (
                     return connections;
                 }, {} as Record<IntegrationDomain, IntegrationConnection>)
             }));
+            setFeedback({ tone: 'success', message: 'Winery integration settings saved.' });
             onUpdate();
-        } catch {
-            alert('Failed to save integrations');
+        } catch (error) {
+            setFeedback({ tone: 'error', message: errorMessage(error, 'Failed to save integrations') });
         } finally {
             setSaving(false);
         }
@@ -278,8 +285,8 @@ export function IntegrationsTab({ winery, onUpdate }: { winery: any, onUpdate: (
             const result = await syncEmailInbox(25);
             setEmailSyncSummary(`Inbox synced: ${result.imported} imported, ${result.duplicates} duplicates, ${result.createdTasks} tasks created.`);
             onUpdate();
-        } catch (err: any) {
-            setEmailSyncSummary(err?.message || 'Email sync failed.');
+        } catch (err: unknown) {
+            setEmailSyncSummary(errorMessage(err, 'Email sync failed.'));
         } finally {
             setSyncingEmail(false);
         }
@@ -287,6 +294,7 @@ export function IntegrationsTab({ winery, onUpdate }: { winery: any, onUpdate: (
 
     return (
         <form onSubmit={handleSubmit} className="space-y-6">
+            {feedback && <p role={feedback.tone === 'error' ? 'alert' : 'status'} className={`rounded-md border px-3 py-2 text-sm ${feedback.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-red-200 bg-red-50 text-red-800'}`}>{feedback.message}</p>}
             <section className="rounded-lg border border-gray-200 bg-white p-5">
                 <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <h3 className="text-lg font-semibold text-gray-900">Communication Channels</h3>
@@ -346,7 +354,7 @@ export function IntegrationsTab({ winery, onUpdate }: { winery: any, onUpdate: (
                                     <div>
                                         <div className="text-sm font-semibold text-gray-900">{DOMAIN_LABELS[domain]}</div>
                                         <div className={`mt-2 inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${statusClass(connection.status)}`}>
-                                            {(connection.status || 'not_connected').replace(/_/g, ' ')}
+                                            {operationalLabel(connection.status || 'not_connected')}
                                         </div>
                                     </div>
                                     <button

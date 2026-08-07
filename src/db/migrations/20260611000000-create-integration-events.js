@@ -4,7 +4,7 @@ async function hasTable(queryInterface, tableName) {
   const tables = await queryInterface.showAllTables();
   return tables.some((table) => {
     const name = typeof table === 'object' ? table.tableName || table.name : table;
-    return name === tableName;
+    return String(name).toLowerCase() === String(tableName).toLowerCase();
   });
 }
 
@@ -199,13 +199,12 @@ module.exports = {
 
   async down(queryInterface) {
     if (await hasTable(queryInterface, 'Notices')) {
-      if (await hasIndex(queryInterface, 'Notices', 'notices_source_event')) {
-        await queryInterface.removeIndex('Notices', 'notices_source_event');
-      }
       if (await hasIndex(queryInterface, 'Notices', 'notices_winery_external_source_id')) {
         await queryInterface.removeIndex('Notices', 'notices_winery_external_source_id');
       }
 
+      // Removing sourceEventId drops its foreign key and supporting index together on MySQL.
+      // Dropping notices_source_event first fails because the foreign key still depends on it.
       for (const columnName of ['sourceEventId', 'externalAuthorName', 'externalPostedAt', 'externalId', 'externalSource']) {
         if (await hasColumn(queryInterface, 'Notices', columnName)) {
           await queryInterface.removeColumn('Notices', columnName);

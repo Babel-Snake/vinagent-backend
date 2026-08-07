@@ -31,11 +31,9 @@ module.exports = {
   },
 
   async down(queryInterface) {
-    if (await hasIndex(queryInterface, 'NoticeComments', 'idx_notice_comments_parent_comment')) {
-      await queryInterface.removeIndex('NoticeComments', 'idx_notice_comments_parent_comment');
-    }
-
     if (await hasColumn(queryInterface, 'NoticeComments', 'parentCommentId')) {
+      // MySQL uses this index to enforce the self-referencing foreign key.
+      // Removing the column drops both the constraint and its supporting index safely.
       await queryInterface.removeColumn('NoticeComments', 'parentCommentId');
     }
   }

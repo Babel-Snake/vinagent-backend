@@ -1,6 +1,8 @@
-const { CalendarEvent, CalendarEventNotice, Notice, NoticeComment, NoticeTask, Task, User } = require('../models');
+const { Attachment, CalendarEvent, CalendarEventNotice, Notice, NoticeAcknowledgement, NoticeArea, NoticeComment, NoticeTask, OperationalArea, Task, User, UserAreaMembership } = require('../models');
 const { Op } = require('sequelize');
 const { ForbiddenError, NotFoundError, ValidationError } = require('../utils/errors');
+const operationalAreaService = require('./operationalArea.service');
+const recordVisibility = require('./recordVisibility.service');
 
 const MANAGER_ROLES = new Set(['manager', 'admin']);
 const AUDIENCE_TYPES = new Set(['all_staff', 'roles', 'users']);
@@ -14,6 +16,10 @@ const LINKED_TASK_ATTRIBUTES = [
   'priority',
   'workflowState',
   'dueAt',
+  'wineryId',
+  'areaScope',
+  'assigneeId',
+  'createdBy',
   'createdAt'
 ];
 const LINKED_NOTICE_ATTRIBUTES = [
@@ -25,6 +31,8 @@ const LINKED_NOTICE_ATTRIBUTES = [
   'audienceType',
   'audienceRoles',
   'audienceUserIds',
+  'wineryId',
+  'areaScope',
   'effectiveFrom',
   'expiresAt',
   'archivedAt',
@@ -40,14 +48,24 @@ const LINKED_CALENDAR_EVENT_ATTRIBUTES = [
   'type'
 ];
 
-function canManageNotices(userRole) {
-  return MANAGER_ROLES.has(userRole);
+function getNoticeAreaInclude() {
+  return {
+    model: OperationalArea,
+    as: 'OperationalAreas',
+    attributes: ['id', 'name', 'description', 'isActive', 'sortOrder'],
+    through: { attributes: [] },
+    required: false
+  };
 }
 
-function assertCanManageNotices(userRole) {
-  if (!canManageNotices(userRole)) {
-    throw new ForbiddenError('Only managers can manage notices.');
-  }
+async function replaceNoticeAreas({ noticeId, wineryId, placement, transaction }) {
+  await NoticeArea.destroy({ where: { noticeId, wineryId }, transaction });
+  if (placement.areaScope !== 'AREAS') return;
+  await NoticeArea.bulkCreate(placement.areaIds.map(areaId => ({ noticeId, areaId, wineryId })), { transaction });
+}
+
+function canManageNotices(userRole) {
+  return MANAGER_ROLES.has(userRole);
 }
 
 function parseBoolean(value) {
@@ -132,24 +150,30 @@ function normalizeNoticeAudiencePayload(data = {}, options = {}) {
   };
 }
 
-function noticeVisibleToUser(notice, { userId, userRole }) {
+function noticeVisibleToUser(notice, { userId, userRole, areaIds = [] }) {
   if (canManageNotices(userRole)) return true;
 
   const plain = notice.toJSON ? notice.toJSON() : notice;
   const audienceType = plain.audienceType || 'all_staff';
 
-  if (audienceType === 'all_staff') return true;
-  if (audienceType === 'roles') {
-    return parseJsonArray(plain.audienceRoles).includes(userRole);
-  }
-  if (audienceType === 'users') {
-    return parseJsonArray(plain.audienceUserIds).map(Number).includes(Number(userId));
+  if (audienceType === 'users' && parseJsonArray(plain.audienceUserIds).map(Number).includes(Number(userId))) {
+    return true;
   }
 
-  return true;
+  let audienceVisible = false;
+
+  if (audienceType === 'all_staff') audienceVisible = true;
+  if (audienceType === 'roles') audienceVisible = parseJsonArray(plain.audienceRoles).includes(userRole);
+  if (audienceType === 'users') audienceVisible = false;
+
+  if (!audienceVisible) return false;
+  if (plain.areaScope !== 'AREAS') return true;
+
+  const noticeAreaIds = (plain.OperationalAreas || []).map(area => Number(area.id));
+  return noticeAreaIds.some(areaId => areaIds.includes(areaId));
 }
 
-function buildNoticeWhere({ wineryId, filters = {}, now = new Date() }) {
+function buildNoticeWhere({ wineryId, filters = {}, now = new Date(), commentNoticeIds = [] }) {
   const where = { wineryId };
   const and = [];
 
@@ -158,7 +182,8 @@ function buildNoticeWhere({ wineryId, filters = {}, now = new Date() }) {
     and.push({
       [Op.or]: [
         { title: { [Op.like]: search } },
-        { body: { [Op.like]: search } }
+        { body: { [Op.like]: search } },
+        ...(commentNoticeIds.length > 0 ? [{ id: { [Op.in]: commentNoticeIds } }] : [])
       ]
     });
   }
@@ -256,6 +281,66 @@ function serializeNotice(notice, now = new Date()) {
   };
 }
 
+function userMatchesNoticeAudience(notice, user) {
+  const audienceType = notice.audienceType || 'all_staff';
+  if (audienceType === 'roles' && !parseJsonArray(notice.audienceRoles).includes(user.role)) return false;
+  if (audienceType === 'users') return parseJsonArray(notice.audienceUserIds).map(Number).includes(Number(user.id));
+  return true;
+}
+
+function getEligibleAcknowledgers(notice, users) {
+  const plain = notice.toJSON ? notice.toJSON() : notice;
+  const noticeAreaIds = (plain.OperationalAreas || []).map(area => Number(area.id));
+  return users.filter(user => {
+    const value = user.toJSON ? user.toJSON() : user;
+    if (!userMatchesNoticeAudience(plain, value)) return false;
+    if (plain.audienceType === 'users' || plain.areaScope !== 'AREAS' || MANAGER_ROLES.has(value.role)) return true;
+    const userAreaIds = (value.AreaMemberships || []).map(membership => Number(membership.areaId));
+    return noticeAreaIds.some(areaId => userAreaIds.includes(areaId));
+  });
+}
+
+async function loadAcknowledgementUsers(wineryId, transaction = null) {
+  return User.findAll({
+    where: { wineryId, isActive: true },
+    attributes: ['id', 'displayName', 'email', 'role'],
+    include: [{ model: UserAreaMembership, as: 'AreaMemberships', attributes: ['areaId'], required: false }],
+    transaction
+  });
+}
+
+async function attachAcknowledgementState(notices, { wineryId, userId, transaction = null }) {
+  const required = notices.filter(notice => notice.requiresAcknowledgement);
+  if (required.length === 0) return;
+  const noticeIds = required.map(notice => notice.id);
+  const [users, acknowledgements] = await Promise.all([
+    loadAcknowledgementUsers(wineryId, transaction),
+    NoticeAcknowledgement.findAll({ where: { wineryId, noticeId: { [Op.in]: noticeIds } }, transaction })
+  ]);
+  const byNotice = new Map();
+  acknowledgements.forEach(acknowledgement => {
+    if (!byNotice.has(acknowledgement.noticeId)) byNotice.set(acknowledgement.noticeId, []);
+    byNotice.get(acknowledgement.noticeId).push(acknowledgement);
+  });
+  required.forEach(notice => {
+    const eligible = getEligibleAcknowledgers(notice, users);
+    const eligibleIds = new Set(eligible.map(user => Number(user.id)));
+    const relevant = (byNotice.get(notice.id) || []).filter(acknowledgement => eligibleIds.has(Number(acknowledgement.userId)));
+    const mine = relevant.find(acknowledgement => Number(acknowledgement.userId) === Number(userId));
+    const expectedCount = eligible.length;
+    const acknowledgedCount = relevant.length;
+    notice.setDataValue('acknowledgement', {
+      expectedCount,
+      acknowledgedCount,
+      outstandingCount: Math.max(expectedCount - acknowledgedCount, 0),
+      completionRate: expectedCount ? Math.round((acknowledgedCount / expectedCount) * 100) : 100,
+      currentUserExpected: eligibleIds.has(Number(userId)),
+      currentUserAcknowledgedAt: mine?.acknowledgedAt || null,
+      isOverdue: Boolean(notice.acknowledgementDueAt && new Date(notice.acknowledgementDueAt) < new Date() && acknowledgedCount < expectedCount)
+    });
+  });
+}
+
 function serializeNoticeComment(comment) {
   if (!comment) return null;
   const plain = comment.toJSON ? comment.toJSON() : comment;
@@ -291,7 +376,27 @@ async function listNotices({ wineryId, userId, userRole, filters = {}, paginatio
   const now = new Date();
   const page = parsePositiveInt(pagination.page, 1, 1000);
   const pageSize = parsePositiveInt(pagination.pageSize, 50, 100);
-  const where = buildNoticeWhere({ wineryId, filters, now });
+  let indirectNoticeIds = [];
+  if (filters.search) {
+    const term = `%${String(filters.search).trim()}%`;
+    const [commentRows, attachmentRows] = await Promise.all([
+      NoticeComment.findAll({ where: { wineryId, body: { [Op.like]: term } }, attributes: ['noticeId'], group: ['noticeId'] }),
+      Attachment.findAll({
+        where: {
+          wineryId,
+          entityType: 'NOTICE',
+          deletedAt: null,
+          [Op.or]: [{ filename: { [Op.like]: term } }, { originalFilename: { [Op.like]: term } }]
+        },
+        attributes: ['entityId']
+      })
+    ]);
+    indirectNoticeIds = [...new Set([
+      ...commentRows.map(row => Number(row.noticeId)),
+      ...attachmentRows.map(row => Number(row.entityId))
+    ])];
+  }
+  const where = buildNoticeWhere({ wineryId, filters, now, commentNoticeIds: indirectNoticeIds });
 
   const rows = await Notice.findAll({
     where,
@@ -306,13 +411,28 @@ async function listNotices({ wineryId, userId, userRole, filters = {}, paginatio
         through: { attributes: ['createdAt', 'createdBy'] },
         required: false
       },
-      getLinkedCalendarEventInclude()
+      getLinkedCalendarEventInclude(),
+      getNoticeAreaInclude()
     ],
     order: buildOrder(filters.sortBy)
   });
 
-  const visibleRows = rows.filter((notice) => noticeVisibleToUser(notice, { userId, userRole }));
+  const { areaIds } = await operationalAreaService.getUserAreaAccess({ userId, wineryId });
+  const visibleRows = rows.filter((notice) => {
+    if (!noticeVisibleToUser(notice, { userId, userRole, areaIds })) return false;
+    if (!filters.areaId || filters.areaId === 'all') return true;
+    if (filters.areaId === 'organisation') return notice.areaScope !== 'AREAS';
+    return (notice.OperationalAreas || []).some(area => Number(area.id) === Number(filters.areaId));
+  });
   const pagedRows = visibleRows.slice((page - 1) * pageSize, page * pageSize);
+  for (const notice of pagedRows) {
+    const visibleTasks = [];
+    for (const task of notice.LinkedTasks || []) {
+      if (await recordVisibility.canViewTask(task, { wineryId, userId, userRole })) visibleTasks.push(task);
+    }
+    notice.setDataValue('LinkedTasks', visibleTasks);
+  }
+  await attachAcknowledgementState(pagedRows, { wineryId, userId });
 
   return {
     notices: pagedRows.map(notice => serializeNotice(notice, now)),
@@ -326,8 +446,12 @@ async function listNotices({ wineryId, userId, userRole, filters = {}, paginatio
 }
 
 async function ensureNotice({ noticeId, wineryId, userId, userRole, transaction }) {
-  const notice = await Notice.findOne({ where: { id: noticeId, wineryId }, transaction });
-  if (!notice || (userId && userRole && !noticeVisibleToUser(notice, { userId, userRole }))) {
+  const notice = await Notice.findOne({
+    where: { id: noticeId, wineryId },
+    include: [getNoticeAreaInclude()],
+    transaction
+  });
+  if (!notice || (userId && userRole && !(await recordVisibility.canViewNotice(notice, { wineryId, userId, userRole, transaction })))) {
     throw new NotFoundError('Notice not found');
   }
   return notice;
@@ -347,15 +471,72 @@ async function getNoticeById({ noticeId, wineryId, userId, userRole }) {
         through: { attributes: ['createdAt', 'createdBy'] },
         required: false
       },
-      getLinkedCalendarEventInclude()
+      getLinkedCalendarEventInclude(),
+      getNoticeAreaInclude()
     ]
   });
 
-  if (!notice || (userId && userRole && !noticeVisibleToUser(notice, { userId, userRole }))) {
+  if (!notice || (userId && userRole && !(await recordVisibility.canViewNotice(notice, { wineryId, userId, userRole })))) {
     throw new NotFoundError('Notice not found');
   }
 
+  if (userId && userRole) {
+    const visibleTasks = [];
+    for (const task of notice.LinkedTasks || []) {
+      if (await recordVisibility.canViewTask(task, { wineryId, userId, userRole })) visibleTasks.push(task);
+    }
+    notice.setDataValue('LinkedTasks', visibleTasks);
+  }
+
+  await attachAcknowledgementState([notice], { wineryId, userId });
+
   return serializeNotice(notice);
+}
+
+async function acknowledgeNotice({ noticeId, wineryId, userId, userRole }) {
+  const notice = await ensureNotice({ noticeId, wineryId, userId, userRole });
+  if (!notice.requiresAcknowledgement) throw new ValidationError('This notice does not require acknowledgement.');
+  if (notice.archivedAt) throw new ValidationError('Archived notices cannot be acknowledged.');
+  const users = await loadAcknowledgementUsers(wineryId);
+  if (!getEligibleAcknowledgers(notice, users).some(user => Number(user.id) === Number(userId))) {
+    throw new ForbiddenError('You are not in the acknowledgement audience for this notice.');
+  }
+  await NoticeAcknowledgement.findOrCreate({
+    where: { noticeId: notice.id, userId },
+    defaults: { noticeId: notice.id, wineryId, userId, acknowledgedAt: new Date() }
+  });
+  return getNoticeById({ noticeId, wineryId, userId, userRole });
+}
+
+async function getNoticeAcknowledgements({ noticeId, wineryId, userId, userRole }) {
+  const notice = await Notice.findOne({ where: { id: noticeId, wineryId }, include: [getNoticeAreaInclude()] });
+  if (!notice) throw new NotFoundError('Notice not found');
+  if (!(await recordVisibility.canManageNotice(notice, { wineryId, userId, userRole }))) {
+    throw new ForbiddenError('You can only view acknowledgement details for notices you manage.');
+  }
+  const [users, acknowledgements] = await Promise.all([
+    loadAcknowledgementUsers(wineryId),
+    NoticeAcknowledgement.findAll({ where: { noticeId, wineryId } })
+  ]);
+  const acknowledgementByUser = new Map(acknowledgements.map(item => [Number(item.userId), item]));
+  const recipients = getEligibleAcknowledgers(notice, users).map(user => {
+    const acknowledgement = acknowledgementByUser.get(Number(user.id));
+    return {
+      user: { id: user.id, displayName: user.displayName, email: user.email, role: user.role },
+      acknowledgedAt: acknowledgement?.acknowledgedAt || null
+    };
+  });
+  const acknowledgedCount = recipients.filter(recipient => recipient.acknowledgedAt).length;
+  return {
+    noticeId: notice.id,
+    required: notice.requiresAcknowledgement,
+    dueAt: notice.acknowledgementDueAt,
+    expectedCount: recipients.length,
+    acknowledgedCount,
+    outstandingCount: recipients.length - acknowledgedCount,
+    completionRate: recipients.length ? Math.round((acknowledgedCount / recipients.length) * 100) : 100,
+    recipients
+  };
 }
 
 function getLinkedNoticeInclude() {
@@ -420,7 +601,7 @@ async function linkNoticeToCalendarEvents({ noticeId, calendarEventIds = [], win
 
 async function ensureNoticeAndTask({ noticeId, taskId, wineryId, transaction }) {
   const [notice, task] = await Promise.all([
-    Notice.findOne({ where: { id: noticeId, wineryId }, transaction }),
+    Notice.findOne({ where: { id: noticeId, wineryId }, include: [getNoticeAreaInclude()], transaction }),
     Task.findOne({ where: { id: taskId, wineryId }, transaction })
   ]);
 
@@ -435,11 +616,13 @@ async function ensureNoticeAndTask({ noticeId, taskId, wineryId, transaction }) 
 }
 
 async function linkNoticeTask({ noticeId, taskId, wineryId, userId, userRole }) {
-  assertCanManageNotices(userRole);
-
   const transaction = await NoticeTask.sequelize.transaction();
   try {
-    await ensureNoticeAndTask({ noticeId, taskId, wineryId, transaction });
+    const { notice, task } = await ensureNoticeAndTask({ noticeId, taskId, wineryId, transaction });
+    if (!(await recordVisibility.canManageNotice(notice, { wineryId, userId, userRole, transaction }))) {
+      throw new ForbiddenError('You can only manage notices for operational areas you manage.');
+    }
+    await recordVisibility.assertCanViewTask(task, { wineryId, userId, userRole, transaction });
     await NoticeTask.findOrCreate({
       where: { noticeId, taskId },
       defaults: {
@@ -459,15 +642,17 @@ async function linkNoticeTask({ noticeId, taskId, wineryId, userId, userRole }) 
   return getNoticeById({ noticeId, wineryId, userId, userRole });
 }
 
-async function unlinkNoticeTask({ noticeId, taskId, wineryId, userRole }) {
-  assertCanManageNotices(userRole);
-
-  await ensureNoticeAndTask({ noticeId, taskId, wineryId });
+async function unlinkNoticeTask({ noticeId, taskId, wineryId, userId, userRole }) {
+  const { notice, task } = await ensureNoticeAndTask({ noticeId, taskId, wineryId });
+  if (!(await recordVisibility.canManageNotice(notice, { wineryId, userId, userRole }))) {
+    throw new ForbiddenError('You can only manage notices for operational areas you manage.');
+  }
+  await recordVisibility.assertCanViewTask(task, { wineryId, userId, userRole });
   await NoticeTask.destroy({
     where: { noticeId, taskId, wineryId }
   });
 
-  return getNoticeById({ noticeId, wineryId, userRole });
+  return getNoticeById({ noticeId, wineryId, userId, userRole });
 }
 
 async function listNoticeComments({ noticeId, wineryId, userId, userRole }) {
@@ -518,9 +703,11 @@ async function createNoticeComment({ noticeId, wineryId, userId, userRole, data 
   }).then(serializeNoticeComment);
 }
 
-async function deleteNoticeComment({ noticeId, commentId, wineryId, userRole }) {
-  assertCanManageNotices(userRole);
-  await ensureNotice({ noticeId, wineryId });
+async function deleteNoticeComment({ noticeId, commentId, wineryId, userId, userRole }) {
+  const notice = await ensureNotice({ noticeId, wineryId, userId, userRole });
+  if (!(await recordVisibility.canManageNotice(notice, { wineryId, userId, userRole }))) {
+    throw new ForbiddenError('You can only manage comments for operational areas you manage.');
+  }
 
   const transaction = await NoticeComment.sequelize.transaction();
   try {
@@ -547,19 +734,36 @@ async function deleteNoticeComment({ noticeId, commentId, wineryId, userRole }) 
 }
 
 async function createNotice({ wineryId, userId, userRole, data }) {
-  assertCanManageNotices(userRole);
   const audience = normalizeNoticeAudiencePayload(data);
-  const { calendarEventIds = [], ...noticeData } = data;
+  const {
+    calendarEventIds = [],
+    primaryAreaId = null,
+    linkedAreaIds = [],
+    ...noticeData
+  } = data;
   const transaction = await Notice.sequelize.transaction();
   let notice;
   try {
+    const areaPlacement = await operationalAreaService.validateAreaPlacement({
+      wineryId,
+      userId,
+      userRole,
+      areaScope: data.areaScope,
+      primaryAreaId,
+      linkedAreaIds,
+      requireManage: true,
+      transaction
+    });
     notice = await Notice.create({
       ...noticeData,
       ...audience,
+      areaScope: areaPlacement.areaScope,
       wineryId,
       createdBy: userId,
       updatedBy: userId
     }, { transaction });
+
+    await replaceNoticeAreas({ noticeId: notice.id, wineryId, placement: areaPlacement, transaction });
 
     await linkNoticeToCalendarEvents({
       noticeId: notice.id,
@@ -579,11 +783,15 @@ async function createNotice({ wineryId, userId, userRole, data }) {
 }
 
 async function updateNotice({ noticeId, wineryId, userId, userRole, updates }) {
-  assertCanManageNotices(userRole);
-
-  const notice = await Notice.findOne({ where: { id: noticeId, wineryId } });
+  const notice = await Notice.findOne({
+    where: { id: noticeId, wineryId },
+    include: [getNoticeAreaInclude()]
+  });
   if (!notice) {
     throw new NotFoundError('Notice not found');
+  }
+  if (!(await recordVisibility.canManageNotice(notice, { wineryId, userId, userRole }))) {
+    throw new ForbiddenError('You can only manage notices for operational areas you manage.');
   }
 
   const updatePayload = { ...updates };
@@ -594,6 +802,29 @@ async function updateNotice({ noticeId, wineryId, userId, userRole, updates }) {
     ? updatePayload.isArchived
     : undefined;
   delete updatePayload.isArchived;
+  const hasAreaUpdate = ['areaScope', 'primaryAreaId', 'linkedAreaIds'].some(field =>
+    Object.prototype.hasOwnProperty.call(updatePayload, field)
+  );
+  let areaPlacement = null;
+  if (hasAreaUpdate) {
+    const existingAreaIds = (notice.OperationalAreas || []).map(area => area.id);
+    areaPlacement = await operationalAreaService.validateAreaPlacement({
+      wineryId,
+      userId,
+      userRole,
+      areaScope: updatePayload.areaScope || notice.areaScope,
+      primaryAreaId: Object.prototype.hasOwnProperty.call(updatePayload, 'primaryAreaId')
+        ? updatePayload.primaryAreaId
+        : existingAreaIds[0] || null,
+      linkedAreaIds: Object.prototype.hasOwnProperty.call(updatePayload, 'linkedAreaIds')
+        ? updatePayload.linkedAreaIds
+        : existingAreaIds.slice(1),
+      requireManage: true
+    });
+    updatePayload.areaScope = areaPlacement.areaScope;
+    delete updatePayload.primaryAreaId;
+    delete updatePayload.linkedAreaIds;
+  }
 
   const hasAudienceUpdate = ['audienceType', 'audienceRoles', 'audienceUserIds'].some((field) =>
     Object.prototype.hasOwnProperty.call(updatePayload, field)
@@ -615,6 +846,7 @@ async function updateNotice({ noticeId, wineryId, userId, userRole, updates }) {
   }
 
   Object.assign(notice, updatePayload, audienceUpdates);
+  if (!notice.requiresAcknowledgement) notice.acknowledgementDueAt = null;
   notice.updatedBy = userId;
 
   if (notice.effectiveFrom && notice.expiresAt) {
@@ -634,6 +866,17 @@ async function updateNotice({ noticeId, wineryId, userId, userRole, updates }) {
   }
 
   await notice.save();
+
+  if (areaPlacement) {
+    const transaction = await Notice.sequelize.transaction();
+    try {
+      await replaceNoticeAreas({ noticeId: notice.id, wineryId, placement: areaPlacement, transaction });
+      await transaction.commit();
+    } catch (err) {
+      if (!transaction.finished) await transaction.rollback();
+      throw err;
+    }
+  }
 
   if (hasCalendarEventUpdate) {
     const transaction = await Notice.sequelize.transaction();
@@ -664,11 +907,15 @@ async function updateNotice({ noticeId, wineryId, userId, userRole, updates }) {
 }
 
 async function archiveNotice({ noticeId, wineryId, userId, userRole }) {
-  assertCanManageNotices(userRole);
-
-  const notice = await Notice.findOne({ where: { id: noticeId, wineryId } });
+  const notice = await Notice.findOne({
+    where: { id: noticeId, wineryId },
+    include: [getNoticeAreaInclude()]
+  });
   if (!notice) {
     throw new NotFoundError('Notice not found');
+  }
+  if (!(await recordVisibility.canManageNotice(notice, { wineryId, userId, userRole }))) {
+    throw new ForbiddenError('You can only manage notices for operational areas you manage.');
   }
 
   if (!notice.archivedAt) {
@@ -694,6 +941,9 @@ module.exports = {
   listNoticeComments,
   createNoticeComment,
   deleteNoticeComment,
+  acknowledgeNotice,
+  getNoticeAcknowledgements,
+  attachAcknowledgementState,
   getLinkedNoticeInclude,
   getLinkedCalendarEventInclude
 };

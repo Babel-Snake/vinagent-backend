@@ -4,7 +4,7 @@ async function hasTable(queryInterface, tableName) {
   const tables = await queryInterface.showAllTables();
   return tables.some((table) => {
     const name = typeof table === 'object' ? table.tableName || table.name : table;
-    return name === tableName;
+    return String(name).toLowerCase() === String(tableName).toLowerCase();
   });
 }
 

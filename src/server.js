@@ -6,6 +6,7 @@ const db = require('./models');
 const logger = require('./config/logger');
 const taskDeadlineService = require('./services/taskDeadline.service');
 const emailSyncService = require('./services/emailSync.service');
+const operationalIntelligenceScheduler = require('./services/operationalIntelligenceScheduler.service');
 
 const PORT = process.env.PORT || 3000;
 
@@ -25,6 +26,7 @@ async function startServer() {
 
     taskDeadlineService.startDeadlineReminderScheduler();
     emailSyncService.startEmailSyncScheduler();
+    operationalIntelligenceScheduler.startOperationalIntelligenceScheduler();
 
     // Workaround for Node.js/Windows event loop premature drain when detached or in MinGW
     setInterval(() => {

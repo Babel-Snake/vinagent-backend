@@ -1,236 +1,209 @@
 'use client';
 
-import { useState } from 'react';
-import { updateBookingsConfig, createBookingType, updateBookingType, deleteBookingType } from '../../lib/api';
+import { useEffect, useMemo, useState } from 'react';
+import {
+    createBookingType,
+    deleteBookingType,
+    updateBookingType,
+    updateOperationalAreaBookingsConfig,
+    Winery
+} from '../../lib/api';
+import ConfirmDialog from '../ui/ConfirmDialog';
 
-export function BookingsTab({ winery, onUpdate }: { winery: any, onUpdate: () => void }) {
-    const config = winery.bookingsConfig || {};
-    const bookingTypes = winery.bookingTypes || [];
+const emptyConfig = {
+    walkInsAllowed: true,
+    walkInNotes: '',
+    groupBookingThreshold: 8,
+    leadTimeHours: 24,
+    cancellationPolicyText: '',
+    kidsPolicy: '',
+    petsPolicy: '',
+    defaultResponseStrategy: 'create_task' as 'confirm' | 'create_task'
+};
 
-    const [formConfig, setFormConfig] = useState({
-        walkInsAllowed: config.walkInsAllowed !== false,
-        walkInNotes: config.walkInNotes || '',
-        groupBookingThreshold: config.groupBookingThreshold || 8,
-        leadTimeHours: config.leadTimeHours || 24,
-        cancellationPolicyText: config.cancellationPolicyText || '',
-        kidsPolicy: config.kidsPolicy || '',
-        petsPolicy: config.petsPolicy || '',
-        defaultResponseStrategy: config.defaultResponseStrategy || 'create_task'
-    });
-
-    // Quick Add for Booking Type
+export function BookingsTab({ winery, onUpdate }: { winery: Winery, onUpdate: () => void }) {
+    const areas = useMemo(() => winery.OperationalAreas || [], [winery.OperationalAreas]);
+    const access = winery.configurationAccess;
+    const [selectedAreaId, setSelectedAreaId] = useState(access?.managedAreaIds?.[0] || areas[0]?.id || 0);
+    const selectedArea = areas.find(area => area.id === selectedAreaId) || areas[0];
+    const canManage = Boolean(access?.isGlobalManager || access?.managedAreaIds?.includes(Number(selectedArea?.id)));
+    const areaConfig = selectedArea?.BookingsConfig;
+    const organisationDefault = useMemo(() => winery.bookingsConfig || {}, [winery]);
+    const bookingTypes = selectedArea?.BookingTypes || [];
+    const [formConfig, setFormConfig] = useState(emptyConfig);
     const [newType, setNewType] = useState({ name: '', description: '', priceCents: 0 });
     const [editingTypeId, setEditingTypeId] = useState<number | null>(null);
     const [editingType, setEditingType] = useState({ name: '', description: '', priceCents: 0 });
-
     const [saving, setSaving] = useState(false);
-    const [savingType, setSavingType] = useState(false);
+    const [feedback, setFeedback] = useState<string | null>(null);
+    const [bookingTypePendingDeletion, setBookingTypePendingDeletion] = useState<{ id: number; name: string } | null>(null);
 
-    const handleConfigSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
+    useEffect(() => {
+        if (!selectedArea && areas[0]) setSelectedAreaId(areas[0].id);
+    }, [areas, selectedArea]);
+
+    useEffect(() => {
+        const config = areaConfig || organisationDefault;
+        setFormConfig({
+            walkInsAllowed: config.walkInsAllowed !== false,
+            walkInNotes: config.walkInNotes || '',
+            groupBookingThreshold: config.groupBookingThreshold || 8,
+            leadTimeHours: config.leadTimeHours ?? 24,
+            cancellationPolicyText: config.cancellationPolicyText || '',
+            kidsPolicy: config.kidsPolicy || '',
+            petsPolicy: config.petsPolicy || '',
+            defaultResponseStrategy: config.defaultResponseStrategy === 'confirm' ? 'confirm' : 'create_task'
+        });
+        setEditingTypeId(null);
+    }, [selectedAreaId, areaConfig, organisationDefault]);
+
+    if (!selectedArea) return <p className="text-sm text-[var(--muted)]">Create an operational area before configuring bookings.</p>;
+
+    async function saveRules(event: React.FormEvent) {
+        event.preventDefault();
+        if (!canManage) return;
+        setFeedback(null);
         setSaving(true);
         try {
-            await updateBookingsConfig(formConfig);
-            alert('Booking Rules Saved!');
+            await updateOperationalAreaBookingsConfig(selectedArea.id, formConfig);
             onUpdate();
-        } catch (e) { alert('Failed to save rules'); }
-        finally { setSaving(false); }
-    };
-
-    const handleAddType = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!newType.name) return;
-        try {
-            await createBookingType(newType);
-            setNewType({ name: '', description: '', priceCents: 0 });
-            onUpdate();
-        } catch (e) { alert('Failed to creating type'); }
-    };
-
-    const handleDeleteType = async (id: number) => {
-        if (!confirm('Delete this booking type?')) return;
-        try {
-            await deleteBookingType(id);
-            if (editingTypeId === id) handleCancelEditType();
-            onUpdate();
-        } catch (e) { alert('Failed'); }
+        } catch (error) {
+            setFeedback(error instanceof Error ? error.message : 'Failed to save booking rules');
+        } finally {
+            setSaving(false);
+        }
     }
 
-    const handleEditType = (type: any) => {
-        setEditingTypeId(type.id);
-        setEditingType({
-            name: type.name || '',
-            description: type.description || '',
-            priceCents: type.priceCents || 0
-        });
-    };
+    async function addType(event: React.FormEvent) {
+        event.preventDefault();
+        if (!canManage || !newType.name.trim()) return;
+        setFeedback(null);
+        try {
+            await createBookingType({ ...newType, areaId: selectedArea.id });
+            setNewType({ name: '', description: '', priceCents: 0 });
+            onUpdate();
+        } catch (error) {
+            setFeedback(error instanceof Error ? error.message : 'Failed to create booking type');
+        }
+    }
 
-    const handleCancelEditType = () => {
-        setEditingTypeId(null);
-        setEditingType({ name: '', description: '', priceCents: 0 });
-    };
+    async function deletePendingBookingType() {
+        const bookingType = bookingTypePendingDeletion;
+        if (!canManage || !bookingType) return;
+        setFeedback(null);
+        try {
+            await deleteBookingType(bookingType.id);
+            onUpdate();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to delete booking type';
+            setFeedback(message);
+            throw new Error(message);
+        }
+    }
 
-    const handleSaveType = async (e: React.FormEvent, id: number) => {
-        e.preventDefault();
-        if (!editingType.name) return;
-        setSavingType(true);
+    async function saveType(event: React.FormEvent, id: number) {
+        event.preventDefault();
+        if (!canManage || !editingType.name.trim()) return;
+        setFeedback(null);
         try {
             await updateBookingType(id, editingType);
-            handleCancelEditType();
+            setEditingTypeId(null);
             onUpdate();
-        } catch (e) {
-            alert('Failed to update experience');
-        } finally {
-            setSavingType(false);
+        } catch (error) {
+            setFeedback(error instanceof Error ? error.message : 'Failed to update booking type');
         }
-    };
+    }
 
     return (
+        <>
         <div className="space-y-8">
-            {/* Global Rules */}
-            <form onSubmit={handleConfigSubmit} className="bg-gray-50 p-6 rounded-lg border border-gray-200 space-y-6">
-                <h3 className="text-lg font-medium text-gray-900">Global Booking Rules</h3>
+            {feedback && <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{feedback}</p>}
+            <div className="rounded-lg border border-[var(--border)] bg-[#f8f9f5] p-4">
+                <label className="block text-sm font-semibold text-[#344039]">Booking area</label>
+                <select value={selectedArea.id} onChange={e => setSelectedAreaId(Number(e.target.value))} className="mt-2 w-full max-w-md rounded-md border border-[var(--border)] bg-white p-2">
+                    {areas.map(area => <option key={area.id} value={area.id}>{area.name}</option>)}
+                </select>
+                <p className="mt-2 text-sm text-[var(--muted)]">
+                    {canManage ? `You can manage ${selectedArea.name} bookings.` : `${selectedArea.name} bookings are read-only for your account.`}
+                    {!areaConfig && ' Organisation defaults are shown until this area saves its own rules.'}
+                </p>
+            </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <form onSubmit={saveRules} className="space-y-6 rounded-lg border border-gray-200 bg-gray-50 p-6">
+                <h3 className="text-lg font-medium text-gray-900">{selectedArea.name} booking rules</h3>
+                <fieldset disabled={!canManage || saving} className="grid grid-cols-1 gap-6 disabled:opacity-70 md:grid-cols-2">
                     <div>
-                        <div className="flex items-center mb-4">
-                            <input type="checkbox" checked={formConfig.walkInsAllowed} onChange={e => setFormConfig({ ...formConfig, walkInsAllowed: e.target.checked })} className="h-4 w-4 text-indigo-600 rounded" />
-                            <label className="ml-2 text-sm text-gray-900">Allow Walk-ins</label>
-                        </div>
-                        <label className="block text-sm font-medium text-gray-700">Walk-in Notes</label>
-                        <input type="text" value={formConfig.walkInNotes} onChange={e => setFormConfig({ ...formConfig, walkInNotes: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" />
+                        <label className="flex items-center text-sm text-gray-900">
+                            <input type="checkbox" checked={formConfig.walkInsAllowed} onChange={e => setFormConfig({ ...formConfig, walkInsAllowed: e.target.checked })} className="mr-2 h-4 w-4" />
+                            Allow walk-ins
+                        </label>
+                        <label className="mt-4 block text-sm font-medium text-gray-700">Walk-in notes</label>
+                        <input value={formConfig.walkInNotes} onChange={e => setFormConfig({ ...formConfig, walkInNotes: e.target.value })} className="mt-1 block w-full rounded-md border border-gray-300 p-2" />
                     </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">Group Threshold (Guests)</label>
-                        <input type="number" value={formConfig.groupBookingThreshold} onChange={e => setFormConfig({ ...formConfig, groupBookingThreshold: parseInt(e.target.value) })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" />
+                    <div className="grid grid-cols-2 gap-3">
+                        <label className="text-sm font-medium text-gray-700">Group threshold
+                            <input type="number" min={1} value={formConfig.groupBookingThreshold} onChange={e => setFormConfig({ ...formConfig, groupBookingThreshold: Number(e.target.value) })} className="mt-1 block w-full rounded-md border border-gray-300 p-2" />
+                        </label>
+                        <label className="text-sm font-medium text-gray-700">Lead time (hours)
+                            <input type="number" min={0} value={formConfig.leadTimeHours} onChange={e => setFormConfig({ ...formConfig, leadTimeHours: Number(e.target.value) })} className="mt-1 block w-full rounded-md border border-gray-300 p-2" />
+                        </label>
                     </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">Cancellation Policy</label>
-                        <textarea rows={3} value={formConfig.cancellationPolicyText} onChange={e => setFormConfig({ ...formConfig, cancellationPolicyText: e.target.value })} className="block w-full rounded-md border-gray-300 shadow-sm border p-2" />
+                    <label className="text-sm font-medium text-gray-700">Cancellation policy
+                        <textarea rows={4} value={formConfig.cancellationPolicyText} onChange={e => setFormConfig({ ...formConfig, cancellationPolicyText: e.target.value })} className="mt-1 block w-full rounded-md border border-gray-300 p-2" />
+                    </label>
+                    <div className="space-y-3">
+                        <label className="block text-sm font-medium text-gray-700">Children policy
+                            <textarea rows={2} value={formConfig.kidsPolicy} onChange={e => setFormConfig({ ...formConfig, kidsPolicy: e.target.value })} className="mt-1 block w-full rounded-md border border-gray-300 p-2" />
+                        </label>
+                        <label className="block text-sm font-medium text-gray-700">Pets policy
+                            <textarea rows={2} value={formConfig.petsPolicy} onChange={e => setFormConfig({ ...formConfig, petsPolicy: e.target.value })} className="mt-1 block w-full rounded-md border border-gray-300 p-2" />
+                        </label>
                     </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">Children / Pets Policy</label>
-                        <div className="space-y-2 mt-1">
-                            <input type="text" placeholder="Kids policy..." value={formConfig.kidsPolicy} onChange={e => setFormConfig({ ...formConfig, kidsPolicy: e.target.value })} className="block w-full rounded-md border-gray-300 shadow-sm border p-2" />
-                            <input type="text" placeholder="Pets policy..." value={formConfig.petsPolicy} onChange={e => setFormConfig({ ...formConfig, petsPolicy: e.target.value })} className="block w-full rounded-md border-gray-300 shadow-sm border p-2" />
-                        </div>
+                    <div className="md:col-span-2">
+                        <button type="submit" className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:bg-gray-400">{saving ? 'Saving…' : 'Save area rules'}</button>
                     </div>
-                </div>
-
-                <div className="pt-4">
-                    <button type="submit" disabled={saving} className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400">
-                        {saving ? 'Saving...' : 'Save Rules'}
-                    </button>
-                </div>
+                </fieldset>
             </form>
 
-            {/* Experiences List */}
-            <div>
-                <h3 className="text-lg font-medium text-gray-900 mb-4">Experiences / Booking Types</h3>
-                <div className="bg-white shadow overflow-hidden sm:rounded-md mb-4">
-                    <ul role="list" className="divide-y divide-gray-200">
-                        {bookingTypes.map((type: any) => (
-                            <li key={type.id} className="px-4 py-4 sm:px-6">
-                                {editingTypeId === type.id ? (
-                                    <form onSubmit={(e) => handleSaveType(e, type.id)} className="space-y-4">
-                                        <div className="flex gap-4 items-start w-full">
-                                            <div className="flex-grow">
-                                                <label className="block text-sm font-medium text-gray-700">Experience Name</label>
-                                                <input
-                                                    type="text"
-                                                    required
-                                                    value={editingType.name}
-                                                    onChange={e => setEditingType({ ...editingType, name: e.target.value })}
-                                                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2"
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block text-sm font-medium text-gray-700">Price (Cents)</label>
-                                                <input
-                                                    type="number"
-                                                    value={editingType.priceCents}
-                                                    onChange={e => setEditingType({ ...editingType, priceCents: parseInt(e.target.value) || 0 })}
-                                                    className="mt-1 block w-28 rounded-md border-gray-300 shadow-sm border p-2"
-                                                />
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700">Description</label>
-                                            <textarea
-                                                rows={2}
-                                                value={editingType.description}
-                                                onChange={e => setEditingType({ ...editingType, description: e.target.value })}
-                                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
-                                            />
-                                        </div>
-                                        <div className="flex justify-end gap-3">
-                                            <button
-                                                type="button"
-                                                onClick={handleCancelEditType}
-                                                className="inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
-                                            >
-                                                Cancel
-                                            </button>
-                                            <button
-                                                type="submit"
-                                                disabled={savingType}
-                                                className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400"
-                                            >
-                                                {savingType ? 'Saving...' : 'Save Experience'}
-                                            </button>
-                                        </div>
-                                    </form>
-                                ) : (
-                                    <div className="flex justify-between items-center gap-4">
-                                        <div>
-                                            <p className="text-sm font-medium text-indigo-600 truncate">{type.name}</p>
-                                            <p className="text-sm text-gray-500">{type.priceCents > 0 ? `$${(type.priceCents / 100).toFixed(2)}` : 'Free'}</p>
-                                            {type.description && <p className="text-sm text-gray-600 mt-1 max-w-2xl">{type.description}</p>}
-                                        </div>
-                                        <div className="flex shrink-0 gap-3">
-                                            <button onClick={() => handleEditType(type)} className="text-indigo-600 hover:text-indigo-900 text-sm">Edit</button>
-                                            <button onClick={() => handleDeleteType(type.id)} className="text-red-600 hover:text-red-900 text-sm">Delete</button>
-                                        </div>
-                                    </div>
-                                )}
-                            </li>
-                        ))}
-                        {bookingTypes.length === 0 && <li className="px-4 py-4 text-gray-500 italic text-sm">No experiences defined.</li>}
-                    </ul>
+            <section className="space-y-4">
+                <h3 className="text-lg font-medium text-gray-900">{selectedArea.name} experiences / booking types</h3>
+                <div className="divide-y divide-gray-200 overflow-hidden rounded-md border border-gray-200 bg-white">
+                    {bookingTypes.map(type => (
+                        <div key={type.id} className="p-4">
+                            {editingTypeId === type.id ? (
+                                <form onSubmit={event => saveType(event, type.id)} className="space-y-3">
+                                    <input required disabled={!canManage} value={editingType.name} onChange={e => setEditingType({ ...editingType, name: e.target.value })} className="block w-full rounded-md border border-gray-300 p-2" />
+                                    <textarea disabled={!canManage} rows={2} value={editingType.description} onChange={e => setEditingType({ ...editingType, description: e.target.value })} className="block w-full rounded-md border border-gray-300 p-2" />
+                                    <input disabled={!canManage} type="number" value={editingType.priceCents} onChange={e => setEditingType({ ...editingType, priceCents: Number(e.target.value) })} className="block w-36 rounded-md border border-gray-300 p-2" />
+                                    <div className="flex gap-2"><button className="rounded bg-indigo-600 px-3 py-2 text-sm text-white">Save</button><button type="button" onClick={() => setEditingTypeId(null)} className="rounded border px-3 py-2 text-sm">Cancel</button></div>
+                                </form>
+                            ) : (
+                                <div className="flex items-start justify-between gap-4">
+                                    <div><p className="font-medium text-indigo-700">{type.name}</p><p className="text-sm text-gray-500">{type.priceCents ? `$${(type.priceCents / 100).toFixed(2)}` : 'Free'}</p>{type.description && <p className="mt-1 text-sm text-gray-600">{type.description}</p>}</div>
+                                    {canManage && <div className="flex gap-3 text-sm"><button type="button" onClick={() => { setEditingTypeId(type.id); setEditingType({ name: type.name, description: type.description || '', priceCents: type.priceCents || 0 }); }} className="text-[var(--brand-strong)]">Edit</button><button type="button" onClick={() => setBookingTypePendingDeletion({ id: type.id, name: type.name })} className="text-red-600">Delete</button></div>}
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                    {bookingTypes.length === 0 && <p className="p-4 text-sm italic text-gray-500">No area-specific booking types defined.</p>}
                 </div>
-
-                {/* Simple Add Form */}
-                <form onSubmit={handleAddType} className="flex flex-col gap-4 bg-gray-50 p-4 rounded-lg">
-                    <div className="flex gap-4 items-start w-full">
-                        <div className="flex-grow">
-                            <label className="block text-sm font-medium text-gray-700">New Experience Name</label>
-                            <input type="text" required value={newType.name} onChange={e => setNewType({ ...newType, name: e.target.value })} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700">Price (Cents)</label>
-                            <input type="number" value={newType.priceCents} onChange={e => setNewType({ ...newType, priceCents: parseInt(e.target.value) })} className="mt-1 block w-24 rounded-md border-gray-300 shadow-sm border p-2" />
-                        </div>
-                    </div>
-                    <div className="w-full">
-                        <label className="block text-sm font-medium text-gray-700">Description</label>
-                        <textarea
-                            rows={2}
-                            value={newType.description}
-                            onChange={e => setNewType({ ...newType, description: e.target.value })}
-                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
-                            placeholder="Optional short description of what's included..."
-                        />
-                    </div>
-                    <div className="flex justify-end">
-                        <button type="submit" className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700">
-                            Add Experience
-                        </button>
-                    </div>
-                </form>
-            </div>
+                {canManage && <form onSubmit={addType} className="grid grid-cols-1 gap-3 rounded-lg bg-gray-50 p-4 md:grid-cols-[1fr_10rem]">
+                    <input required value={newType.name} onChange={e => setNewType({ ...newType, name: e.target.value })} placeholder="New experience name" className="rounded-md border border-gray-300 p-2" />
+                    <input type="number" value={newType.priceCents} onChange={e => setNewType({ ...newType, priceCents: Number(e.target.value) })} placeholder="Price cents" className="rounded-md border border-gray-300 p-2" />
+                    <textarea rows={2} value={newType.description} onChange={e => setNewType({ ...newType, description: e.target.value })} placeholder="Description" className="rounded-md border border-gray-300 p-2 md:col-span-2" />
+                    <button type="submit" className="w-fit rounded-md bg-green-700 px-4 py-2 text-sm font-medium text-white md:col-span-2">Add experience</button>
+                </form>}
+            </section>
         </div>
+        <ConfirmDialog
+            open={Boolean(bookingTypePendingDeletion)}
+            onClose={() => setBookingTypePendingDeletion(null)}
+            onConfirm={deletePendingBookingType}
+            title="Delete booking type?"
+            description={bookingTypePendingDeletion ? `"${bookingTypePendingDeletion.name}" will be permanently removed from this area's booking options.` : ''}
+            confirmLabel="Delete booking type"
+            destructive
+        />
+        </>
     );
 }

@@ -8,6 +8,8 @@ class SendgridProvider {
 
         if (this.enabled) {
             logger.info('SendGrid Provider Initialized');
+        } else if (process.env.NODE_ENV === 'production') {
+            logger.error('SendGrid credentials missing. Email delivery is disabled.');
         } else {
             logger.warn('SendGrid credentials missing. Using Mock Email Mode.');
         }
@@ -23,6 +25,12 @@ class SendgridProvider {
 
     async sendEmail({ to, from, subject, text, cc = null }) {
         if (!this.enabled) {
+            if (process.env.NODE_ENV === 'production') {
+                const error = new Error('SendGrid email is not configured. Missing: SENDGRID_API_KEY');
+                error.code = 'SENDGRID_NOT_CONFIGURED';
+                logger.error('Blocked email send because SendGrid is not configured.');
+                throw error;
+            }
             logger.info(`[MOCK EMAIL] To: ${to} | Cc: ${cc || ''} | From: ${from} | Subject: ${subject} | Body: ${text}`);
             return {
                 id: `mock-email-${Date.now()}`,

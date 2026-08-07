@@ -1,5 +1,5 @@
-const { WinerySettings } = require('../../../models');
 const MockCrmProvider = require('./providers/mock');
+const integrationConnectionService = require('../../integrationConnection.service');
 // const Commerce7Provider = require('./providers/commerce7'); // Future
 
 class CrmIntegrationFactory {
@@ -8,11 +8,15 @@ class CrmIntegrationFactory {
      * @param {number} wineryId
      * @returns {Promise<CrmAdapter>}
      */
-    async getProvider(wineryId) {
-        const settings = await WinerySettings.findOne({ where: { wineryId } });
-
-        const providerName = settings ? settings.crmProvider : 'mock';
-        const config = settings ? settings.crmConfig : {};
+    async getProvider(wineryId, { areaId = null, transaction = null } = {}) {
+        const resolved = await integrationConnectionService.resolveExecutionConfig({
+            wineryId,
+            areaId,
+            domain: 'crm',
+            transaction
+        });
+        const providerName = resolved.provider;
+        const config = resolved.config;
 
         switch (providerName) {
             case 'mock':

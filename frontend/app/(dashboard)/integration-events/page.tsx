@@ -6,13 +6,18 @@ import {
     createIntegrationEvent,
     fetchIntegrationEvents,
     IntegrationEvent,
+    IntegrationEventItem,
     IntegrationEventCreateInput,
     IntegrationEventStatus,
     IntegrationEventType,
     NoticeCategory,
     NoticePriority,
-    reviewIntegrationEvent
+    reviewIntegrationEvent,
+    fetchOperationalAreas,
+    OperationalArea
 } from '../../../lib/api';
+import WorkSubnav from '../../../components/WorkSubnav';
+import TaskLinkPicker from '../../../components/TaskLinkPicker';
 
 const EVENT_TYPES: Array<{ value: IntegrationEventType | 'all'; label: string }> = [
     { value: 'all', label: 'All Types' },
@@ -50,6 +55,18 @@ const DEFAULT_CALL_PAYLOAD = `{
   "urgency": "normal",
   "recommendedAction": "Call Sarah back to confirm availability."
 }`;
+
+type BatchItemType = 'TASK' | 'NOTICE' | 'REQUEST' | 'NOTE';
+type BatchItemDraft = { key: string; type: BatchItemType; title: string; body: string };
+
+function newBatchItem(event: IntegrationEvent, type: BatchItemType = 'TASK'): BatchItemDraft {
+    return {
+        key: `review-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        type,
+        title: normalizedDefault(event, 'title', eventTitle(event)),
+        body: normalizedDefault(event, 'body', normalizedDefault(event, 'summary'))
+    };
+}
 
 function formatDateTime(value?: string | null) {
     if (!value) return 'Not set';
@@ -118,15 +135,9 @@ function normalizedDefault(event: IntegrationEvent, field: string, fallback = ''
     return value === undefined || value === null ? fallback : String(value);
 }
 
-function commaSeparatedIds(value: string) {
-    return value
-        .split(',')
-        .map(part => Number(part.trim()))
-        .filter(id => Number.isInteger(id) && id > 0);
-}
-
 export default function IntegrationEventsPage() {
     const [events, setEvents] = useState<IntegrationEvent[]>([]);
+    const [areas, setAreas] = useState<OperationalArea[]>([]);
     const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -134,6 +145,7 @@ export default function IntegrationEventsPage() {
         status: 'PENDING_REVIEW',
         eventType: 'all',
         provider: 'all',
+        areaId: 'all',
         search: ''
     });
     const [showCreate, setShowCreate] = useState(false);
@@ -155,6 +167,10 @@ export default function IntegrationEventsPage() {
             setLoading(false);
         }
     }, [filters]);
+
+    useEffect(() => {
+        fetchOperationalAreas().then(setAreas).catch(() => setAreas([]));
+    }, []);
 
     useEffect(() => {
         const timer = setTimeout(loadEvents, 250);
@@ -179,10 +195,10 @@ export default function IntegrationEventsPage() {
     }, [events]);
 
     return (
-        <div className="page-shell">
+        <div>
             <div className="page-header">
                 <div>
-                    <h1 className="text-2xl font-semibold text-[#1c231f]">Integration intake</h1>
+                    <h1 className="page-title">Intake review</h1>
                     <p className="page-kicker">Review imported notices, call summaries, and provider events before they become operational records.</p>
                 </div>
                 <div className="flex shrink-0 gap-3">
@@ -194,6 +210,8 @@ export default function IntegrationEventsPage() {
                     </button>
                 </div>
             </div>
+
+            <WorkSubnav />
 
             {error && (
                 <div className="mb-5 rounded-md border border-red-200 bg-red-50 p-4">
@@ -215,7 +233,7 @@ export default function IntegrationEventsPage() {
             </div>
 
             <div className="surface-panel mb-5 p-4">
-                <div className="grid gap-3 md:grid-cols-[1.2fr_1fr_1fr_1fr]">
+                <div className="grid gap-3 md:grid-cols-5">
                     <div>
                         <label className="mb-1.5 block text-xs font-bold uppercase text-[var(--muted)]">Search</label>
                         <input
@@ -253,6 +271,17 @@ export default function IntegrationEventsPage() {
                             className="form-control"
                         >
                             {providers.map(provider => <option key={provider} value={provider}>{provider === 'all' ? 'All Providers' : provider}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="mb-1.5 block text-xs font-bold uppercase text-[var(--muted)]">Area</label>
+                        <select
+                            value={filters.areaId}
+                            onChange={(event) => setFilters(prev => ({ ...prev, areaId: event.target.value }))}
+                            className="form-control"
+                        >
+                            <option value="all">All Areas</option>
+                            {areas.map(area => <option key={area.id} value={area.id}>{area.name}</option>)}
                         </select>
                     </div>
                 </div>
@@ -311,6 +340,7 @@ export default function IntegrationEventsPage() {
                     {selectedEvent ? (
                         <EventDetail
                             event={selectedEvent}
+                            areas={areas}
                             onReviewed={async (message) => {
                                 setActionMessage(message);
                                 await loadEvents();
@@ -329,6 +359,7 @@ export default function IntegrationEventsPage() {
 
             {showCreate && (
                 <CreateIntegrationEventModal
+                    areas={areas}
                     onClose={() => setShowCreate(false)}
                     onCreated={async (event, duplicate) => {
                         setShowCreate(false);
@@ -344,12 +375,14 @@ export default function IntegrationEventsPage() {
 
 function EventDetail({
     event,
+    areas,
     onReviewed
 }: {
     event: IntegrationEvent;
+    areas: OperationalArea[];
     onReviewed: (message: string) => Promise<void>;
 }) {
-    const [mode, setMode] = useState<'publish_notice' | 'create_task' | 'link_task' | 'ignore' | 'archive'>(
+    const [mode, setMode] = useState<'publish_notice' | 'create_task' | 'link_task' | 'create_items' | 'ignore' | 'archive'>(
         event.eventType === 'notice.imported' ? 'publish_notice' : event.eventType === 'call.intake' ? 'create_task' : 'link_task'
     );
     const [busy, setBusy] = useState(false);
@@ -359,15 +392,18 @@ function EventDetail({
     const [noticeCategory, setNoticeCategory] = useState(normalizedDefault(event, 'category', 'GENERAL'));
     const [noticePriority, setNoticePriority] = useState(normalizedDefault(event, 'priority', 'normal'));
     const [noticePinned, setNoticePinned] = useState(false);
-    const [linkedTaskIds, setLinkedTaskIds] = useState('');
+    const [linkedTaskIds, setLinkedTaskIds] = useState<number[]>([]);
     const [taskCategory, setTaskCategory] = useState(event.eventType === 'call.intake' ? 'BOOKING' : 'INTERNAL');
     const [taskSubType, setTaskSubType] = useState(event.eventType === 'call.intake' ? 'BOOKING_NEW' : 'INTEGRATION_REVIEW');
     const [taskPriority, setTaskPriority] = useState(event.normalizedPayload?.urgency === 'urgent' ? 'high' : 'normal');
     const [requesterName, setRequesterName] = useState(normalizedDefault(event, 'callerName'));
     const [requesterPhone, setRequesterPhone] = useState(normalizedDefault(event, 'callerPhone'));
     const [suggestedAction, setSuggestedAction] = useState(normalizedDefault(event, 'recommendedAction'));
-    const [linkTaskId, setLinkTaskId] = useState('');
+    const [linkTaskId, setLinkTaskId] = useState<number | null>(null);
     const [reason, setReason] = useState('');
+    const [confirmedAreaId, setConfirmedAreaId] = useState<number | ''>(event.confirmedAreaId || event.suggestedAreaId || '');
+    const [linkedAreaIds, setLinkedAreaIds] = useState<number[]>([]);
+    const [batchItems, setBatchItems] = useState<BatchItemDraft[]>(() => [newBatchItem(event)]);
 
     useEffect(() => {
         setMode(event.eventType === 'notice.imported' ? 'publish_notice' : event.eventType === 'call.intake' ? 'create_task' : 'link_task');
@@ -377,33 +413,60 @@ function EventDetail({
         setNoticeCategory(normalizedDefault(event, 'category', 'GENERAL'));
         setNoticePriority(normalizedDefault(event, 'priority', 'normal'));
         setNoticePinned(false);
-        setLinkedTaskIds('');
+        setLinkedTaskIds([]);
         setTaskCategory(event.eventType === 'call.intake' ? 'BOOKING' : 'INTERNAL');
         setTaskSubType(event.eventType === 'call.intake' ? 'BOOKING_NEW' : 'INTEGRATION_REVIEW');
         setTaskPriority(event.normalizedPayload?.urgency === 'urgent' ? 'high' : 'normal');
         setRequesterName(normalizedDefault(event, 'callerName'));
         setRequesterPhone(normalizedDefault(event, 'callerPhone'));
         setSuggestedAction(normalizedDefault(event, 'recommendedAction'));
-        setLinkTaskId('');
+        setLinkTaskId(null);
         setReason('');
+        setConfirmedAreaId(event.confirmedAreaId || event.suggestedAreaId || '');
+        setLinkedAreaIds([]);
+        setBatchItems([newBatchItem(event)]);
     }, [event]);
 
     async function submitReview() {
+        if (mode === 'link_task' && !linkTaskId) {
+            setError('Choose the existing task that this intake should link to.');
+            return;
+        }
+
         setBusy(true);
         setError('');
         try {
             const result = await reviewIntegrationEvent(event.id, {
                 action: mode,
                 reason: reason || undefined,
-                taskId: mode === 'link_task' ? Number(linkTaskId) : undefined,
-                taskIds: mode === 'publish_notice' ? commaSeparatedIds(linkedTaskIds) : undefined,
+                taskId: mode === 'link_task' ? linkTaskId ?? undefined : undefined,
+                taskIds: mode === 'publish_notice' ? linkedTaskIds : undefined,
+                confirmedAreaId: confirmedAreaId === '' ? null : confirmedAreaId,
+                items: mode === 'create_items'
+                    ? batchItems.map(item => ({
+                        key: item.key,
+                        type: item.type,
+                        data: {
+                            title: item.title,
+                            body: item.body,
+                            areaScope: confirmedAreaId === '' ? 'ORGANISATION' : 'AREAS',
+                            primaryAreaId: confirmedAreaId === '' ? null : confirmedAreaId,
+                            linkedAreaIds,
+                            ...(item.type === 'REQUEST' ? { subtype: 'INTEGRATION_REVIEW' } : {}),
+                            ...(item.type === 'NOTE' ? { recordType: 'INTEGRATION_CONTEXT' } : {})
+                        }
+                    }))
+                    : undefined,
                 notice: mode === 'publish_notice'
                     ? {
                         title: noticeTitle,
                         body: noticeBody,
                         category: noticeCategory as NoticeCategory,
                         priority: noticePriority as NoticePriority,
-                        isPinned: noticePinned
+                        isPinned: noticePinned,
+                        areaScope: confirmedAreaId === '' ? 'ORGANISATION' : 'AREAS',
+                        primaryAreaId: confirmedAreaId === '' ? null : confirmedAreaId,
+                        linkedAreaIds
                     }
                     : undefined,
                 task: mode === 'create_task'
@@ -413,16 +476,21 @@ function EventDetail({
                         category: taskCategory,
                         subType: taskSubType,
                         priority: taskPriority,
-                        suggestedAction
+                        suggestedAction,
+                        areaScope: confirmedAreaId === '' ? 'ORGANISATION' : 'AREAS',
+                        primaryAreaId: confirmedAreaId === '' ? null : confirmedAreaId,
+                        linkedAreaIds
                     }
                     : undefined
             });
 
-            const target = result.noticeId
+            const target = result.items?.length
+                ? `${result.items.length} linked items`
+                : result.noticeId
                 ? `notice #${result.noticeId}`
                 : result.taskId
                     ? `task #${result.taskId}`
-                    : result.event.status.toLowerCase().replace(/_/g, ' ');
+                    : labelFromValue(result.event.status);
             await onReviewed(`Event #${event.id} reviewed: ${target}.`);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to review event');
@@ -446,7 +514,9 @@ function EventDetail({
                         <h2 className="break-words text-xl font-semibold text-[#1c231f]">{eventTitle(event)}</h2>
                         <p className="mt-1 text-sm text-[var(--muted)]">Received {formatDateTime(event.receivedAt)}</p>
                     </div>
-                    {event.relatedRecordType && event.relatedRecordId && (
+                    {(event.linkedItems?.length || event.LinkedItems?.length) ? (
+                        <RelatedItemLinks items={event.linkedItems || event.LinkedItems || []} />
+                    ) : event.relatedRecordType && event.relatedRecordId && (
                         <RelatedRecordLink event={event} />
                     )}
                 </div>
@@ -476,10 +546,41 @@ function EventDetail({
                                 <select value={mode} onChange={(event) => setMode(event.target.value as typeof mode)} className="form-control">
                                     <option value="publish_notice">Publish Notice</option>
                                     <option value="create_task">Create Task</option>
+                                    <option value="create_items">Create Multiple Items</option>
                                     <option value="link_task">Link Existing Task</option>
                                     <option value="ignore">Ignore</option>
                                     <option value="archive">Archive</option>
                                 </select>
+
+                                {(mode === 'publish_notice' || mode === 'create_task' || mode === 'create_items') && (
+                                    <div className="rounded-md border border-teal-100 bg-teal-50 p-3">
+                                        <label className="mb-1.5 block text-xs font-bold uppercase text-teal-800">Confirmed Operational Area</label>
+                                        <select
+                                            value={confirmedAreaId}
+                                            onChange={(event) => setConfirmedAreaId(event.target.value ? Number(event.target.value) : '')}
+                                            className="form-control"
+                                        >
+                                            <option value="">Organisation-wide</option>
+                                            {areas.map(area => <option key={area.id} value={area.id}>{area.name}</option>)}
+                                        </select>
+                                        {confirmedAreaId !== '' && areas.length > 1 && (
+                                            <div className="mt-2 flex flex-wrap gap-2">
+                                                {areas.filter(area => area.id !== Number(confirmedAreaId)).map(area => (
+                                                    <label key={area.id} className="flex items-center gap-1.5 text-xs text-teal-900">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={linkedAreaIds.includes(area.id)}
+                                                            onChange={(event) => setLinkedAreaIds(current => event.target.checked
+                                                                ? [...current, area.id]
+                                                                : current.filter(id => id !== area.id))}
+                                                        />
+                                                        {area.name}
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
 
                                 {mode === 'publish_notice' && (
                                     <div className="space-y-3">
@@ -496,7 +597,28 @@ function EventDetail({
                                             <input type="checkbox" checked={noticePinned} onChange={(event) => setNoticePinned(event.target.checked)} />
                                             Pin notice
                                         </label>
-                                        <Field label="Linked Task IDs" value={linkedTaskIds} onChange={setLinkedTaskIds} placeholder="Example: 12, 18" />
+                                        <TaskLinkPicker
+                                            label="Link existing tasks"
+                                            linkedTaskIds={linkedTaskIds}
+                                            disabled={busy}
+                                            onSelect={(taskId) => setLinkedTaskIds(current => [...current, taskId])}
+                                        />
+                                        {linkedTaskIds.length > 0 && (
+                                            <div className="flex flex-wrap gap-2" aria-label="Tasks linked to this notice">
+                                                {linkedTaskIds.map(taskId => (
+                                                    <button
+                                                        key={taskId}
+                                                        type="button"
+                                                        className="rounded-md border border-teal-200 bg-teal-50 px-2 py-1 text-xs font-semibold text-teal-900 hover:bg-teal-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)]"
+                                                        onClick={() => setLinkedTaskIds(current => current.filter(id => id !== taskId))}
+                                                        disabled={busy}
+                                                        aria-label={`Remove task ${taskId} from this notice`}
+                                                    >
+                                                        Task #{taskId} <span aria-hidden="true">×</span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
                                 )}
 
@@ -516,8 +638,61 @@ function EventDetail({
                                     </div>
                                 )}
 
+                                {mode === 'create_items' && (
+                                    <div className="space-y-3">
+                                        <p className="text-xs text-slate-600">Create up to 10 operational items in one atomic review. If any item fails, none are saved.</p>
+                                        {batchItems.map((item, index) => (
+                                            <div key={item.key} className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                                                <div className="flex items-center gap-2">
+                                                    <select
+                                                        value={item.type}
+                                                        onChange={(event) => setBatchItems(current => current.map(entry => entry.key === item.key ? { ...entry, type: event.target.value as BatchItemType } : entry))}
+                                                        className="form-control"
+                                                    >
+                                                        {(['TASK', 'NOTICE', 'REQUEST', 'NOTE'] as BatchItemType[]).map(type => <option key={type} value={type}>{labelFromValue(type)}</option>)}
+                                                    </select>
+                                                    {batchItems.length > 1 && (
+                                                        <button type="button" className="btn-secondary shrink-0" onClick={() => setBatchItems(current => current.filter(entry => entry.key !== item.key))}>Remove</button>
+                                                    )}
+                                                </div>
+                                                <Field label={`Item ${index + 1} title`} value={item.title} onChange={(title) => setBatchItems(current => current.map(entry => entry.key === item.key ? { ...entry, title } : entry))} />
+                                                <div>
+                                                    <label className="mb-1.5 block text-xs font-bold uppercase text-[var(--muted)]">Body</label>
+                                                    <textarea value={item.body} onChange={(event) => setBatchItems(current => current.map(entry => entry.key === item.key ? { ...entry, body: event.target.value } : entry))} className="form-control min-h-20" />
+                                                </div>
+                                            </div>
+                                        ))}
+                                        <button
+                                            type="button"
+                                            className="btn-secondary w-full justify-center"
+                                            disabled={batchItems.length >= 10}
+                                            onClick={() => setBatchItems(current => [...current, newBatchItem(event, 'NOTE')])}
+                                        >
+                                            Add Item
+                                        </button>
+                                    </div>
+                                )}
+
                                 {mode === 'link_task' && (
-                                    <Field label="Task ID" value={linkTaskId} onChange={setLinkTaskId} placeholder="Existing task ID" />
+                                    <div className="space-y-2">
+                                        <TaskLinkPicker
+                                            label="Task to link"
+                                            linkedTaskIds={linkTaskId ? [linkTaskId] : []}
+                                            disabled={busy}
+                                            onSelect={setLinkTaskId}
+                                        />
+                                        {linkTaskId && (
+                                            <button
+                                                type="button"
+                                                className="rounded-md border border-teal-200 bg-teal-50 px-2 py-1 text-xs font-semibold text-teal-900 hover:bg-teal-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)]"
+                                                onClick={() => setLinkTaskId(null)}
+                                                disabled={busy}
+                                            >
+                                                Task #{linkTaskId} <span aria-hidden="true">×</span>
+                                                <span className="sr-only"> Remove selected task</span>
+                                            </button>
+                                        )}
+                                    </div>
                                 )}
 
                                 {(mode === 'ignore' || mode === 'archive') && (
@@ -553,9 +728,11 @@ function EventDetail({
 }
 
 function CreateIntegrationEventModal({
+    areas,
     onClose,
     onCreated
 }: {
+    areas: OperationalArea[];
     onClose: () => void;
     onCreated: (event: IntegrationEvent, duplicate: boolean) => Promise<void>;
 }) {
@@ -563,6 +740,7 @@ function CreateIntegrationEventModal({
     const [intakeMethod, setIntakeMethod] = useState<'manual' | 'webhook' | 'automation' | 'email' | 'import'>('manual');
     const [eventType, setEventType] = useState<IntegrationEventType>('notice.imported');
     const [externalEventId, setExternalEventId] = useState('');
+    const [suggestedAreaId, setSuggestedAreaId] = useState<number | ''>('');
     const [payloadText, setPayloadText] = useState(DEFAULT_NOTICE_PAYLOAD);
     const [error, setError] = useState('');
     const [saving, setSaving] = useState(false);
@@ -590,6 +768,8 @@ function CreateIntegrationEventModal({
                 intakeMethod,
                 eventType,
                 externalEventId: externalEventId || null,
+                suggestedAreaId: suggestedAreaId === '' ? null : suggestedAreaId,
+                areaMappingSource: suggestedAreaId === '' ? null : 'MANUAL',
                 rawPayload: parsed.data
             };
             const result = await createIntegrationEvent(input);
@@ -629,6 +809,17 @@ function CreateIntegrationEventModal({
                             optionLabel={labelFromValue}
                         />
                         <Field label="External ID" value={externalEventId} onChange={setExternalEventId} placeholder="Optional provider ID" />
+                        <div>
+                            <label className="mb-1.5 block text-xs font-bold uppercase text-[var(--muted)]">Suggested Area</label>
+                            <select
+                                className="form-control"
+                                value={suggestedAreaId}
+                                onChange={(event) => setSuggestedAreaId(event.target.value ? Number(event.target.value) : '')}
+                            >
+                                <option value="">No suggestion</option>
+                                {areas.map(area => <option key={area.id} value={area.id}>{area.name}</option>)}
+                            </select>
+                        </div>
                     </div>
 
                     <div className="mt-4">
@@ -685,7 +876,7 @@ function IntakeMetric({
 function StatusBadge({ status }: { status: IntegrationEventStatus }) {
     return (
         <span className={`shrink-0 rounded-md border px-2 py-1 text-[11px] font-bold uppercase ${statusTone(status)}`}>
-            {status.replace(/_/g, ' ')}
+            {labelFromValue(status)}
         </span>
     );
 }
@@ -771,5 +962,24 @@ function RelatedRecordLink({ event }: { event: IntegrationEvent }) {
         <Link href={href} className="btn-secondary">
             Open {event.relatedRecordType === 'NOTICE' ? 'Notice' : 'Task'} #{event.relatedRecordId}
         </Link>
+    );
+}
+
+function operationalItemHref(item: IntegrationEventItem) {
+    if (item.itemType === 'TASK') return `/tasks?taskId=${item.itemId}`;
+    if (item.itemType === 'NOTICE') return `/noticeboard?noticeId=${item.itemId}`;
+    if (item.itemType === 'REQUEST') return `/requests?requestId=${item.itemId}`;
+    return `/notes?recordId=${item.itemId}`;
+}
+
+function RelatedItemLinks({ items }: { items: IntegrationEventItem[] }) {
+    return (
+        <div className="flex max-w-md flex-wrap justify-end gap-2">
+            {items.map(item => (
+                <Link key={item.id} href={operationalItemHref(item)} className="btn-secondary">
+                    {labelFromValue(item.itemType)} #{item.itemId}
+                </Link>
+            ))}
+        </div>
     );
 }

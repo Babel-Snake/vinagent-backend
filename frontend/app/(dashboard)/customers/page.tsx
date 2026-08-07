@@ -1,7 +1,19 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { getCustomers, createCustomer, updateCustomer, deleteCustomer, searchMembers, mergeCustomers, getWineryFull, updateWinerySettings } from '../../../lib/api';
+import { useState, useEffect, useEffectEvent, useRef } from 'react';
+import {
+    getCustomers,
+    createCustomer,
+    updateCustomer,
+    deleteCustomer,
+    searchMembers,
+    mergeCustomers,
+    getWineryFull,
+    updateWinerySettings,
+    type Member,
+    type MemberInput
+} from '../../../lib/api';
+import Dialog from '../../../components/ui/Dialog';
 
 const SOURCE_LABELS: Record<string, string> = {
     manual: 'Manual', sms: 'SMS', email: 'Email', booking: 'Booking',
@@ -23,24 +35,45 @@ const LOYALTY_COLORS: Record<string, string> = {
 
 const STATE_FILTER_OPTIONS = ['ACT', 'NSW', 'NT', 'QLD', 'SA', 'TAS', 'VIC', 'WA'];
 
-function formatDate(d: string | null) {
+function formatDate(d?: string | null) {
     if (!d) return '—';
     return new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-function formatLocation(customer: any) {
+type CustomerForm = Omit<Partial<Member>, 'tags'> & { tags: string };
+
+function errorMessage(error: unknown) {
+    return error instanceof Error ? error.message : 'An unexpected error occurred';
+}
+
+function formatLocation(customer: Member) {
     const locality = [customer.suburb, customer.state, customer.postcode].filter(Boolean).join(' ');
     return [customer.addressLine1, locality].filter(Boolean).join(', ');
 }
 
+function buildCustomerPayload(form: CustomerForm): MemberInput {
+    const payload = {
+        ...form,
+        tags: form.tags ? form.tags.split(',').map(tag => tag.trim()).filter(Boolean) : []
+    };
+    delete payload.id;
+    delete payload.wineryId;
+    delete payload.createdAt;
+    delete payload.updatedAt;
+    delete payload.taskCount;
+    delete payload.Tasks;
+    return payload;
+}
+
 export default function CustomersPage() {
-    const [customers, setCustomers] = useState<any[]>([]);
+    const [customers, setCustomers] = useState<Member[]>([]);
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(50);
     const [totalPages, setTotalPages] = useState(1);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [operationError, setOperationError] = useState('');
 
     // Filters
     const [search, setSearch] = useState('');
@@ -52,12 +85,12 @@ export default function CustomersPage() {
 
     // Modals
     const [showCreateModal, setShowCreateModal] = useState(false);
-    const [editingCustomer, setEditingCustomer] = useState<any>(null);
-    const [deletingCustomer, setDeletingCustomer] = useState<any>(null);
-    const [mergeTargetCustomer, setMergeTargetCustomer] = useState<any>(null);
-    const [mergeSourceCustomer, setMergeSourceCustomer] = useState<any>(null);
+    const [editingCustomer, setEditingCustomer] = useState<Member | null>(null);
+    const [deletingCustomer, setDeletingCustomer] = useState<Member | null>(null);
+    const [mergeTargetCustomer, setMergeTargetCustomer] = useState<Member | null>(null);
+    const [mergeSourceCustomer, setMergeSourceCustomer] = useState<Member | null>(null);
     const [mergeQuery, setMergeQuery] = useState('');
-    const [mergeCandidates, setMergeCandidates] = useState<any[]>([]);
+    const [mergeCandidates, setMergeCandidates] = useState<Member[]>([]);
     const [mergeOverrides, setMergeOverrides] = useState<Record<string, string>>({});
     const [isMerging, setIsMerging] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -75,7 +108,7 @@ export default function CustomersPage() {
     const menuRef = useRef<HTMLDivElement>(null);
 
     // Form state for create/edit
-    const [form, setForm] = useState<any>({});
+    const [form, setForm] = useState<CustomerForm>({ tags: '' });
     const [isSaving, setIsSaving] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
 
@@ -100,15 +133,19 @@ export default function CustomersPage() {
             setTotal(data.total);
             setTotalPages(data.totalPages);
             setPage(data.page);
-        } catch (err: any) {
-            setError(err.message);
+        } catch (err: unknown) {
+            setError(errorMessage(err));
         } finally {
             setLoading(false);
         }
     };
 
+    const loadCustomersFromEffect = useEffectEvent((p: number) => {
+        void loadCustomers(p);
+    });
+
     useEffect(() => {
-        loadCustomers(1);
+        loadCustomersFromEffect(1);
     }, [customerTypeFilter, sourceFilter, stateFilter, sortBy, pageSize]);
 
     useEffect(() => {
@@ -129,7 +166,7 @@ export default function CustomersPage() {
 
     useEffect(() => {
         if (searchTimeout.current) clearTimeout(searchTimeout.current);
-        searchTimeout.current = setTimeout(() => loadCustomers(1), 400);
+        searchTimeout.current = setTimeout(() => loadCustomersFromEffect(1), 400);
         return () => { if (searchTimeout.current) clearTimeout(searchTimeout.current); };
     }, [search]);
 
@@ -160,9 +197,10 @@ export default function CustomersPage() {
         lifetimeSpend: 0, totalOrders: 0, visitCount: 0
     });
 
-    const handleCreate = () => { resetForm(); setShowCreateModal(true); };
+    const handleCreate = () => { resetForm(); setOperationError(''); setShowCreateModal(true); };
 
-    const handleEdit = (c: any) => {
+    const handleEdit = (c: Member) => {
+        setOperationError('');
         setForm({
             ...c,
             customerType: c.customerType || (c.isWineClubMember ? 'member' : 'guest'),
@@ -176,7 +214,8 @@ export default function CustomersPage() {
         setOpenMenuId(null);
     };
 
-    const handleOpenMerge = (customer: any) => {
+    const handleOpenMerge = (customer: Member) => {
+        setOperationError('');
         setMergeTargetCustomer(customer);
         setMergeSourceCustomer(null);
         setMergeQuery(`${customer.firstName || ''} ${customer.lastName || ''}`.trim());
@@ -186,45 +225,48 @@ export default function CustomersPage() {
 
     const handleSubmitCreate = async (e: React.FormEvent) => {
         e.preventDefault();
+        setOperationError('');
         setIsSaving(true);
         try {
-            const payload = { ...form, tags: form.tags ? form.tags.split(',').map((s: string) => s.trim()).filter(Boolean) : [] };
+            const payload = buildCustomerPayload(form);
             if (!payload.dateOfBirth) delete payload.dateOfBirth;
             await createCustomer(payload);
             setShowCreateModal(false);
             loadCustomers(1);
-        } catch (err: any) { alert(err.message); }
+        } catch (err: unknown) { setOperationError(errorMessage(err)); }
         finally { setIsSaving(false); }
     };
 
     const handleSubmitEdit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!editingCustomer) return;
+        setOperationError('');
         setIsSaving(true);
         try {
-            const payload = { ...form, tags: form.tags ? form.tags.split(',').map((s: string) => s.trim()).filter(Boolean) : [] };
+            const payload = buildCustomerPayload(form);
             if (!payload.dateOfBirth) delete payload.dateOfBirth;
-            delete payload.id; delete payload.wineryId; delete payload.createdAt; delete payload.updatedAt; delete payload.taskCount; delete payload.Tasks;
             await updateCustomer(editingCustomer.id, payload);
             setEditingCustomer(null);
             loadCustomers();
-        } catch (err: any) { alert(err.message); }
+        } catch (err: unknown) { setOperationError(errorMessage(err)); }
         finally { setIsSaving(false); }
     };
 
     const handleConfirmDelete = async () => {
         if (!deletingCustomer) return;
+        setOperationError('');
         setIsDeleting(true);
         try {
             await deleteCustomer(deletingCustomer.id);
             setDeletingCustomer(null);
             loadCustomers();
-        } catch (err: any) { alert(err.message); }
+        } catch (err: unknown) { setOperationError(errorMessage(err)); }
         finally { setIsDeleting(false); }
     };
 
     const handleConfirmMerge = async () => {
         if (!mergeTargetCustomer || !mergeSourceCustomer) return;
+        setOperationError('');
         setIsMerging(true);
         try {
             await mergeCustomers(mergeTargetCustomer.id, mergeSourceCustomer.id, mergeOverrides);
@@ -233,20 +275,21 @@ export default function CustomersPage() {
             setMergeQuery('');
             setMergeCandidates([]);
             loadCustomers(1);
-        } catch (err: any) {
-            alert(err.message);
+        } catch (err: unknown) {
+            setOperationError(errorMessage(err));
         } finally {
             setIsMerging(false);
         }
     };
 
     const handleSaveMatchingSettings = async () => {
+        setOperationError('');
         setIsSavingSettings(true);
         try {
             await updateWinerySettings({ identityMatchingConfig: matchingConfig });
             setShowSettingsModal(false);
-        } catch (err: any) {
-            alert(err.message);
+        } catch (err: unknown) {
+            setOperationError(errorMessage(err));
         } finally {
             setIsSavingSettings(false);
         }
@@ -273,7 +316,7 @@ export default function CustomersPage() {
         });
     };
 
-    const displayCustomerType = (customer: any) => customer.customerType || (customer.isWineClubMember ? 'member' : 'guest');
+    const displayCustomerType = (customer: Member) => customer.customerType || (customer.isWineClubMember ? 'member' : 'guest');
 
     const CustomerFormFields = () => (
         <div className="space-y-4">
@@ -399,11 +442,11 @@ export default function CustomersPage() {
             {/* Header */}
             <div className="page-header">
                 <div>
-                    <h1 className="text-2xl font-bold text-[#1c231f]">Customers</h1>
+                    <h1 className="page-title">Customers</h1>
                     <p className="page-kicker">{total} customer records with merge, identity, and engagement context.</p>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-3">
-                    <button onClick={() => setShowSettingsModal(true)} className="btn-secondary">
+                    <button onClick={() => { setOperationError(''); setShowSettingsModal(true); }} className="btn-secondary">
                         Matching Settings
                     </button>
                     <button onClick={handleCreate} className="btn-primary">
@@ -501,7 +544,43 @@ export default function CustomersPage() {
 
             {/* Table */}
             <div className="surface-panel overflow-hidden">
-                <div className="overflow-x-auto">
+                <div className="divide-y divide-[var(--border)] lg:hidden">
+                    {loading ? (
+                        <div className="px-4 py-12 text-center text-[var(--muted)]">Loading customers...</div>
+                    ) : customers.length === 0 ? (
+                        <div className="px-4 py-12 text-center text-[var(--muted)]">No customers found.</div>
+                    ) : customers.map(c => (
+                        <article key={c.id} className="space-y-4 p-4">
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="flex min-w-0 items-center gap-3">
+                                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-[var(--brand-soft)] text-lg font-bold text-[var(--brand)]">{(c.firstName || '?').charAt(0).toUpperCase()}</div>
+                                    <div className="min-w-0">
+                                        <h2 className="truncate text-base font-semibold text-[#1c231f]">{c.firstName} {c.lastName}</h2>
+                                        <p className="mt-0.5 text-sm text-[var(--muted)]">{displayCustomerType(c) === 'member' ? 'Wine Club member' : displayCustomerType(c) === 'tour_operator' ? 'Tour operator' : 'Guest'}</p>
+                                    </div>
+                                </div>
+                                {c.loyaltyTier && <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${LOYALTY_COLORS[c.loyaltyTier] || LOYALTY_COLORS.none}`}>{LOYALTY_LABELS[c.loyaltyTier] || c.loyaltyTier}</span>}
+                            </div>
+                            <div className="space-y-1 text-sm">
+                                {c.email ? <a href={`mailto:${c.email}`} className="block break-all text-[var(--brand-strong)] hover:underline">{c.email}</a> : <span className="block text-[var(--muted)]">No email recorded</span>}
+                                {c.phone ? <a href={`tel:${c.phone}`} className="block text-[var(--brand-strong)] hover:underline">{c.phone}</a> : <span className="block text-[var(--muted)]">No phone recorded</span>}
+                            </div>
+                            <dl className="grid grid-cols-2 gap-x-4 gap-y-3 border-y border-[var(--border)] py-3 text-sm">
+                                <div><dt className="text-xs font-semibold uppercase text-[var(--muted)]">Location</dt><dd className="mt-0.5 text-[#344039]">{formatLocation(c) || 'Not recorded'}</dd></div>
+                                <div><dt className="text-xs font-semibold uppercase text-[var(--muted)]">Last contact</dt><dd className="mt-0.5 text-[#344039]">{formatDate(c.lastContactAt)}</dd></div>
+                                <div><dt className="text-xs font-semibold uppercase text-[var(--muted)]">Spend</dt><dd className="mt-0.5 font-medium text-[#344039]">${Number(c.lifetimeSpend || 0).toLocaleString('en-AU', { maximumFractionDigits: 0 })}</dd></div>
+                                <div><dt className="text-xs font-semibold uppercase text-[var(--muted)]">Tasks</dt><dd className="mt-0.5 font-medium text-[#344039]">{c.taskCount || 0}</dd></div>
+                            </dl>
+                            <div className="flex flex-wrap gap-2">
+                                <button type="button" onClick={() => handleEdit(c)} className="btn-secondary">Edit</button>
+                                <button type="button" onClick={() => handleOpenMerge(c)} className="btn-secondary text-amber-800">Merge</button>
+                                <button type="button" onClick={() => setDeletingCustomer(c)} className="btn-secondary text-red-700">Delete</button>
+                            </div>
+                        </article>
+                    ))}
+                </div>
+
+                <div className="hidden overflow-x-auto lg:block">
                     <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-[#f8faf6]">
                             <tr>
@@ -567,16 +646,16 @@ export default function CustomersPage() {
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
                                         <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-50 text-blue-700">
-                                            {SOURCE_LABELS[c.source] || c.source || '—'}
+                                            {c.source ? (SOURCE_LABELS[c.source] || c.source) : '—'}
                                         </span>
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
-                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${LOYALTY_COLORS[c.loyaltyTier] || LOYALTY_COLORS.none}`}>
-                                            {LOYALTY_LABELS[c.loyaltyTier] || 'None'}
+                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${c.loyaltyTier ? (LOYALTY_COLORS[c.loyaltyTier] || LOYALTY_COLORS.none) : LOYALTY_COLORS.none}`}>
+                                            {c.loyaltyTier ? (LOYALTY_LABELS[c.loyaltyTier] || c.loyaltyTier) : 'None'}
                                         </span>
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 font-medium">
-                                        ${parseFloat(c.lifetimeSpend || 0).toLocaleString('en-AU', { minimumFractionDigits: 0 })}
+                                        ${Number(c.lifetimeSpend || 0).toLocaleString('en-AU', { minimumFractionDigits: 0 })}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{c.visitCount || 0}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{c.taskCount || 0}</td>
@@ -619,13 +698,14 @@ export default function CustomersPage() {
 
             {/* Create Modal */}
             {showCreateModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                    <div className="bg-white rounded-lg max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+                <Dialog open={showCreateModal} onClose={() => setShowCreateModal(false)} title="Add new customer" showHeader={false} className="max-w-2xl">
+                    <div className="p-6">
                         <div className="flex justify-between items-center mb-4">
                             <h2 className="text-xl font-bold">Add New Customer</h2>
                             <button onClick={() => setShowCreateModal(false)} className="text-gray-400 hover:text-gray-600">✕</button>
                         </div>
                         <form onSubmit={handleSubmitCreate}>
+                            {operationError && <p role="alert" className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{operationError}</p>}
                             <CustomerFormFields />
                             <div className="flex justify-end gap-3 pt-4 mt-4 border-t">
                                 <button type="button" onClick={() => setShowCreateModal(false)} className="px-4 py-2 text-gray-700 hover:bg-gray-50 border rounded-md text-sm font-medium">Cancel</button>
@@ -633,12 +713,12 @@ export default function CustomersPage() {
                             </div>
                         </form>
                     </div>
-                </div>
+                </Dialog>
             )}
 
             {mergeTargetCustomer && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                    <div className="bg-white rounded-lg max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+                <Dialog open={Boolean(mergeTargetCustomer)} onClose={() => setMergeTargetCustomer(null)} title="Merge customers" showHeader={false} className="max-w-2xl">
+                    <div className="p-6">
                         <div className="flex justify-between items-center mb-4">
                             <div>
                                 <h2 className="text-xl font-bold">Merge Customers</h2>
@@ -647,6 +727,7 @@ export default function CustomersPage() {
                             <button onClick={() => setMergeTargetCustomer(null)} className="text-gray-400 hover:text-gray-600">×</button>
                         </div>
 
+                        {operationError && <p role="alert" className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{operationError}</p>}
                         <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 mb-4">
                             <div className="text-xs font-bold uppercase tracking-wide text-gray-500 mb-1">Merge Target</div>
                             <div className="font-semibold text-gray-900">{mergeTargetCustomer.firstName} {mergeTargetCustomer.lastName}</div>
@@ -740,12 +821,12 @@ export default function CustomersPage() {
                             </button>
                         </div>
                     </div>
-                </div>
+                </Dialog>
             )}
 
             {showSettingsModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                    <div className="bg-white rounded-lg max-w-lg w-full p-6">
+                <Dialog open={showSettingsModal} onClose={() => setShowSettingsModal(false)} title="Matching settings" showHeader={false} className="max-w-lg">
+                    <div className="p-6">
                         <div className="flex justify-between items-center mb-4">
                             <div>
                                 <h2 className="text-xl font-bold">Matching Settings</h2>
@@ -754,6 +835,7 @@ export default function CustomersPage() {
                             <button onClick={() => setShowSettingsModal(false)} className="text-gray-400 hover:text-gray-600">×</button>
                         </div>
 
+                        {operationError && <p role="alert" className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{operationError}</p>}
                         <div className="space-y-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Auto-link threshold</label>
@@ -786,18 +868,19 @@ export default function CustomersPage() {
                             </button>
                         </div>
                     </div>
-                </div>
+                </Dialog>
             )}
 
             {/* Edit Modal */}
             {editingCustomer && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                    <div className="bg-white rounded-lg max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+                <Dialog open={Boolean(editingCustomer)} onClose={() => setEditingCustomer(null)} title="Edit customer" showHeader={false} className="max-w-2xl">
+                    <div className="p-6">
                         <div className="flex justify-between items-center mb-4">
                             <h2 className="text-xl font-bold">Edit Customer</h2>
                             <button onClick={() => setEditingCustomer(null)} className="text-gray-400 hover:text-gray-600">✕</button>
                         </div>
                         <form onSubmit={handleSubmitEdit}>
+                            {operationError && <p role="alert" className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{operationError}</p>}
                             <CustomerFormFields />
                             <div className="flex justify-end gap-3 pt-4 mt-4 border-t">
                                 <button type="button" onClick={() => setEditingCustomer(null)} className="px-4 py-2 text-gray-700 hover:bg-gray-50 border rounded-md text-sm font-medium">Cancel</button>
@@ -805,13 +888,13 @@ export default function CustomersPage() {
                             </div>
                         </form>
                     </div>
-                </div>
+                </Dialog>
             )}
 
             {/* Delete Confirmation */}
             {deletingCustomer && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                    <div className="bg-white rounded-lg max-w-sm w-full p-6 text-center">
+                <Dialog open={Boolean(deletingCustomer)} onClose={() => setDeletingCustomer(null)} title="Delete customer" showHeader={false} className="max-w-sm">
+                    <div className="p-6 text-center">
                         <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 mb-4">
                             <svg className="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -819,12 +902,13 @@ export default function CustomersPage() {
                         </div>
                         <h3 className="text-lg font-medium text-gray-900 mb-2">Delete {deletingCustomer.firstName} {deletingCustomer.lastName}?</h3>
                         <p className="text-sm text-gray-500 mb-6">This will permanently remove this customer and their data. This action cannot be undone.</p>
+                        {operationError && <p role="alert" className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-left text-sm text-red-800">{operationError}</p>}
                         <div className="flex justify-center gap-3">
                             <button type="button" onClick={() => setDeletingCustomer(null)} className="px-4 py-2 w-full text-gray-700 hover:bg-gray-50 border rounded-md text-sm font-medium">Cancel</button>
                             <button type="button" onClick={handleConfirmDelete} disabled={isDeleting} className="px-4 py-2 w-full bg-red-600 text-white hover:bg-red-700 rounded-md text-sm font-medium disabled:opacity-50">{isDeleting ? 'Deleting...' : 'Delete'}</button>
                         </div>
                     </div>
-                </div>
+                </Dialog>
             )}
         </div>
     );

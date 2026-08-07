@@ -2,9 +2,14 @@ const client = require('twilio');
 const crypto = require('crypto');
 const config = require('../config');
 const logger = require('../config/logger');
-const { WineryIntegrationConfig } = require('../models');
+const {
+    WineryIntegrationConfig,
+    OperationalAreaIntegrationConfig,
+    OperationalArea
+} = require('../models');
 const {
     DOMAINS,
+    AREA_DOMAINS,
     digestWebhookSecret,
     parseJsonObject
 } = require('../services/integrationConnection.service');
@@ -122,12 +127,24 @@ async function validateIntegrationWebhookSignature(req, res, next) {
     try {
         const wineryId = Number.parseInt(req.params.wineryId, 10);
         const domain = String(req.params.domain || '').toLowerCase();
+        const hasAreaId = req.params.areaId !== undefined;
+        const areaId = hasAreaId ? Number.parseInt(req.params.areaId, 10) : null;
 
         if (!Number.isInteger(wineryId) || wineryId < 1 || !DOMAINS.includes(domain)) {
             return res.status(404).json({ error: 'Webhook not found' });
         }
+        if (hasAreaId && (!Number.isInteger(areaId) || areaId < 1 || !AREA_DOMAINS.includes(domain))) {
+            return res.status(404).json({ error: 'Webhook not found' });
+        }
 
-        const integrationConfig = await WineryIntegrationConfig.findOne({ where: { wineryId } });
+        let integrationConfig;
+        if (hasAreaId) {
+            const area = await OperationalArea.findOne({ where: { id: areaId, wineryId, isActive: true } });
+            if (!area) return res.status(404).json({ error: 'Webhook not found' });
+            integrationConfig = await OperationalAreaIntegrationConfig.findOne({ where: { wineryId, areaId } });
+        } else {
+            integrationConfig = await WineryIntegrationConfig.findOne({ where: { wineryId } });
+        }
         const connections = parseJsonObject(integrationConfig?.providerConnections);
         const connection = parseJsonObject(connections[domain]);
 
@@ -162,6 +179,7 @@ async function validateIntegrationWebhookSignature(req, res, next) {
         req.integrationWebhook = {
             wineryId,
             domain,
+            areaId,
             providerConnection: connection
         };
 

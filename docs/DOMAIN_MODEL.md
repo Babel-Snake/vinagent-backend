@@ -2,6 +2,53 @@
 
 This document describes the current backend domain model and the workflow semantics that matter most in the live build.
 
+## Operational object grammar
+
+The product now exposes four staff-facing operational concepts:
+
+- Task: action that must be completed.
+- Notice: information that must be communicated.
+- Request: approval, decision, help, information, or resources that must be supplied.
+- Note: searchable operational memory, implemented as `OperationalRecord`.
+
+Tasks and Notices retain their existing mature tables. Requests and Operational Records are additive domains using the same winery and operational-area security boundary.
+
+### OperationalRequest
+
+`OperationalRequest` stores title/body/original input, subtype, priority, target user, due date, decision state/response, source, AI suggestion/confidence, human confirmation, and actor timestamps.
+
+States are `PENDING | APPROVED | REJECTED | CANCELLED`. Only a pending Request can be edited or decided. A requested person or relevant manager may approve/reject; the creator or relevant manager may cancel.
+
+`OperationalRequestArea` provides primary and linked area placement. `OperationalItemAuditEvent` records creation, edits, and decisions.
+
+### OperationalRecord
+
+`OperationalRecord` stores a title, body, original input, record type, source/reference, occurrence time, optional customer link, structured metadata, AI suggestion/confidence, and human confirmation.
+
+Operational Records do not have a completion status. Follow-up work will be represented by a separate linked Task or Request rather than mutating the Note into another type.
+
+`OperationalRecordArea` provides primary and linked area placement. `OperationalRecordRecipient` optionally directs a Note to multiple active users in the same winery. Direction controls personal attention surfaces, while the existing winery/area rules remain the visibility boundary. Area-scoped recipients must be able to view at least one selected area. `OperationalItemAuditEvent` records creation and edits, including recipient changes.
+
+### OperationalItemRelation
+
+`OperationalItemRelation` links typed `TASK | NOTICE | REQUEST | NOTE` identities without changing the source record. Supported relationships include `CREATED_FROM`, `RELATES_TO`, `BLOCKS`, `DUPLICATES`, `GENERATED_TASK`, `FOLLOW_UP_FOR`, and `COMPLETION_RECORD`.
+
+Conversions are additive. Request-to-Task requires an approved Request; Note-to-Task preserves the Note. Repeated conversions return the existing generated Task rather than creating duplicates.
+
+### OperationalItemComment and attachments
+
+`OperationalItemComment` provides threaded comments for Requests and Notes. Any user who can view the parent may comment. Authors can delete their own comments; relevant managers can moderate them.
+
+The polymorphic `Attachment` entity types now include `REQUEST` and `NOTE`. Parent item visibility is enforced before list, upload, download, or deletion. Attachment actions are also written to the operational-item audit history.
+
+### Unified operations read model
+
+The four operational domains remain their own sources of truth. `GET /api/operations` builds a normalized, read-only feed after invoking each domain's tenant, audience, and area visibility rules.
+
+The read model returns a typed identity, title, preview, state, priority, areas, event timestamp, due/expiry timestamp, owner/author summary, and a source URL. Search delegates to each domain so hidden records are excluded before cross-object merge, sorting, counts, and pagination.
+
+The initial implementation uses bounded relational queries and application-level merging. A dedicated search index should only replace it after measured volume or latency justifies the additional synchronization infrastructure.
+
 ## 1. User
 
 Represents an authenticated human user of the platform.
@@ -42,6 +89,23 @@ Current ecosystem around a winery:
 * `WineryFAQItem`
 * `WinerySop`
 * `WineryContact`
+* `WineryContactArea`
+* `OperationalAreaProfile`
+* `OperationalAreaBookingsConfig`
+* `AreaProductListing`
+* `OperationalAreaIntegrationConfig`
+
+Organisation identity remains on `Winery`. `OperationalAreaProfile` stores public contact details, opening hours, directions, and service notes for one area. `OperationalAreaBookingsConfig` stores booking rules for one area. Both are tenant-scoped and have a unique `areaId`.
+
+`WineryBookingsConfig` remains the organisation default for compatibility. `WineryBookingType.areaId` is nullable: a populated value gives the booking type an area owner, while `null` identifies a legacy organisation-level booking type.
+
+`AreaProductListing` joins one canonical `WineryProduct` to one `OperationalArea`. It stores area availability, optional price/stock overrides, featured state, and area sales notes. Product identity, vintage, tasting notes, awards, and default commercial values remain on `WineryProduct`, preventing duplicate catalogues from drifting apart.
+
+`OperationalAreaIntegrationConfig` stores provider connections for an area's `booking`, `pos`, `crm`, and `delivery` domains. Communication channels and winery fallback connections remain on `WineryIntegrationConfig`. A missing area domain inherits the winery fallback. Area connections receive distinct webhook URLs/secrets, and booking/CRM task execution resolves the primary task area's override before falling back to `WinerySettings`.
+
+`WineryFAQItem.areaId` and `WinerySop.areaId` are nullable. A null value means shared winery knowledge; a populated value gives the FAQ or SOP one operational-area owner. Existing rows remain shared. AI context keeps shared knowledge at winery level and adds area-owned knowledge only under the relevant area.
+
+`WineryContactArea` joins organisation contacts to operational areas using `PRIMARY | LINKED`. A contact may have at most one primary link by service policy and any number of linked responsibilities. Contacts with no links are organisation-wide. `WineryContact.reportsToId` remains independent of area placement, preserving one reporting hierarchy across the winery. Area-scoped AI context includes relevant contacts plus their reporting-manager chain.
 
 ### 2.2 WinerySettings
 
@@ -61,6 +125,9 @@ Key fields:
 * `crmProvider`
 * `crmConfig`
 * `identityMatchingConfig`
+* `operationalIntelligenceConfig`: per-winery scheduler participation, suggested-signal thresholds, and review reminder windows. The server-level scheduler loop is still controlled by environment flags; this field controls how a participating winery is evaluated.
+
+`OperationalIntelligenceConfigAuditEvent` records manager changes to `operationalIntelligenceConfig`, including the actor, optional preset, changed field paths, and before/after snapshots.
 
 ## 3. Member
 
@@ -376,3 +443,48 @@ Current analytics sources:
 * `Member` for customer source, loyalty, spend, and lifecycle counts
 
 Waiting and blocked age are currently approximated from the open task's latest update timestamp. That is useful for MVP management visibility, but exact state-duration analytics would require explicit workflow-state transition timestamps.
+
+## 12. Operational Areas
+
+Operational placement is represented by `OperationalArea`, scoped to the current `Winery` tenant. Users join areas through `UserAreaMembership`; tasks use `TaskArea`; notices use `NoticeArea`.
+
+Tasks and notices explicitly distinguish `areaScope = ORGANISATION | AREAS`. Existing records are organisation-scoped. Area-scoped tasks have one primary link and may have linked areas. Notice area targeting composes with the existing audience rules.
+
+Integration events can store suggested and confirmed area IDs, confidence, and mapping source. Review carries confirmed placement into the normal task or notice.
+
+`IntegrationEventItem` is the multi-result edge from an intake event to a `TASK | NOTICE | REQUEST | NOTE`. It records the target ID, a per-event idempotency key, whether the target was created or linked, and the reviewing actor. A unique event/type/target constraint prevents duplicate links; a unique event/key constraint makes batch identities stable. The legacy singular related-record pointer mirrors the first result only.
+
+## Notice acknowledgements
+
+Acknowledgement is a Notice capability rather than a top-level operational object. A Notice opts in with `requiresAcknowledgement` and may set `acknowledgementDueAt`. `NoticeAcknowledgement` records one immutable read confirmation per notice/user pair.
+
+Expected recipients are calculated from active winery users, directed audience rules, and area access. Specific-user targeting retains its existing direct-access behavior. Managers may inspect recipient completion only for notices they can manage; ordinary users see only aggregate state and their own acknowledgement.
+
+## Derived operational intelligence
+
+Request aging, classification corrections, conversion outcomes, recurrence candidates, and type/area trend comparisons are read models rather than new source-of-truth entities. Aging uses current pending Requests. Classification compares stored AI suggestion and human confirmation. Conversion outcomes follow `GENERATED_TASK` relationships to the authoritative Task state.
+
+Recurrence candidates are explainable advisory clusters built from normalized significant terms. Each result carries its source object links and period boundaries. The heuristic deliberately excludes Tasks generated from Request/Note conversions and never automatically merges, escalates, or creates records.
+
+`OperationalIntelligenceSignal` is the durable review wrapper for an advisory finding. It stores winery scope, optional area scope, signal type, severity, status, title/summary, stable fingerprint, stable `dedupeKey`, evidence JSON, reporting period, reviewer state, optional review owner/due date, optional suggested action text, materialization metadata, and optional `actionTaskId`. It is not the analytical source of truth; the underlying Tasks, Notices, Requests, Notes, and relations remain authoritative. Analytics can emit non-persisted `suggestedSignals`; managers or scheduled runs can materialize them into saved review records. Duplicate materialization across adjacent reporting windows updates or suppresses the existing open/acknowledged signal rather than creating noisy copies. A signal can create a Task only through an explicit manager/admin action, and repeated action calls reuse the existing Task.
+
+Authorization is inherited by comments, files, task steps, linked records, and calendar surfaces. See `docs/OPERATIONAL_AREAS.md` for the policy and API contract.
+
+## Projects
+
+`Project` is the optional coordination container for a defined cross-record outcome. Core fields are `title`, `intendedOutcome`, optional `businessContext`, `status`, `areaScope`, accountable `ownerUserId`, planned/target/actual dates, Project-level risk and review date, completion reason, tenant, creator, and updater.
+
+Relationships:
+
+* `ProjectArea` links one primary and optional additional operational areas.
+* `ProjectParticipant` links active winery users as `PARTICIPANT` or `STAKEHOLDER` and stores their Project-notification preference.
+* `ProjectItem` is the unique typed edge to a `TASK | REQUEST | NOTICE | NOTE | CALENDAR_EVENT`; it stores required, milestone, and sort metadata without copying source workflow state.
+* `ProjectTaskDependency` records one Task prerequisite edge within a Project. Both endpoints must already be linked Tasks, and cycle creation is rejected.
+* `ProjectAuditEvent` stores immutable significant Project mutations with actor, before/after snapshots, and contextual metadata.
+* `Attachment(entityType = PROJECT)` provides Project files through the shared attachment service.
+
+Project lifecycle status is `PLANNED | ACTIVE | ON_HOLD | COMPLETED | CANCELLED`. Health is not stored; it is derived as `ON_TRACK | AT_RISK | BLOCKED | OVERDUE` for open Projects. Progress is null without required Tasks and otherwise counts only required Tasks whose authoritative `workflowState` is `COMPLETED`.
+
+Visibility follows winery and operational-area policy. Global managers see and govern all winery Projects. Area managers govern Projects wholly inside areas they manage. A governing user may appoint an active same-winery user from a participating area as `leadUserId`; `leadGrantedByUserId` and `leadGrantedAt` retain the grant provenance. The Project Lead reports to the accountable owner and can coordinate only that open Project. Lead authority excludes owner/lead changes, participating-area changes, completion, cancellation, reopening, and completion overrides. Owners, leads, creators, participants, organisation users, and users sharing a Project area may view according to policy.
+
+Every ordinary linked child record is independently re-authorised before its metadata is returned. Project-created delegated Tasks are distinguished by `ProjectItem.linkType = DELEGATED_WORK`. The current Project Lead may view and mutate those Tasks even when another department owns them; ordinary `REFERENCE` links never grant access. Delegated Tasks persist their accountable Project owner as `Task.createdBy`, so revoking or replacing the Project Lead immediately removes cross-area lead access without changing the assignee's access or deleting the Task.

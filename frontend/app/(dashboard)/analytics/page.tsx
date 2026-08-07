@@ -1,244 +1,69 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { getAnalytics } from '../../../lib/api';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { BarChart, DonutChart, SparkBars } from '../../../components/analytics/AnalyticsCharts';
+import {
+    AUTOMATION_LABELS,
+    CATEGORY_LABELS,
+    CUSTOMER_OUTCOME_LABELS,
+    DAY_ORDER,
+    formatHours,
+    formatMinutes,
+    formatNumber,
+    formatPercent,
+    IDENTITY_LABELS,
+    LOYALTY_COLORS,
+    LOYALTY_LABELS,
+    RESOLVED_AS_COLORS,
+    RESOLVED_AS_LABELS,
+    SENTIMENT_COLORS,
+    SOURCE_LABELS,
+    STATUS_COLORS,
+    STATUS_LABELS,
+    WAITING_LABELS,
+    WORKFLOW_COLORS,
+    WORKFLOW_LABELS
+} from '../../../components/analytics/analyticsPresentation';
+import { OperationalIntelligenceSection } from '../../../components/analytics/OperationalIntelligenceSection';
+import { useAnalyticsDashboard } from '../../../components/analytics/useAnalyticsDashboard';
 
-const STATUS_LABELS: Record<string, string> = {
-    PENDING: 'Pending', ACTIONED: 'Actioned', REJECTED: 'Rejected'
-};
-const STATUS_COLORS: Record<string, string> = {
-    PENDING: '#f59e0b', ACTIONED: '#10b981', REJECTED: '#ef4444'
-};
-const RESOLVED_AS_LABELS: Record<string, string> = {
-    COMPLETED: 'Completed',
-    WORKAROUND: 'Workaround',
-    ESCALATED: 'Escalated',
-    DECLINED: 'Declined',
-    DUPLICATE: 'Duplicate',
-    NO_ACTION: 'No Action'
-};
-const RESOLVED_AS_COLORS: Record<string, string> = {
-    COMPLETED: '#10b981',
-    WORKAROUND: '#f59e0b',
-    ESCALATED: '#6366f1',
-    DECLINED: '#ef4444',
-    DUPLICATE: '#6b7280',
-    NO_ACTION: '#94a3b8'
-};
-const CATEGORY_LABELS: Record<string, string> = {
-    BOOKING: 'Booking', ORDER: 'Order', ACCOUNT: 'Account', GENERAL: 'General',
-    INTERNAL: 'Internal', SYSTEM: 'System', OPERATIONS: 'Operations'
-};
-const CUSTOMER_OUTCOME_LABELS: Record<string, string> = {
-    BOOKING_CONFIRMED: 'Booking Confirmed',
-    ORDER_UPDATED: 'Order Updated',
-    ACCOUNT_UPDATED: 'Account Updated',
-    INFO_PROVIDED: 'Info Provided',
-    ISSUE_RESOLVED: 'Issue Resolved',
-    REQUEST_DECLINED: 'Request Declined',
-    REFERRED: 'Referred',
-    NO_CHANGE: 'No Change',
-    UNKNOWN: 'Unknown'
-};
-const SOURCE_LABELS: Record<string, string> = {
-    manual: 'Manual', sms: 'SMS', email: 'Email', booking: 'Booking',
-    wine_club: 'Wine Club', pos: 'POS', import: 'Import', website: 'Website',
-    referral: 'Referral', walk_in: 'Walk-in'
-};
-const LOYALTY_LABELS: Record<string, string> = { none: 'None', bronze: 'Bronze', silver: 'Silver', gold: 'Gold', platinum: 'Platinum' };
-const LOYALTY_COLORS: Record<string, string> = { none: '#9ca3af', bronze: '#d97706', silver: '#6b7280', gold: '#eab308', platinum: '#6366f1' };
-const SENTIMENT_COLORS: Record<string, string> = { POSITIVE: '#10b981', NEUTRAL: '#6b7280', NEGATIVE: '#ef4444' };
-const WORKFLOW_LABELS: Record<string, string> = {
-    NOT_STARTED: 'Not Started',
-    IN_PROGRESS: 'In Progress',
-    WAITING: 'Waiting',
-    BLOCKED: 'Blocked',
-    COMPLETED: 'Completed',
-    CANCELLED: 'Cancelled'
-};
-const WORKFLOW_COLORS: Record<string, string> = {
-    NOT_STARTED: '#94a3b8',
-    IN_PROGRESS: '#3b82f6',
-    WAITING: '#f59e0b',
-    BLOCKED: '#ef4444',
-    COMPLETED: '#10b981',
-    CANCELLED: '#6b7280'
-};
-const WAITING_LABELS: Record<string, string> = {
-    NONE: 'None',
-    STAFF: 'Staff',
-    CUSTOMER: 'Customer',
-    MANAGER: 'Manager',
-    EXTERNAL: 'External'
-};
-const IDENTITY_LABELS: Record<string, string> = {
-    AUTO_LINKED: 'Auto Linked',
-    AUTO_CREATED: 'Auto Created',
-    REVIEW_REQUIRED: 'Review Required',
-    REVIEW_CONFIRMED: 'Review Confirmed',
-    MANUALLY_LINKED: 'Manually Linked',
-    UNRESOLVED: 'Unresolved',
-    UNLINKED: 'Unlinked',
-    SELECTED_MEMBER: 'Selected Member',
-    UNRECORDED: 'Unrecorded'
-};
-const AUTOMATION_LABELS: Record<string, string> = {
-    EXPLICIT_FOLLOW_UP: 'Explicit Follow-up',
-    CUSTOMER_NO_RESPONSE_CALLBACK: 'No-response Callback',
-    ESCALATION_REVIEW: 'Escalation Review'
-};
-const DAY_ORDER = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const INSIGHT_VIEWS = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'operations', label: 'Operations' },
+    { id: 'customers', label: 'Customers & revenue' },
+    { id: 'team', label: 'Team' },
+    { id: 'intelligence', label: 'Intelligence' }
+] as const;
 
-// --- Chart Components ---
-
-function BarChart({ data, labelKey, valueKey, colorFn, labelMap }: {
-    data: any[], labelKey: string, valueKey: string,
-    colorFn?: (l: string) => string, labelMap?: Record<string, string>
-}) {
-    const max = Math.max(...data.map(d => parseInt(d[valueKey]) || 0), 1);
-    return (
-        <div className="space-y-2">
-            {data.map((d, i) => {
-                const val = parseInt(d[valueKey]) || 0;
-                const pct = (val / max) * 100;
-                const label = labelMap?.[d[labelKey]] || d[labelKey] || 'Unknown';
-                const color = colorFn?.(d[labelKey]) || '#6366f1';
-                return (
-                    <div key={i} className="flex items-center gap-3">
-                        <div className="w-24 text-xs text-gray-600 text-right truncate" title={label}>{label}</div>
-                        <div className="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
-                            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: color }}></div>
-                        </div>
-                        <div className="w-8 text-xs font-medium text-gray-700 text-right">{val}</div>
-                    </div>
-                );
-            })}
-            {data.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No data for this period</p>}
-        </div>
-    );
-}
-
-function DonutChart({ data, labelKey, valueKey, colorFn, labelMap }: {
-    data: any[], labelKey: string, valueKey: string,
-    colorFn?: (l: string) => string, labelMap?: Record<string, string>
-}) {
-    const total = data.reduce((sum, d) => sum + (parseInt(d[valueKey]) || 0), 0);
-    if (total === 0) return <p className="text-sm text-gray-400 text-center py-8">No data for this period</p>;
-
-    const segments = data.map((d, index) => {
-        const val = parseInt(d[valueKey]) || 0;
-        const pct = (val / total) * 100;
-        const start = data
-            .slice(0, index)
-            .reduce((sum, item) => sum + ((parseInt(item[valueKey]) || 0) / total) * 100, 0);
-        return { label: labelMap?.[d[labelKey]] || d[labelKey], val, pct, start, color: colorFn?.(d[labelKey]) || '#6366f1' };
-    });
-
-    const gradient = segments.map(s => `${s.color} ${s.start}% ${s.start + s.pct}%`).join(', ');
-
-    return (
-        <div className="flex items-center gap-6">
-            <div className="relative w-32 h-32 flex-shrink-0">
-                <div className="w-32 h-32 rounded-full" style={{ background: `conic-gradient(${gradient})` }}></div>
-                <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-16 h-16 rounded-full bg-white flex items-center justify-center text-lg font-bold text-gray-700">{total}</div>
-                </div>
-            </div>
-            <div className="space-y-1 text-xs">
-                {segments.filter(s => s.val > 0).map((s, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-sm flex-shrink-0" style={{ backgroundColor: s.color }}></div>
-                        <span className="text-gray-600">{s.label}</span>
-                        <span className="font-medium text-gray-800">{s.val} ({Math.round(s.pct)}%)</span>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-}
-
-function SparkBars({ data, labelKey, valueKey }: { data: any[], labelKey: string, valueKey: string }) {
-    const max = Math.max(...data.map(d => parseInt(d[valueKey]) || 0), 1);
-    return (
-        <div className="flex items-end gap-px h-20">
-            {data.map((d, i) => {
-                const val = parseInt(d[valueKey]) || 0;
-                const pct = Math.max((val / max) * 100, 3);
-                return (
-                    <div key={i} className="flex-1 group relative">
-                        <div className="w-full bg-indigo-400 hover:bg-indigo-500 rounded-t transition-colors cursor-default" style={{ height: `${pct}%` }}>
-                            <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block bg-gray-800 text-white text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap z-10">
-                                {d[labelKey]}: {val}
-                            </div>
-                        </div>
-                    </div>
-                );
-            })}
-        </div>
-    );
-}
-
-function formatNumber(value: any) {
-    return (Number(value) || 0).toLocaleString('en-AU');
-}
-
-function formatHours(value: any) {
-    const numeric = Number(value) || 0;
-    if (numeric === 0) return '0h';
-    if (numeric < 1) return `${Math.round(numeric * 60)}m`;
-    if (numeric >= 48) return `${(numeric / 24).toFixed(1)}d`;
-    return `${numeric.toFixed(1)}h`;
-}
-
-function formatMinutes(value: any) {
-    const numeric = Number(value) || 0;
-    if (numeric === 0) return '0m';
-    if (numeric >= 60) return `${(numeric / 60).toFixed(1)}h`;
-    return `${numeric.toFixed(0)}m`;
-}
-
-function formatPercent(value: any) {
-    return `${Math.round(Number(value) || 0)}%`;
-}
-
-// --- Page ---
+type InsightView = typeof INSIGHT_VIEWS[number]['id'];
 
 export default function AnalyticsPage() {
-    const [data, setData] = useState<any>(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
+    const router = useRouter();
+    const searchParams = useSearchParams();
+    const dashboard = useAnalyticsDashboard();
+    const {
+        data, loading, error, period, offset, setPeriod, setOffset,
+        goBack, goForward, goToday, periodLabel
+    } = dashboard;
+    const requestedView = searchParams.get('view');
+    const activeView: InsightView = INSIGHT_VIEWS.some(view => view.id === requestedView)
+        ? requestedView as InsightView
+        : 'overview';
 
-    const [period, setPeriod] = useState('month');
-    const [offset, setOffset] = useState(0);
-
-    const load = useCallback(() => {
-        setLoading(true);
-        setError('');
-        getAnalytics(period, offset)
-            .then(setData)
-            .catch(err => setError(err.message))
-            .finally(() => setLoading(false));
-    }, [period, offset]);
-
-    useEffect(() => {
-        const timer = window.setTimeout(() => {
-            load();
-        }, 0);
-        return () => window.clearTimeout(timer);
-    }, [load]);
-
-    const goBack = () => setOffset(o => o + 1);
-    const goForward = () => setOffset(o => Math.max(0, o - 1));
-    const goToday = () => setOffset(0);
-
-    const periodLabel = data?.period?.label || '';
+    function selectView(nextView: InsightView) {
+        const params = new URLSearchParams(searchParams.toString());
+        if (nextView === 'overview') params.delete('view');
+        else params.set('view', nextView);
+        const query = params.toString();
+        router.replace(query ? `/analytics?${query}` : '/analytics', { scroll: false });
+    }
 
     return (
         <div className="page-shell space-y-7">
             {/* Header + Period Selector */}
             <div className="page-header">
                 <div>
-                    <h1 className="text-2xl font-bold text-[#1c231f]">Analytics</h1>
+                    <h1 className="page-title">Insights</h1>
                     <p className="page-kicker">Operations, customer engagement, workflow quality, and follow-up signals.</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -269,6 +94,22 @@ export default function AnalyticsPage() {
                 </div>
             </div>
 
+            <nav className="flex gap-1 overflow-x-auto rounded-lg border border-[var(--border)] bg-[#f8faf6] p-1" aria-label="Insights views">
+                {INSIGHT_VIEWS.map(view => (
+                    <button
+                        key={view.id}
+                        type="button"
+                        onClick={() => selectView(view.id)}
+                        aria-current={activeView === view.id ? 'page' : undefined}
+                        className={`whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold ${activeView === view.id
+                            ? 'bg-[var(--surface)] text-[var(--brand-strong)] shadow-sm'
+                            : 'text-[var(--muted)] hover:bg-white hover:text-[#1c231f]'}`}
+                    >
+                        {view.label}
+                    </button>
+                ))}
+            </nav>
+
             {/* Period Label */}
             {periodLabel && (
                 <div className="text-center">
@@ -298,19 +139,21 @@ export default function AnalyticsPage() {
                 const handoffs = operations.handoffs || {};
                 const identity = operations.identity || {};
                 const followUps = operations.followUps || {};
+                const acknowledgements = operations.acknowledgements || {};
+                const intelligence = operations.intelligence || {};
                 return (
                     <>
                         {/* KPI Cards */}
-                        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
+                        {activeView === 'overview' && (
+                        <>
+                        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
                             {[
                                 { label: 'Open Tasks', value: kpis.openTasks, dot: 'bg-amber-500', color: 'text-amber-700' },
-                                { label: 'Resolved', value: kpis.resolvedInPeriod, dot: 'bg-emerald-500', color: 'text-emerald-700' },
-                                { label: 'Follow-up Marked', value: kpis.followUpsMarked, dot: 'bg-orange-500', color: 'text-orange-700' },
-                                { label: 'New Customers', value: kpis.newCustomers, dot: 'bg-sky-500', color: 'text-sky-700' },
-                                { label: 'Total Customers', value: kpis.totalCustomers, dot: 'bg-teal-600', color: 'text-teal-800' },
-                                { label: 'Wine Club', value: kpis.wineClubMembers, dot: 'bg-violet-500', color: 'text-violet-700' },
-                                { label: 'Revenue Tracked', value: `$${(kpis.revenueTracked || 0).toLocaleString('en-AU', { minimumFractionDigits: 0 })}`, dot: 'bg-emerald-600', color: 'text-emerald-800' },
-                                { label: 'Inbound Msgs', value: kpis.inboundMessages, dot: 'bg-blue-500', color: 'text-blue-700' }
+                                { label: 'Overdue', value: formatNumber(workflow.overdueTasks), dot: 'bg-red-500', color: 'text-red-700' },
+                                { label: 'Waiting', value: formatNumber(workflow.currentWaiting), dot: 'bg-amber-500', color: 'text-amber-700' },
+                                { label: 'First Response', value: formatMinutes(response.avgFirstResponseMinutes), dot: 'bg-teal-600', color: 'text-teal-800' },
+                                { label: 'Resolution', value: formatHours(timing.avgResolutionHours), dot: 'bg-emerald-500', color: 'text-emerald-700' },
+                                { label: 'Revenue Tracked', value: `$${(kpis.revenueTracked || 0).toLocaleString('en-AU', { minimumFractionDigits: 0 })}`, dot: 'bg-[var(--brand)]', color: 'text-[var(--brand-strong)]' }
                             ].map((kpi, i) => (
                                 <div key={i} className="metric-tile">
                                     <div className="flex items-center justify-between gap-2">
@@ -321,8 +164,13 @@ export default function AnalyticsPage() {
                                 </div>
                             ))}
                         </div>
+                        <p className="text-sm text-[var(--muted)]">Use the view selector above to investigate operations, customers, team capacity, or intelligence signals.</p>
+                        </>
+                        )}
 
                         {/* Operational Flow */}
+                        {activeView === 'operations' && (
+                        <>
                         <div>
                             <div className="flex items-center justify-between mb-4">
                                 <div>
@@ -330,14 +178,16 @@ export default function AnalyticsPage() {
                                     <p className="text-sm text-gray-500">Where work is waiting, blocked, delayed, or moving through handoffs.</p>
                                 </div>
                             </div>
-                            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
+                            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
                                 {[
                                     { label: 'Avg Resolution', value: formatHours(timing.avgResolutionHours), sub: 'closed cases' },
                                     { label: 'First Response', value: formatMinutes(response.avgFirstResponseMinutes), sub: `${formatPercent(response.responseCoverageRate)} coverage` },
                                     { label: 'Waiting Now', value: formatNumber(workflow.currentWaiting), sub: `${formatHours(timing.avgWaitingAgeHours)} avg age` },
                                     { label: 'Blocked Now', value: formatNumber(workflow.currentBlocked), sub: `${formatHours(timing.avgBlockedAgeHours)} avg age` },
                                     { label: 'Overdue', value: formatNumber(workflow.overdueTasks), sub: `${formatNumber(workflow.dueSoonTasks)} due soon` },
-                                    { label: 'Handoffs', value: formatNumber(handoffs.total), sub: `${formatNumber(handoffs.tasksWithHandoffs)} tasks touched` }
+                                    { label: 'Handoffs', value: formatNumber(handoffs.total), sub: `${formatNumber(handoffs.tasksWithHandoffs)} tasks touched` },
+                                    { label: 'Notice Read Rate', value: formatPercent(acknowledgements.completionRate), sub: `${formatNumber(acknowledgements.completedAcknowledgements)} confirmations` },
+                                    { label: 'Unread Notices', value: formatNumber(acknowledgements.outstandingAcknowledgements), sub: `${formatNumber(acknowledgements.overdueNotices)} notices overdue` }
                                 ].map((metric, i) => (
                                     <div key={i} className="bg-white rounded-lg border border-gray-200 p-4">
                                         <div className="text-2xl font-bold text-gray-900">{metric.value}</div>
@@ -496,7 +346,16 @@ export default function AnalyticsPage() {
                             </div>
                         </div>
 
+                        </>
+                        )}
+
+                        {/* Cross-object intelligence */}
+                        {activeView === 'intelligence' && <OperationalIntelligenceSection dashboard={dashboard} intelligence={intelligence} />}
+
+
                         {/* Bookings */}
+                        {activeView === 'customers' && (
+                        <>
                         <div>
                             <h2 className="text-lg font-semibold text-gray-900 mb-4">Bookings & Events</h2>
                             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -514,7 +373,7 @@ export default function AnalyticsPage() {
                                     <h3 className="text-sm font-semibold text-gray-900 mb-3">Bookings by Day of Week</h3>
                                     {bookings.byDay.length > 0 ? (
                                         <BarChart
-                                            data={DAY_ORDER.map(d => bookings.byDay.find((b: any) => b.dayName === d) || { dayName: d, count: 0 })}
+                                            data={DAY_ORDER.map(d => bookings.byDay.find(b => b.dayName === d) || { dayName: d, count: 0 })}
                                             labelKey="dayName" valueKey="count"
                                             colorFn={() => '#8b5cf6'}
                                             labelMap={{ Monday: 'Mon', Tuesday: 'Tue', Wednesday: 'Wed', Thursday: 'Thu', Friday: 'Fri', Saturday: 'Sat', Sunday: 'Sun' }}
@@ -554,11 +413,11 @@ export default function AnalyticsPage() {
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-gray-100">
-                                                    {customers.topBySpend.map((c: any, i: number) => (
+                                                    {customers.topBySpend.map((c, i: number) => (
                                                         <tr key={c.id} className="hover:bg-gray-50">
                                                             <td className="px-3 py-2 text-gray-400">{i + 1}</td>
                                                             <td className="px-3 py-2 font-medium text-gray-900">{c.firstName} {c.lastName}</td>
-                                                            <td className="px-3 py-2 text-gray-500">{c.email || '—'}</td>
+                                                            <td className="px-3 py-2 text-gray-500">{c.email || 'â€”'}</td>
                                                             <td className="px-3 py-2">
                                                                 <span className="px-2 py-0.5 text-xs rounded-full font-semibold"
                                                                     style={{ backgroundColor: `${LOYALTY_COLORS[c.loyaltyTier] || '#9ca3af'}20`, color: LOYALTY_COLORS[c.loyaltyTier] || '#9ca3af' }}>
@@ -566,7 +425,7 @@ export default function AnalyticsPage() {
                                                                 </span>
                                                             </td>
                                                             <td className="px-3 py-2 text-right text-gray-600">{c.totalOrders || 0}</td>
-                                                            <td className="px-3 py-2 text-right font-semibold text-emerald-600">${parseFloat(c.lifetimeSpend || 0).toLocaleString('en-AU')}</td>
+                                                            <td className="px-3 py-2 text-right font-semibold text-emerald-600">${Number(c.lifetimeSpend || 0).toLocaleString('en-AU')}</td>
                                                         </tr>
                                                     ))}
                                                 </tbody>
@@ -577,15 +436,18 @@ export default function AnalyticsPage() {
                             </div>
                         </div>
 
-                        {/* Staff & Communication */}
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        </>
+                        )}
+
+                        {/* Team */}
+                        {activeView === 'team' && (
                             <div className="bg-white rounded-lg border border-gray-200 p-5">
                                 <h3 className="text-sm font-semibold text-gray-900 mb-3">Staff Workload</h3>
                                 {staff.length > 0 ? (
                                     <div className="space-y-3">
-                                        {staff.map((s: any, i: number) => (
+                                        {staff.map((s, i: number) => (
                                             <div key={i} className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-sm flex-shrink-0">
+                                                <div className="w-8 h-8 rounded-full bg-[var(--brand-soft)] flex items-center justify-center text-[var(--brand-strong)] font-bold text-sm flex-shrink-0">
                                                     {(s.name || '?').charAt(0).toUpperCase()}
                                                 </div>
                                                 <div className="flex-1 min-w-0">
@@ -594,7 +456,7 @@ export default function AnalyticsPage() {
                                                         <span className="text-gray-500">{s.resolved}/{s.total}</span>
                                                     </div>
                                                     <div className="bg-gray-100 rounded-full h-2 mt-1">
-                                                        <div className="h-full rounded-full bg-indigo-500 transition-all" style={{ width: `${s.rate}%` }}></div>
+                                                        <div className="h-full rounded-full bg-[var(--brand)] transition-all" style={{ width: `${s.rate}%` }}></div>
                                                     </div>
                                                     <div className="text-[10px] text-gray-400 mt-0.5">{s.rate}% resolution rate</div>
                                                 </div>
@@ -603,7 +465,9 @@ export default function AnalyticsPage() {
                                     </div>
                                 ) : <p className="text-sm text-gray-400 text-center py-8">No assigned tasks in this period</p>}
                             </div>
+                        )}
 
+                        {activeView === 'customers' && (
                             <div className="bg-white rounded-lg border border-gray-200 p-5">
                                 <h3 className="text-sm font-semibold text-gray-900 mb-3">Communication Channels</h3>
                                 <div className="space-y-5">
@@ -621,7 +485,7 @@ export default function AnalyticsPage() {
                                     </div>
                                 </div>
                             </div>
-                        </div>
+                        )}
                     </>
                 );
             })()}

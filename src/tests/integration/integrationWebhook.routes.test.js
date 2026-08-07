@@ -9,12 +9,16 @@ const {
   IntegrationEvent,
   User,
   Winery,
-  WineryIntegrationConfig
+  WineryIntegrationConfig,
+  OperationalArea,
+  OperationalAreaIntegrationConfig
 } = require('../../models');
 
 describe('Generic Integration Webhook Routes', () => {
   const authToken = 'Bearer mock-token';
   const webhookSecret = 'generic-webhook-secret-123';
+  const areaWebhookSecret = 'area-webhook-secret-123';
+  let area;
 
   beforeAll(async () => {
     await sequelize.sync({ force: true });
@@ -34,6 +38,7 @@ describe('Generic Integration Webhook Routes', () => {
       role: 'manager',
       wineryId: 1
     });
+    area = await OperationalArea.create({ wineryId: 1, name: 'Restaurant', sortOrder: 1 });
   });
 
   afterAll(async () => {
@@ -42,6 +47,7 @@ describe('Generic Integration Webhook Routes', () => {
 
   beforeEach(async () => {
     await IntegrationEvent.destroy({ where: {} });
+    await OperationalAreaIntegrationConfig.destroy({ where: {} });
     await WineryIntegrationConfig.destroy({ where: {} });
   });
 
@@ -64,6 +70,23 @@ describe('Generic Integration Webhook Routes', () => {
             authMethod: 'webhook',
             webhookSecret,
             capabilities: ['receive_webhook', 'record_order_event']
+          }
+        }
+      })
+      .expect(200);
+  }
+
+  async function configureAreaWebhookSecret() {
+    return request(app)
+      .put(`/api/winery/areas/${area.id}/integration-config`)
+      .set('Authorization', authToken)
+      .send({
+        providerConnections: {
+          booking: {
+            provider: 'opentable',
+            authMethod: 'webhook',
+            webhookSecret: areaWebhookSecret,
+            capabilities: ['receive_webhook']
           }
         }
       })
@@ -177,5 +200,55 @@ describe('Generic Integration Webhook Routes', () => {
 
     expect(duplicateRes.body.duplicate).toBe(true);
     expect(await IntegrationEvent.count()).toBe(1);
+  });
+
+  it('authenticates an area webhook and routes its event directly to that area', async () => {
+    await configureAreaWebhookSecret();
+    const body = JSON.stringify({
+      provider: 'opentable',
+      eventType: 'task.suggested',
+      externalEventId: 'restaurant-booking-change-1',
+      rawPayload: { summary: 'Guest requested a booking time change.' }
+    });
+    const signature = signBody(areaWebhookSecret, body);
+
+    const response = await request(app)
+      .post(`/api/webhooks/integration/1/booking/${area.id}`)
+      .set('content-type', 'application/json')
+      .set('x-vinagent-webhook-secret', areaWebhookSecret)
+      .set('x-vinagent-webhook-signature', `sha256=${signature}`)
+      .send(body)
+      .expect(201);
+
+    expect(response.body.event).toMatchObject({
+      suggestedAreaId: area.id,
+      areaConfidence: 1,
+      areaMappingSource: 'RULE'
+    });
+    expect(response.body.event.metadata.webhook).toMatchObject({
+      domain: 'booking',
+      areaId: area.id,
+      configuredProvider: 'opentable'
+    });
+  });
+
+  it('does not fall back to the winery connection for an invalid area webhook path', async () => {
+    await configureWebhookSecret();
+    const body = JSON.stringify({
+      provider: 'zapier',
+      eventType: 'task.suggested',
+      externalEventId: 'invalid-area-path-1'
+    });
+    const signature = signBody(webhookSecret, body);
+
+    await request(app)
+      .post('/api/webhooks/integration/1/crm/0')
+      .set('content-type', 'application/json')
+      .set('x-vinagent-webhook-secret', webhookSecret)
+      .set('x-vinagent-webhook-signature', `sha256=${signature}`)
+      .send(body)
+      .expect(404);
+
+    expect(await IntegrationEvent.count()).toBe(0);
   });
 });

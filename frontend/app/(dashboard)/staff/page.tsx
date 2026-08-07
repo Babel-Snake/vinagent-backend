@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useRef } from 'react';
 import CreateStaffModal from '../../../components/CreateStaffModal';
+import Dialog from '../../../components/ui/Dialog';
+import { clientLogger } from '../../../lib/clientLogger';
+import { errorMessage } from '../../../lib/errors';
 import {
     deleteStaff,
     getWineryFull,
@@ -9,6 +12,12 @@ import {
     resetStaffAccessCode,
     updateStaff,
     updateWinerySettings,
+    fetchOperationalAreas,
+    createOperationalArea,
+    updateOperationalArea,
+    replaceStaffAreaMemberships,
+    type AreaMembership,
+    type OperationalArea,
     type Staff,
     type Winery
 } from '../../../lib/api';
@@ -31,8 +40,12 @@ const DEFAULT_AUTH_CONFIG = {
 export function StaffManagement({ embedded = false, winery: wineryFromProps = null, onSettingsUpdated }: StaffManagementProps) {
     const [showStaffModal, setShowStaffModal] = useState(false);
     const [users, setUsers] = useState<Staff[]>([]);
+    const [areas, setAreas] = useState<OperationalArea[]>([]);
+    const [newAreaName, setNewAreaName] = useState('');
+    const [areaSaving, setAreaSaving] = useState(false);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [operationError, setOperationError] = useState('');
     const [authConfig, setAuthConfig] = useState(DEFAULT_AUTH_CONFIG);
     const [settingsSaving, setSettingsSaving] = useState(false);
     const [settingsError, setSettingsError] = useState('');
@@ -49,6 +62,7 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
     const [editRole, setEditRole] = useState('staff');
     const [editIsActive, setEditIsActive] = useState(true);
     const [editResponsibilities, setEditResponsibilities] = useState('');
+    const [editAreaMemberships, setEditAreaMemberships] = useState<AreaMembership[]>([]);
     const [isSaving, setIsSaving] = useState(false);
 
     // Delete state
@@ -77,17 +91,19 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
     useEffect(() => {
         async function loadStaff() {
             try {
-                const [data, wineryData] = await Promise.all([
+                const [data, wineryData, operationalAreas] = await Promise.all([
                     listStaff(),
-                    wineryFromProps ? Promise.resolve(wineryFromProps) : getWineryFull()
+                    wineryFromProps ? Promise.resolve(wineryFromProps) : getWineryFull(),
+                    fetchOperationalAreas(true)
                 ]);
                 setUsers(data);
+                setAreas(operationalAreas);
                 setAuthConfig({
                     ...DEFAULT_AUTH_CONFIG,
                     ...(wineryData?.settings?.authConfig || {})
                 });
-            } catch (err: any) {
-                setError(err.message || 'Failed to load staff');
+            } catch (err: unknown) {
+                setError(errorMessage(err, 'Failed to load staff'));
             } finally {
                 setLoading(false);
             }
@@ -101,16 +117,19 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
     };
 
     const handleEditClick = (user: Staff) => {
+        setOperationError('');
         setEditingUser(user);
         setEditName(user.displayName || '');
         setEditEmail(user.email || '');
         setEditRole(user.role || 'staff');
         setEditIsActive(user.isActive ?? true);
         setEditResponsibilities(user.responsibilities || '');
+        setEditAreaMemberships(user.areaMemberships || []);
         setOpenMenuId(null);
     };
 
     const handleDeleteClick = (user: Staff) => {
+        setOperationError('');
         setDeletingUser(user);
         setOpenMenuId(null);
     };
@@ -155,8 +174,8 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
             });
             setSettingsSuccess('PIN login settings saved.');
             onSettingsUpdated?.();
-        } catch (err: any) {
-            setSettingsError(err.message || 'Failed to save PIN login settings');
+        } catch (err: unknown) {
+            setSettingsError(errorMessage(err, 'Failed to save PIN login settings'));
         } finally {
             setSettingsSaving(false);
         }
@@ -166,6 +185,7 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
         e.preventDefault();
         if (!editingUser) return;
 
+        setOperationError('');
         setIsSaving(true);
         try {
             const updated = await updateStaff(editingUser.id, {
@@ -175,10 +195,11 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
                 isActive: editIsActive,
                 responsibilities: editResponsibilities
             });
-            setUsers(users.map(u => u.id === updated.id ? { ...u, ...updated } : u));
+            const areaMemberships = await replaceStaffAreaMemberships(editingUser.id, editAreaMemberships);
+            setUsers(users.map(u => u.id === updated.id ? { ...u, ...updated, areaMemberships } : u));
             setEditingUser(null);
-        } catch (err: any) {
-            alert(err.message || 'Failed to update staff');
+        } catch (err: unknown) {
+            setOperationError(errorMessage(err, 'Failed to update staff'));
         } finally {
             setIsSaving(false);
         }
@@ -187,16 +208,56 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
     const handleConfirmDelete = async () => {
         if (!deletingUser) return;
 
+        setOperationError('');
         setIsDeleting(true);
         try {
             await deleteStaff(deletingUser.id);
             setUsers(users.filter(u => u.id !== deletingUser.id));
             setDeletingUser(null);
-        } catch (err: any) {
-            alert(err.message || 'Failed to delete staff');
+        } catch (err: unknown) {
+            setOperationError(errorMessage(err, 'Failed to delete staff'));
         } finally {
             setIsDeleting(false);
         }
+    };
+
+    const handleCreateArea = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!newAreaName.trim()) return;
+        setOperationError('');
+        setAreaSaving(true);
+        try {
+            await createOperationalArea({ name: newAreaName.trim(), sortOrder: areas.length });
+            setAreas(await fetchOperationalAreas(true));
+            setNewAreaName('');
+        } catch (err: unknown) {
+            setOperationError(errorMessage(err, 'Failed to create area'));
+        } finally {
+            setAreaSaving(false);
+        }
+    };
+
+    const handleToggleArea = async (area: OperationalArea) => {
+        setOperationError('');
+        try {
+            await updateOperationalArea(area.id, { isActive: !area.isActive });
+            setAreas(await fetchOperationalAreas(true));
+        } catch (err: unknown) {
+            setOperationError(errorMessage(err, 'Failed to update area'));
+        }
+    };
+
+    const toggleEditArea = (areaId: number) => {
+        setEditAreaMemberships(current => current.some(item => item.areaId === areaId)
+            ? current.filter(item => item.areaId !== areaId)
+            : [...current, { areaId, membershipRole: 'MEMBER', isPrimary: current.length === 0 }]);
+    };
+
+    const updateEditAreaMembership = (areaId: number, updates: Partial<AreaMembership>) => {
+        setEditAreaMemberships(current => current.map(item => {
+            if (item.areaId !== areaId) return updates.isPrimary ? { ...item, isPrimary: false } : item;
+            return { ...item, ...updates };
+        }));
     };
 
     const handleResetAccessCode = async (e: React.FormEvent) => {
@@ -239,8 +300,8 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
                 pin: clearPin ? undefined : pin || undefined,
                 clearedPin: clearPin
             });
-        } catch (err: any) {
-            setResetAccessCodeError(err.message || 'Failed to reset access code');
+        } catch (err: unknown) {
+            setResetAccessCodeError(errorMessage(err, 'Failed to reset access code'));
         } finally {
             setIsResettingAccessCode(false);
         }
@@ -253,7 +314,7 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
                     {embedded ? (
                         <h2 className="text-lg font-semibold text-[#1c231f]">Staff & Access</h2>
                     ) : (
-                        <h1 className="text-2xl font-bold text-[#1c231f]">Staff management</h1>
+                        <h1 className="page-title">Staff management</h1>
                     )}
                     <p className={embedded ? 'mt-1 text-sm text-[var(--muted)]' : 'page-kicker'}>
                         Manage login access, roles, responsibilities, and operational coverage.
@@ -269,6 +330,44 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
                     Add Staff
                 </button>
             </div>
+
+            <section className="rounded-md border border-[var(--border)] bg-white p-4">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                        <h3 className="text-sm font-semibold uppercase text-[#344039]">Operational Areas</h3>
+                        <p className="mt-1 text-sm text-[var(--muted)]">Create departments and use staff memberships to control operational visibility.</p>
+                    </div>
+                    <form onSubmit={handleCreateArea} className="flex w-full gap-2 lg:w-auto">
+                        <input
+                            className="form-control min-w-56"
+                            value={newAreaName}
+                            onChange={e => setNewAreaName(e.target.value)}
+                            placeholder="e.g. Restaurant"
+                            maxLength={120}
+                        />
+                        <button className="btn-primary whitespace-nowrap" disabled={areaSaving || !newAreaName.trim()}>
+                            {areaSaving ? 'Adding...' : 'Add Area'}
+                        </button>
+                    </form>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                    {areas.length === 0 ? (
+                        <span className="text-sm text-[var(--muted)]">No operational areas configured.</span>
+                    ) : areas.map(area => (
+                        <button
+                            key={area.id}
+                            type="button"
+                            onClick={() => handleToggleArea(area)}
+                            className={`rounded-full border px-3 py-1.5 text-sm ${area.isActive
+                                ? 'border-teal-200 bg-teal-50 text-teal-800'
+                                : 'border-gray-200 bg-gray-50 text-gray-500 line-through'}`}
+                            title={area.isActive ? 'Click to deactivate' : 'Click to reactivate'}
+                        >
+                            {area.name}
+                        </button>
+                    ))}
+                </div>
+            </section>
 
             <section className="rounded-md border border-[var(--border)] bg-[#f8faf6] p-4">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -400,6 +499,12 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
                 </div>
             )}
 
+            {operationError && (
+                <div role="alert" className="mb-6 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                    {operationError}
+                </div>
+            )}
+
             <div className="surface-panel overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200">
@@ -421,6 +526,9 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
                                     Contact
                                 </th>
                                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase text-[var(--muted)]">
+                                    Areas
+                                </th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase text-[var(--muted)]">
                                     Responsibilities
                                 </th>
                                 <th scope="col" className="relative px-6 py-3">
@@ -431,7 +539,7 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
                         <tbody className="bg-white divide-y divide-gray-200">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={7} className="px-6 py-12 text-center text-sm text-[var(--muted)]">
+                                    <td colSpan={8} className="px-6 py-12 text-center text-sm text-[var(--muted)]">
                                         Loading staff...
                                     </td>
                                 </tr>
@@ -488,6 +596,11 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
                                         <a href={`mailto:${user.email}`} className="text-blue-600 hover:text-blue-800 hover:underline">
                                             {user.email}
                                         </a>
+                                    </td>
+                                    <td className="px-6 py-4 text-sm text-gray-500">
+                                        {(user.areaMemberships || []).length > 0
+                                            ? user.areaMemberships!.map(item => `${item.Area?.name || `Area #${item.areaId}`}${item.membershipRole === 'MANAGER' ? ' (manager)' : ''}`).join(', ')
+                                            : <span className="italic text-gray-300">Organisation only</span>}
                                     </td>
                                     <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate" title={user.responsibilities || ''}>
                                         {user.responsibilities || <span className="italic text-gray-300">Not set</span>}
@@ -554,20 +667,21 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
                     onClose={() => {
                         setShowStaffModal(false);
                         // Refresh list to show newly added user
-                        listStaff().then(setUsers).catch(console.error);
+                        listStaff().then(setUsers).catch(clientLogger.error);
                     }}
                 />
             )}
 
             {/* Edit Modal */}
             {editingUser && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                    <div className="bg-white rounded-lg max-w-md w-full p-6">
+                <Dialog open={Boolean(editingUser)} onClose={() => setEditingUser(null)} title="Edit staff member" showHeader={false} className="max-w-md">
+                    <div className="p-6">
                         <div className="flex justify-between items-center mb-4">
                             <h2 className="text-xl font-bold">Edit Staff Member</h2>
                             <button onClick={() => setEditingUser(null)} className="text-gray-400 hover:text-gray-600">X</button>
                         </div>
                         <form onSubmit={handleSaveEdit} className="space-y-4">
+                            {operationError && <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{operationError}</p>}
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Display Name</label>
                                 <input
@@ -630,6 +744,45 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
                                     placeholder="E.g. Handling wine club cancellations, managing shipping logistics..."
                                 />
                             </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Operational Areas</label>
+                                <div className="mt-2 max-h-48 space-y-2 overflow-y-auto rounded-md border border-gray-200 p-2">
+                                    {areas.filter(area => area.isActive).length === 0 ? (
+                                        <p className="text-sm text-gray-500">Create an operational area first.</p>
+                                    ) : areas.filter(area => area.isActive).map(area => {
+                                        const membership = editAreaMemberships.find(item => item.areaId === area.id);
+                                        return (
+                                            <div key={area.id} className="flex flex-wrap items-center justify-between gap-2 rounded bg-gray-50 px-2 py-2">
+                                                <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                                                    <input type="checkbox" checked={Boolean(membership)} onChange={() => toggleEditArea(area.id)} />
+                                                    {area.name}
+                                                </label>
+                                                {membership && (
+                                                    <div className="flex items-center gap-3 text-xs">
+                                                        <select
+                                                            value={membership.membershipRole}
+                                                            onChange={e => updateEditAreaMembership(area.id, { membershipRole: e.target.value as 'MEMBER' | 'MANAGER' })}
+                                                            className="rounded border border-gray-300 px-2 py-1"
+                                                        >
+                                                            <option value="MEMBER">Member</option>
+                                                            <option value="MANAGER">Area manager</option>
+                                                        </select>
+                                                        <label className="flex items-center gap-1">
+                                                            <input
+                                                                type="radio"
+                                                                name="primaryArea"
+                                                                checked={membership.isPrimary}
+                                                                onChange={() => updateEditAreaMembership(area.id, { isPrimary: true })}
+                                                            />
+                                                            Primary
+                                                        </label>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
                             <div className="flex justify-end gap-3 pt-4">
                                 <button
                                     type="button"
@@ -648,13 +801,13 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
                             </div>
                         </form>
                     </div>
-                </div>
+                </Dialog>
             )}
 
             {/* Reset Access Code Modal */}
             {resettingUser && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                    <div className="bg-white rounded-lg max-w-md w-full p-6">
+                <Dialog open={Boolean(resettingUser)} onClose={() => setResettingUser(null)} title="Update credentials" showHeader={false} className="max-w-md">
+                    <div className="p-6">
                         <div className="flex justify-between items-start mb-4">
                             <div>
                                 <h2 className="text-xl font-bold">Update credentials</h2>
@@ -778,13 +931,13 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
                             </form>
                         )}
                     </div>
-                </div>
+                </Dialog>
             )}
 
             {/* Delete Confirmation Modal */}
             {deletingUser && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                    <div className="bg-white rounded-lg max-w-sm w-full p-6 text-center">
+                <Dialog open={Boolean(deletingUser)} onClose={() => setDeletingUser(null)} title="Delete staff member" showHeader={false} className="max-w-sm">
+                    <div className="p-6 text-center">
                         <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 mb-4">
                             <svg className="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -794,6 +947,7 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
                         <p className="text-sm text-gray-500 mb-6">
                             Are you sure you want to permanently delete this staff member? By doing so, they will instantly lose access to the system. This action cannot be undone.
                         </p>
+                        {operationError && <p role="alert" className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-left text-sm text-red-800">{operationError}</p>}
                         <div className="flex justify-center gap-3">
                             <button
                                 type="button"
@@ -812,7 +966,7 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
                             </button>
                         </div>
                     </div>
-                </div>
+                </Dialog>
             )}
         </div>
     );

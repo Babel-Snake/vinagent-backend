@@ -15,6 +15,15 @@
   --warning-soft: #fff4dd;
   --danger: #b42318;
   --danger-soft: #fee9e7;
+  --success: #16794a;
+  --success-soft: #e9f7ef;
+  --involvement-direct: #0f766e;
+  --involvement-direct-strong: #115e59;
+  --involvement-direct-soft: #e4f4f1;
+  --involvement-area: #7a1f2b;
+  --involvement-area-strong: #5f1721;
+  --involvement-area-soft: #f8edef;
+  --focus-ring: #0f766e;
   --muted: #667085;
 }
 
@@ -51,6 +60,11 @@ button:disabled {
   cursor: not-allowed;
 }
 
+:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--focus-ring) 70%, white);
+  outline-offset: 2px;
+}
+
 ::selection {
   background: var(--brand-soft);
   color: var(--brand-strong);
@@ -75,6 +89,24 @@ button:disabled {
   margin-bottom: 1.25rem;
 }
 
+.page-title {
+  color: #1c231f;
+  font-size: 1.5rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 2rem;
+}
+
+@media (max-width: 639px) {
+  .page-header {
+    flex-direction: column;
+  }
+
+  .page-header > :last-child {
+    align-self: stretch;
+  }
+}
+
 .page-kicker {
   color: var(--muted);
   font-size: 0.875rem;
@@ -88,6 +120,61 @@ button:disabled {
   box-shadow: 0 1px 2px rgba(28, 35, 31, 0.05);
 }
 
+/* Personal relevance is deliberately separate from status colours. The inset
+   rail carries involvement while red, amber and green remain free for state. */
+.involvement-surface {
+  position: relative;
+}
+
+.involvement-surface-direct {
+  border-color: color-mix(in srgb, var(--involvement-direct) 62%, white) !important;
+  box-shadow: inset 4px 0 0 var(--involvement-direct), 0 1px 2px rgba(28, 35, 31, 0.06);
+}
+
+.involvement-surface-area {
+  border-color: color-mix(in srgb, var(--involvement-area) 38%, white) !important;
+  box-shadow: inset 4px 0 0 color-mix(in srgb, var(--involvement-area) 72%, white), 0 1px 2px rgba(28, 35, 31, 0.05);
+}
+
+.involvement-badge {
+  align-items: center;
+  border: 1px solid;
+  border-radius: 999px;
+  display: inline-flex;
+  flex-shrink: 0;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  gap: 0.375rem;
+  line-height: 1rem;
+  padding: 0.2rem 0.5rem;
+  white-space: nowrap;
+}
+
+.involvement-badge-direct {
+  background: var(--involvement-direct-soft);
+  border-color: color-mix(in srgb, var(--involvement-direct) 45%, white);
+  color: var(--involvement-direct-strong);
+}
+
+.involvement-badge-area {
+  background: var(--involvement-area-soft);
+  border-color: color-mix(in srgb, var(--involvement-area) 32%, white);
+  color: var(--involvement-area-strong);
+}
+
+.involvement-badge-compact {
+  font-size: 0.625rem;
+  line-height: 0.875rem;
+  padding: 0.125rem 0.4rem;
+}
+
+.involvement-badge-dot {
+  background: currentColor;
+  border-radius: 999px;
+  height: 0.4rem;
+  width: 0.4rem;
+}
+
 .btn-primary {
   align-items: center;
   background: var(--brand);
@@ -98,6 +185,7 @@ button:disabled {
   font-weight: 650;
   gap: 0.5rem;
   line-height: 1.25rem;
+  min-height: 2.75rem;
   padding: 0.625rem 0.875rem;
   transition: background-color 160ms ease, box-shadow 160ms ease;
 }
@@ -117,6 +205,7 @@ button:disabled {
   font-weight: 600;
   gap: 0.5rem;
   line-height: 1.25rem;
+  min-height: 2.75rem;
   padding: 0.625rem 0.875rem;
   transition: background-color 160ms ease, border-color 160ms ease;
 }
@@ -130,9 +219,9 @@ button:disabled {
   align-items: center;
   border-radius: 8px;
   display: inline-flex;
-  height: 2.25rem;
+  height: 2.75rem;
   justify-content: center;
-  width: 2.25rem;
+  width: 2.75rem;
 }
 
 .form-control {
@@ -151,6 +240,51 @@ button:disabled {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
   outline: none;
+}
+
+/* Project editor fields are scoped because legacy screens use `input` as a
+   component class without a shared global definition. */
+.project-editor-form .form-label {
+  color: #344039;
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 650;
+  line-height: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.project-editor-form .input {
+  background: white;
+  border: 1px solid #ccd5c7;
+  border-radius: 8px;
+  box-sizing: border-box;
+  color: #1c231f;
+  display: block;
+  font-size: 0.875rem;
+  line-height: 1.4rem;
+  padding: 0.65rem 0.75rem;
+  width: 100%;
+}
+
+.project-editor-form input.input,
+.project-editor-form select.input {
+  min-height: 2.75rem;
+}
+
+.project-editor-form textarea.input {
+  min-height: 6.5rem;
+  resize: vertical;
+}
+
+.project-editor-form .input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
+  outline: none;
+}
+
+.project-editor-form .input:disabled {
+  background: #f2f4ef;
+  color: var(--muted);
 }
 
 .metric-tile {

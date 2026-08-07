@@ -3,16 +3,17 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { auth } from '../../lib/firebase';
-import { clearPinSession, getMyProfile, getPinSession, saveDefaultWineryContext } from '../../lib/api';
+import { clearPinSession, getMyProfile, getPinSession, saveDefaultWineryContext, type AuthDisplayUser, type UserProfile } from '../../lib/api';
 import Navbar from '../../components/Navbar';
+import { clientLogger } from '../../lib/clientLogger';
 
 export default function DashboardLayout({
     children,
 }: {
     children: React.ReactNode;
 }) {
-    const [user, setUser] = useState<any>(null);
-    const [fullProfile, setFullProfile] = useState<any>(null);
+    const [user, setUser] = useState<AuthDisplayUser | null>(null);
+    const [fullProfile, setFullProfile] = useState<UserProfile | null>(null);
     const [loading, setLoading] = useState(true);
     const router = useRouter();
 
@@ -26,7 +27,7 @@ export default function DashboardLayout({
                     const profileData = await getMyProfile();
                     setFullProfile(profileData.user);
                 } catch (e) {
-                    console.error("Failed to load profile", e);
+                    clientLogger.error("Failed to load profile", e);
                 }
 
                 setLoading(false);
@@ -40,8 +41,8 @@ export default function DashboardLayout({
 
                 setUser({
                     uid: `pin-${pinSession.user.id}`,
-                    email: pinSession.user.email,
-                    displayName: pinSession.user.displayName,
+                    email: pinSession.user.email ?? null,
+                    displayName: pinSession.user.displayName ?? null,
                     isPinSession: true
                 });
 
@@ -55,7 +56,7 @@ export default function DashboardLayout({
                         });
                     }
                 } catch (e) {
-                    console.error("Failed to load PIN profile", e);
+                    clientLogger.error("Failed to load PIN profile", e);
                     clearPinSession();
                     router.push('/login');
                 } finally {

@@ -4,6 +4,8 @@ VinAgent is an AI-assisted operations platform for winery teams. The current bui
 
 `inbound message -> triage -> task -> human action -> optional automation / secure member follow-up -> audit trail -> managed follow-up case when needed`
 
+The product has four day-to-day operational objects: Tasks, Notices, Requests, and Notes (`OperationalRecord`). Projects now sit above those objects and Calendar Events as an optional coordination layer for outcomes that span several people, areas, decisions, or dates. The existing Task workflow remains the primary automation engine.
+
 The repository now contains both:
 
 * an Express backend in `src/`
@@ -54,6 +56,8 @@ When a managed follow-up task is created, the assignee can also receive a system
 
 Analytics now reads from the same operational case record instead of only counting tasks. The dashboard surfaces workflow state, waiting and blocked work, response latency, handoffs, identity-review load, and follow-up automation conversion alongside the older customer and booking charts.
 
+Projects provide an outcome-first workspace under Work. A Project has one accountable owner, an optional Project Lead who reports to that owner, organisation or area visibility, participants, dates, status, separately derived health, files, and immutable Project activity. A governing manager may delegate day-to-day coordination to any active user from a participating area without promoting that user organisationally. The lead may coordinate the Project and create cross-area delegated Tasks, but cannot change the owner, lead appointment, area scope, completion, cancellation, or completion overrides. Linked records remain authoritative and keep their own permissions; only Tasks created through the dedicated Project delegation flow receive revocable, Project-scoped lead access. Required Task workflow completion drives Project progress; dependencies, blocked/overdue work, pending Requests, Events, and milestones drive the explainable attention and next-action summary. Home presents each person's current and upcoming Projects with their specific owner, lead, participant, stakeholder, or delegated-work relationship.
+
 Example: an address-change task starts `PENDING`, triage proposes a step plan, a manager actions it, the system creates a secure token and sends the member a link, the task returns to `PENDING` while the workflow is `WAITING`, and becomes `ACTIONED` again once the member confirms.
 
 Example: an external order call can capture requester details, suggest a likely existing customer without auto-linking if confidence is weak, and enrich the linked member record once the task is actioned.
@@ -89,7 +93,7 @@ npm install
 3. Create the database and run migrations:
 
 ```bash
-npx sequelize db:migrate
+npm run db:migrate
 ```
 
 4. Run the test suite:
@@ -118,6 +122,7 @@ npm run test:unit
 npm run test:int
 npm run lint
 npm run format
+npm run seed:sidewood:projects
 ```
 
 ## Core Docs
@@ -126,10 +131,16 @@ Start here if you need the current backend contract:
 
 * `docs/ARCHITECTURE.md`
 * `docs/DOMAIN_MODEL.md`
+* `docs/OPERATIONAL_AREAS.md`
+* `docs/OPERATIONAL_INTELLIGENCE_IMPLEMENTATION.md`
+* `docs/PROJECTS_IMPLEMENTATION_PLAN.md`
+* `docs/FRONTEND_UX_BUILD_PLAN.md`
 * `docs/API_SPEC.md`
 * `docs/TASK_WORKFLOW_PLAN.md`
 * `docs/GOLDEN_PATH.md`
 * `docs/TEST_PLAN.md`
+* `docs/PRODUCTION_READINESS.md`
+* `docs/MYSQL_MIGRATION_REHEARSAL.md`
 * `docs/FUTURE_PRODUCT_PASSES.md`
 
 Supporting references:

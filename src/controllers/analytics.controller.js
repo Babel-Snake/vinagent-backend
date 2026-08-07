@@ -1,5 +1,8 @@
-const { Task, TaskAction, TaskStep, Member, Message, User, CalendarEvent } = require('../models');
+const { Task, TaskAction, TaskStep, Member, Message, User, CalendarEvent, Notice, NoticeAcknowledgement, OperationalArea } = require('../models');
 const { Op, fn, col } = require('sequelize');
+const noticeService = require('../services/notice.service');
+const operationalIntelligenceConfig = require('../services/operationalIntelligenceConfig.service');
+const operationalIntelligenceService = require('../services/operationalIntelligence.service');
 
 // Compute start/end dates for a given period + offset.
 function getDateRange(period = 'month', offset = 0) {
@@ -620,6 +623,45 @@ async function getAnalytics(req, res, next) {
             users: staffUsers,
             followUpChildTasks,
             taskSteps: taskStepsInPeriod
+        });
+
+        const requiredNotices = await Notice.findAll({
+            where: { wineryId, requiresAcknowledgement: true, createdAt: periodFilter },
+            include: [{
+                model: OperationalArea,
+                as: 'OperationalAreas',
+                attributes: ['id', 'name'],
+                through: { attributes: [] },
+                required: false
+            }]
+        });
+        await noticeService.attachAcknowledgementState(requiredNotices, { wineryId, userId: req.user.id });
+        const acknowledgementStates = requiredNotices.map(notice => notice.getDataValue('acknowledgement') || {});
+        const expectedAcknowledgements = acknowledgementStates.reduce((sum, state) => sum + (state.expectedCount || 0), 0);
+        const completedAcknowledgements = acknowledgementStates.reduce((sum, state) => sum + (state.acknowledgedCount || 0), 0);
+        operations.acknowledgements = {
+            requiredNotices: requiredNotices.length,
+            fullyAcknowledgedNotices: acknowledgementStates.filter(state => state.outstandingCount === 0).length,
+            overdueNotices: acknowledgementStates.filter(state => state.isOverdue).length,
+            expectedAcknowledgements,
+            completedAcknowledgements,
+            outstandingAcknowledgements: Math.max(expectedAcknowledgements - completedAcknowledgements, 0),
+            completionRate: percentage(completedAcknowledgements, expectedAcknowledgements),
+            acknowledgementsThisPeriod: await NoticeAcknowledgement.count({ where: { wineryId, acknowledgedAt: periodFilter } })
+        };
+        operations.intelligence = await operationalIntelligenceService.getOperationalIntelligence({
+            wineryId,
+            start,
+            end,
+            now: new Date()
+        });
+        const intelligenceConfig = await operationalIntelligenceConfig.getConfigForWinery(wineryId);
+        operations.intelligence.suggestedSignals = operationalIntelligenceService.buildSuggestedSignalInputs({
+            intelligence: operations.intelligence,
+            acknowledgements: operations.acknowledgements,
+            start,
+            end,
+            config: intelligenceConfig
         });
 
         res.json({

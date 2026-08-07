@@ -9,9 +9,16 @@ import {
     fetchTasks,
     Notice,
     Task,
+    UserProfile,
     updateCalendarEvent
 } from '../../lib/api';
 import { format } from 'date-fns';
+import { clientLogger } from '../../lib/clientLogger';
+import { operationalLabel } from '../../lib/operationalPresentation';
+import ConfirmDialog from '../ui/ConfirmDialog';
+import ProjectLinksPanel from '../ProjectLinksPanel';
+import InvolvementBadge from '../InvolvementBadge';
+import { eventInvolvement, involvementSurfaceClass } from '../../lib/involvement';
 
 interface EventModalProps {
     isOpen: boolean;
@@ -22,6 +29,7 @@ interface EventModalProps {
     canEdit: boolean;
     onViewTask: (taskId: number) => void;
     onViewNotice: (noticeId: number) => void;
+    currentUser: UserProfile;
 }
 
 type LinkChip = {
@@ -35,22 +43,22 @@ function taskTitle(task: Partial<Task> & { title?: string }) {
     const summary = payload.summary || payload.title || payload.originalText;
     if (typeof summary === 'string' && summary.trim()) return summary.trim();
     if (task.title) return task.title;
-    const subtype = task.subType ? task.subType.replace(/_/g, ' ') : '';
-    return subtype || task.category || `Task #${task.id}`;
+    const subtype = task.subType ? operationalLabel(task.subType) : '';
+    return subtype || (task.category ? operationalLabel(task.category) : '') || `Task #${task.id}`;
 }
 
 function taskMeta(task: Partial<Task>) {
     const parts = [`Task #${task.id}`];
-    if (task.category) parts.push(task.category);
-    if (task.status) parts.push(task.status);
+    if (task.category) parts.push(operationalLabel(task.category));
+    if (task.status) parts.push(operationalLabel(task.status));
     if (task.Assignee?.displayName) parts.push(task.Assignee.displayName);
     return parts.join(' - ');
 }
 
 function noticeMeta(notice: Partial<Notice>) {
     const parts = [`Notice #${notice.id}`];
-    if (notice.category) parts.push(notice.category.replace(/_/g, ' '));
-    if (notice.priority) parts.push(notice.priority);
+    if (notice.category) parts.push(operationalLabel(notice.category));
+    if (notice.priority) parts.push(operationalLabel(notice.priority));
     return parts.join(' - ');
 }
 
@@ -97,6 +105,7 @@ export default function EventModal({
     initialSlot,
     existingEvent,
     canEdit,
+    currentUser,
     onViewTask,
     onViewNotice
 }: EventModalProps) {
@@ -106,6 +115,9 @@ export default function EventModal({
     const [start, setStart] = useState('');
     const [end, setEnd] = useState('');
     const [loading, setLoading] = useState(false);
+    const [formError, setFormError] = useState<string | null>(null);
+    const [deleteRequested, setDeleteRequested] = useState(false);
+    const involvement = existingEvent ? eventInvolvement(existingEvent, currentUser) : null;
 
     const [taskSearch, setTaskSearch] = useState('');
     const [taskSuggestions, setTaskSuggestions] = useState<Task[]>([]);
@@ -165,7 +177,7 @@ export default function EventModal({
                 setTaskSuggestions(tasks.filter(task => !selectedIds.has(task.id)).slice(0, 8));
                 setShowTaskSuggestions(true);
             } catch (err) {
-                console.error('Failed to search tasks', err);
+                clientLogger.error('Failed to search tasks', err);
             }
         }, 300);
     }, [taskSearch, selectedTasks]);
@@ -185,7 +197,7 @@ export default function EventModal({
                 setNoticeSuggestions(result.notices.filter(notice => !selectedIds.has(notice.id)).slice(0, 8));
                 setShowNoticeSuggestions(true);
             } catch (err) {
-                console.error('Failed to search notices', err);
+                clientLogger.error('Failed to search notices', err);
             }
         }, 300);
     }, [noticeSearch, selectedNotices]);
@@ -194,6 +206,7 @@ export default function EventModal({
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        setFormError(null);
         setLoading(true);
         try {
             const taskIds = selectedTasks.map(task => task.id);
@@ -218,22 +231,24 @@ export default function EventModal({
             onRefresh();
             onClose();
         } catch (error) {
-            alert(error instanceof Error ? error.message : 'Failed to save event');
-            console.error(error);
+            setFormError(error instanceof Error ? error.message : 'Failed to save event');
+            clientLogger.error(error);
         } finally {
             setLoading(false);
         }
     };
 
-    const handleDelete = async () => {
-        if (!existingEvent || !confirm('Are you sure you want to delete this event?')) return;
+    const deleteEvent = async () => {
+        if (!existingEvent) return;
         setLoading(true);
         try {
             await deleteCalendarEvent(existingEvent.id);
             onRefresh();
             onClose();
-        } catch {
-            alert('Failed to delete event');
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to delete event';
+            setFormError(message);
+            throw new Error(message);
         } finally {
             setLoading(false);
         }
@@ -258,12 +273,11 @@ export default function EventModal({
     };
 
     return (
+        <>
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg bg-white shadow-xl">
+            <div className={`flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-white shadow-xl ${involvementSurfaceClass(involvement)}`}>
                 <div className="flex shrink-0 items-center justify-between border-b px-6 py-4">
-                    <h3 className="text-lg font-bold text-gray-900">
-                        {existingEvent ? (canEdit ? 'Edit Event' : 'Event Details') : 'New Event'}
-                    </h3>
+                    <div className="flex flex-wrap items-center gap-2"><h3 className="text-lg font-bold text-gray-900">{existingEvent ? (canEdit ? 'Edit Event' : 'Event Details') : 'New Event'}</h3><InvolvementBadge signal={involvement} /></div>
                     <button onClick={onClose} className="text-gray-400 hover:text-gray-500">
                         <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18 18 6M6 6l12 12" />
@@ -273,12 +287,13 @@ export default function EventModal({
 
                 <div className="overflow-y-auto p-6">
                     <form onSubmit={handleSubmit} className="space-y-4">
+                        {formError && <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{formError}</p>}
                         {!canEdit && existingEvent ? (
                             <div className="space-y-4">
                                 <ReadOnlyField label="Title">{existingEvent.title}</ReadOnlyField>
                                 <ReadOnlyField label="Type">
                                     <span className="inline-flex rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium capitalize text-blue-800">
-                                        {existingEvent.type.replace(/_/g, ' ')}
+                                        {operationalLabel(existingEvent.type)}
                                     </span>
                                 </ReadOnlyField>
                                 <ReadOnlyField label="Time">
@@ -395,11 +410,13 @@ export default function EventModal({
                             </>
                         )}
 
+                        {existingEvent && <ProjectLinksPanel itemType="CALENDAR_EVENT" itemId={existingEvent.id} compact />}
+
                         <div className="flex justify-end gap-3 border-t pt-4">
                             {canEdit && existingEvent && (
                                 <button
                                     type="button"
-                                    onClick={handleDelete}
+                                    onClick={() => setDeleteRequested(true)}
                                     className="rounded-md px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
                                 >
                                     Delete
@@ -426,6 +443,16 @@ export default function EventModal({
                 </div>
             </div>
         </div>
+        <ConfirmDialog
+            open={deleteRequested}
+            onClose={() => setDeleteRequested(false)}
+            onConfirm={deleteEvent}
+            title="Delete event?"
+            description={existingEvent ? `"${existingEvent.title}" will be permanently removed from the calendar.` : ''}
+            confirmLabel="Delete event"
+            destructive
+        />
+        </>
     );
 }
 

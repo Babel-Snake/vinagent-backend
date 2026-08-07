@@ -64,10 +64,24 @@ function clearFailedAttempts(req, wineryId) {
  * Get current user context.
  * GET /api/auth/me
  */
-exports.getMe = (req, res) => {
-    res.json({
-        user: req.user
-    });
+exports.getMe = async (req, res, next) => {
+    try {
+        const wineryConfigurationAccess = require('../services/wineryConfigurationAccess.service');
+        const configurationAccess = await wineryConfigurationAccess.getConfigurationAccess({
+            wineryId: req.user.wineryId,
+            userId: req.user.id,
+            userRole: req.user.role
+        });
+        res.json({
+            user: {
+                ...req.user,
+                canAccessWineryConfig: configurationAccess.canRead,
+                managedAreaIds: configurationAccess.managedAreaIds
+            }
+        });
+    } catch (error) {
+        next(error);
+    }
 };
 
 exports.getPinConfig = async (req, res, next) => {

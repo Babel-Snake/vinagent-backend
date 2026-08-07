@@ -1,7 +1,13 @@
 require('dotenv').config();
 
+const crypto = require('crypto');
 const admin = require('../config/firebase');
 const db = require('../models');
+const {
+    SIDEWOOD_USER_ALIASES,
+    SIDEWOOD_USERS: users,
+    seedSidewoodAreaDemo
+} = require('./sidewoodAreaSeed');
 
 const SIDEWOOD_KEY = 'sidewood-estate';
 
@@ -303,58 +309,6 @@ const faqs = [
     ['Is there a zero-alcohol tasting option?', 'Yes. The Nearly Naked 0% Alcohol Wine Flight includes four 60mL pours from Sidewood\'s zero-alcohol wine range.', ['zero-alcohol', 'nearly-naked', 'tastings']],
     ['Can tasting fees be redeemed?', 'Public information says self-guided wine flights are redeemable on a dozen-bottle take-home purchase.', ['tastings', 'redeemable', 'purchases']],
     ['What should staff say if customers ask about opening hours?', 'Confirm the current opening hours before replying. Public sources currently vary between 10am-5pm and 11am-5pm for the cellar door.', ['hours', 'verify', 'internal-warning']]
-];
-
-const contacts = [
-    {
-        name: 'Owen',
-        role: 'Executive',
-        email: 'owen@sidewood.com.au',
-        layer: 'Executive',
-        responsibilities: 'Executive leadership and internal escalation.'
-    },
-    {
-        name: 'Clare',
-        role: 'Wine Club Manager',
-        email: 'clare@sidewood.com.au',
-        layer: 'Wine Club',
-        responsibilities: 'Wine club enquiries, member support and subscriptions.'
-    },
-    {
-        name: 'Bradley',
-        role: 'Logistics',
-        email: 'bradley@sidewood.com.au',
-        layer: 'Logistics',
-        responsibilities: 'Logistics, dispatch and fulfilment coordination.'
-    },
-    {
-        name: 'Lisa',
-        role: 'Accounts',
-        email: 'lisa@sidewood.com.au',
-        layer: 'Accounts',
-        responsibilities: 'Accounts enquiries, payments and finance follow-up.'
-    },
-    {
-        name: 'Lara',
-        role: 'Media/Marketing',
-        email: 'lara@sidewood.com.au',
-        layer: 'Media/Marketing',
-        responsibilities: 'Media, marketing and brand communications.'
-    }
-];
-
-const users = [
-    {
-        username: 'serena',
-        email: 'serena@sidewood.com.au',
-        displayName: 'Serena',
-        role: 'manager',
-        responsibilities: 'Main Sidewood demo manager account.'
-    },
-    { username: 'jacob', displayName: 'Jacob', role: 'staff' },
-    { username: 'nick', displayName: 'Nick', role: 'staff' },
-    { username: 'james', displayName: 'James', role: 'staff' },
-    { username: 'joanna', displayName: 'Joanna', role: 'staff' }
 ];
 
 const customers = [
@@ -728,12 +682,15 @@ function internalStaffEmail(username, wineryId) {
     return `${username.toLowerCase().replace(/[^a-z0-9]/g, '')}.w${wineryId}@vinagent.internal`;
 }
 
-function readRequiredEnv(name, { minLength = 8 } = {}) {
+function readOptionalEnv(name, { minLength = 8 } = {}) {
     const value = process.env[name];
-    if (!value || value.trim().length < minLength) {
-        throw new Error(`${name} must be set and at least ${minLength} characters long.`);
-    }
+    if (!value || !value.trim()) return null;
+    if (value.trim().length < minLength) throw new Error(`${name} must be at least ${minLength} characters long when set.`);
     return value.trim();
+}
+
+function generateDemoCredential(label) {
+    return `${label}-${crypto.randomBytes(12).toString('base64url')}9`;
 }
 
 async function upsertOne(model, where, values, transaction) {
@@ -746,6 +703,13 @@ async function upsertOne(model, where, values, transaction) {
 }
 
 async function ensureFirebaseUser({ email, password, displayName }) {
+    if (process.env.SIDEWOOD_DB_ONLY === 'true') {
+        if (process.env.NODE_ENV === 'production') {
+            throw new Error('SIDEWOOD_DB_ONLY is forbidden in production.');
+        }
+        return `seed:${email}`;
+    }
+
     if (!admin.apps || admin.apps.length === 0) {
         return `seed:${email}`;
     }
@@ -771,10 +735,44 @@ async function ensureFirebaseUser({ email, password, displayName }) {
     }
 }
 
+async function migrateLegacySidewoodUsers(winery) {
+    if (process.env.SIDEWOOD_DB_ONLY === 'true') return;
+
+    for (const alias of SIDEWOOD_USER_ALIASES) {
+        const definition = users.find(user => user.username === alias.username);
+        const legacyEmail = internalStaffEmail(alias.legacyUsername, winery.id);
+        const email = definition.email || internalStaffEmail(definition.username, winery.id);
+        const legacyUser = await db.User.findOne({ where: { wineryId: winery.id, email: legacyEmail } });
+        const currentUser = await db.User.findOne({ where: { wineryId: winery.id, email } });
+
+        if (!legacyUser) continue;
+        if (currentUser) {
+            throw new Error(`Cannot migrate ${alias.legacyUsername}: both legacy and replacement users exist.`);
+        }
+        if (!admin.apps || admin.apps.length === 0) {
+            throw new Error(`Firebase Admin is required to rename ${alias.legacyUsername} to ${alias.username}.`);
+        }
+
+        await admin.auth().updateUser(legacyUser.firebaseUid, {
+            email,
+            displayName: definition.displayName
+        });
+        await legacyUser.update({
+            email,
+            displayName: definition.displayName,
+            role: definition.role,
+            responsibilities: definition.responsibilities,
+            isActive: true
+        });
+    }
+}
+
 async function seedSidewoodEstate() {
     const transaction = await db.sequelize.transaction();
-    const managerPassword = readRequiredEnv('SIDEWOOD_MANAGER_PASSWORD');
-    const staffAccessCode = readRequiredEnv('SIDEWOOD_STAFF_ACCESS_CODE');
+    const configuredManagerPassword = readOptionalEnv('SIDEWOOD_MANAGER_PASSWORD');
+    const configuredStaffAccessCode = readOptionalEnv('SIDEWOOD_STAFF_ACCESS_CODE');
+    let generatedManagerPassword = null;
+    let generatedStaffAccessCode = null;
 
     try {
         const [winery] = await db.Winery.findOrCreate({
@@ -919,15 +917,6 @@ async function seedSidewoodEstate() {
             await upsertOne(db.WineryFAQItem, { wineryId: winery.id, question }, { answer, tags, isActive: true }, transaction);
         }
 
-        for (const contact of contacts) {
-            await upsertOne(db.WineryContact, { wineryId: winery.id, email: contact.email }, {
-                ...contact,
-                phone: null,
-                notes: 'VERIFY_INTERNAL',
-                isActive: true
-            }, transaction);
-        }
-
         for (const customer of customers) {
             const customerType = customer.customerType || (customer.isWineClubMember ? 'member' : 'guest');
             await upsertOne(db.Member, { wineryId: winery.id, email: customer.email }, {
@@ -939,16 +928,27 @@ async function seedSidewoodEstate() {
 
         await transaction.commit();
 
+        await migrateLegacySidewoodUsers(winery);
+
+        const usersByUsername = {};
         for (const user of users) {
             const email = user.email || internalStaffEmail(user.username, winery.id);
-            const password = user.role === 'manager' ? managerPassword : staffAccessCode;
-            const firebaseUid = await ensureFirebaseUser({
-                email,
-                password,
-                displayName: user.displayName
-            });
+            const existingUser = await db.User.findOne({ where: { email } });
+            let password = user.role === 'manager' ? configuredManagerPassword : configuredStaffAccessCode;
+            if (!existingUser && !password) {
+                if (user.role === 'manager') {
+                    generatedManagerPassword ||= generateDemoCredential('SidewoodManager');
+                    password = generatedManagerPassword;
+                } else {
+                    generatedStaffAccessCode ||= generateDemoCredential('SidewoodStaff');
+                    password = generatedStaffAccessCode;
+                }
+            }
+            const firebaseUid = password
+                ? await ensureFirebaseUser({ email, password, displayName: user.displayName })
+                : existingUser.firebaseUid;
 
-            await upsertOne(db.User, { email }, {
+            usersByUsername[user.username] = await upsertOne(db.User, { email }, {
                 firebaseUid,
                 displayName: user.displayName,
                 role: user.role,
@@ -958,12 +958,26 @@ async function seedSidewoodEstate() {
             });
         }
 
+        const areaTransaction = await db.sequelize.transaction();
+        try {
+            await seedSidewoodAreaDemo({ db, winery, usersByUsername, transaction: areaTransaction });
+            await areaTransaction.commit();
+        } catch (error) {
+            await areaTransaction.rollback();
+            throw error;
+        }
+
         console.log(`Seeded Sidewood Estate demo winery (id=${winery.id}).`);
+        console.log('Seeded 7 operational areas, 11 area-assigned users, an area-based org chart, linked notices/tasks and cross-area operational demo work.');
         console.log(`Seeded Sidewood demo customers: ${customers.filter(customer => (customer.customerType || (customer.isWineClubMember ? 'member' : 'guest')) === 'member').length} members, ${customers.filter(customer => (customer.customerType || (customer.isWineClubMember ? 'member' : 'guest')) === 'guest').length} guests, ${customers.filter(customer => customer.customerType === 'tour_operator').length} tour operators.`);
-        console.log('Manager login email: serena@sidewood.com.au. Password was read from SIDEWOOD_MANAGER_PASSWORD and was not printed.');
-        console.log('Staff login usernames: Jacob, Nick, James, Joanna. Access code was read from SIDEWOOD_STAFF_ACCESS_CODE and was not printed.');
+        console.log('Existing Sidewood credentials were preserved unless an environment override was supplied.');
+        console.log('Cellar Door staff login usernames: Jacob, Nick, James, Joanna.');
+        console.log('Area staff login usernames: Clare, Kirri, Bradley, Lisa, Lara.');
+        console.log('Cellar Door area-manager email: serena@sidewood.com.au. Winery manager email: owen@sidewood.com.au.');
+        if (generatedStaffAccessCode) console.log(`New area staff access code (shown once): ${generatedStaffAccessCode}`);
+        if (generatedManagerPassword) console.log(`New Owen manager password (shown once): ${generatedManagerPassword}`);
     } catch (error) {
-        await transaction.rollback();
+        if (!transaction.finished) await transaction.rollback();
         console.error('Failed to seed Sidewood Estate demo winery:', error);
         process.exitCode = 1;
     } finally {
@@ -971,4 +985,6 @@ async function seedSidewoodEstate() {
     }
 }
 
-seedSidewoodEstate();
+if (require.main === module) seedSidewoodEstate();
+
+module.exports = { seedSidewoodEstate };

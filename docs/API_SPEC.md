@@ -248,8 +248,13 @@ Review actions:
 * `publish_notice`: creates a normal VinAgent notice with external source metadata and optional `taskIds` links
 * `create_task`: creates a draft task from a call intake or generic event
 * `link_task`: links the event to an existing task by `taskId`
+* `create_items`: atomically creates or links up to 10 typed `TASK`, `NOTICE`, `REQUEST`, or `NOTE` items
 * `ignore`
 * `archive`
+
+`create_items` accepts an `items` array. Each entry has a unique optional `key`, a `type`, `mode: CREATE | LINK`, an `itemId` for link mode, and type-specific `data` for create mode. If any entry fails, the entire batch rolls back. Repeating a successfully processed batch returns its existing links with `duplicate: true` rather than creating more records.
+
+Integration-event responses expose all results as `linkedItems` / `LinkedItems`. The legacy singular related-record fields remain populated with the first result for older clients.
 
 See `docs/INTEGRATION_INTAKE.md` for normalized payload examples and rollout guidance.
 
@@ -394,7 +399,29 @@ Response:
 }
 ```
 
-### 4.2 `GET /api/tasks/:id`
+### 4.2 `GET /api/tasks/summary`
+
+Returns exact queue-wide counts for the same visibility scope and filters accepted by `GET /api/tasks`, excluding pagination controls. This allows list surfaces to display totals without treating a capped page of results as a complete queue.
+
+Response:
+
+```json
+{
+  "summary": {
+    "matching": 42,
+    "highPriority": 7,
+    "waiting": 4,
+    "blocked": 2,
+    "unassigned": 5,
+    "overdue": 3,
+    "dueSoon": 6,
+    "identityReview": 1,
+    "followUps": 8
+  }
+}
+```
+
+### 4.3 `GET /api/tasks/:id`
 
 Returns a single task with its related member, primary originating message, full linked `Messages` timeline, assignee, creator, ordered `TaskStep` list, recent `TaskAction` history, optional `ParentTask`, and linked `SubTasks`.
 
@@ -992,7 +1019,7 @@ Side effects:
 
 Mounted under `/api/winery`.
 
-All current winery endpoints require manager/admin auth.
+Winery-wide writes require winery `manager/admin` authority. Area managers may read the full non-secret configuration and update profiles, booking rules, and booking types only for areas where their membership role is `MANAGER`.
 
 ### 6.1 `GET /api/winery/full`
 
@@ -1011,7 +1038,12 @@ Returns:
     "faqs": [],
     "sops": [],
     "integrationConfig": {},
-    "contacts": []
+    "contacts": [],
+    "OperationalAreas": [],
+    "configurationAccess": {
+      "isGlobalManager": false,
+      "managedAreaIds": [3]
+    }
   }
 }
 ```
@@ -1028,6 +1060,26 @@ Current update endpoints:
 * `POST /api/winery/integration-config/test`
 * `POST /api/winery/integration-config/email/sync`
 * `PUT /api/winery/settings`
+
+Area-owned updates:
+
+* `PUT /api/winery/areas/:areaId/profile`
+* `PUT /api/winery/areas/:areaId/bookings-config`
+* `PUT /api/winery/areas/:areaId/products/:productId`
+* `DELETE /api/winery/areas/:areaId/products/:productId`
+* `PUT /api/winery/areas/:areaId/integration-config`
+* `DELETE /api/winery/areas/:areaId/integration-config/:domain`
+* `POST /api/winery/areas/:areaId/integration-config/test`
+
+An area profile accepts `publicEmail`, `publicPhone`, `openingHoursText`, `guestDirections`, and `serviceNotes`. Area booking configuration uses the existing booking-rule fields. Area managers may update only managed areas; winery managers may update any active area.
+
+Area product listings reference the shared winery catalogue and accept `isAvailable`, nullable `priceOverride`, nullable `stockStatusOverride`, `isFeatured`, and `salesNotes`. Removing a listing does not delete the canonical winery product.
+
+FAQs and SOPs use the existing `/api/winery/faqs` and `/api/winery/sops` CRUD endpoints. Creation accepts nullable `areaId`: `null` creates shared winery knowledge, while an area ID creates area-owned knowledge. Existing records remain shared after migration. Ownership is immutable through update endpoints. Area managers may manage records owned by their areas; shared records require a winery manager.
+
+Area integration configuration supports `booking`, `pos`, `crm`, and `delivery` connections. Each supplied connection uses the existing provider-connection fields. Missing domains inherit the winery-level connection. Deleting a domain removes only its area override. Area managers may change/test only managed areas; winery managers may manage every area. Responses and `GET /api/winery/full` never expose webhook secret hashes.
+
+An area-specific signed intake endpoint is available at `POST /api/webhooks/integration/:wineryId/:domain/:areaId`. It uses that area's connection secret and creates an integration event with the area as a rule-based suggestion. The existing endpoint without `:areaId` remains the winery-level fallback.
 
 All return:
 
@@ -1108,6 +1160,8 @@ Currently exposed:
 * `POST /api/winery/contacts`
 * `PUT /api/winery/contacts/:id`
 * `DELETE /api/winery/contacts/:id`
+
+Contact create/update payloads support `primaryAreaId` and `linkedAreaIds`. No primary area means an organisation-wide contact and requires a winery manager. Area managers may create contacts only within areas they manage and may edit/delete contacts whose primary area they manage. Existing cross-area links do not prevent the primary-area manager from updating contact details; changing placement requires authority over every new target area. Reporting lines remain winery-wide, reporting targets must belong to the same winery, and cycles are rejected.
 
 ## 7. Staff APIs
 
@@ -1214,7 +1268,7 @@ Mounted under `/api/users`.
 
 ### 9.1 `GET /api/users`
 
-Returns authenticated-winery users for assignment dropdowns and staff-selection UI.
+Returns authenticated-winery users for assignment dropdowns and staff-selection UI. Each compact row includes `id`, `displayName`, `email`, `role`, `isActive`, and `managedAreaIds`; the last field lets area-aware owner selectors identify people authorised across every selected area without exposing full membership records.
 
 ## 10. Noticeboard APIs
 
@@ -1235,6 +1289,24 @@ Currently exposed:
 * `POST /api/notices/:id/tasks`
 * `DELETE /api/notices/:id/tasks/:taskId`
 
+### Notice list pagination
+
+`GET /api/notices` accepts the existing notice filters together with optional `page` (default `1`) and `pageSize` (default `50`, maximum `100`). The response is:
+
+```json
+{
+  "notices": [],
+  "pagination": {
+    "page": 1,
+    "pageSize": 50,
+    "total": 0,
+    "totalPages": 1
+  }
+}
+```
+
+Clients must use `pagination.total` for any total displayed to staff and provide a route to later pages when `totalPages` is greater than one.
+
 ## 11. Attachment APIs
 
 Mounted under `/api/attachments`.
@@ -1248,7 +1320,7 @@ Currently exposed:
 * `GET /api/attachments/:id/download`
 * `DELETE /api/attachments/:id`
 
-Attachments can be linked to task, task-step, task-outcome, task-follow-up, and notice entities.
+Attachments can be linked to task, task-step, task-outcome, task-follow-up, notice, Request, Note, and Project entities. Each parent domain supplies its own visibility and mutation policy.
 
 ## 12. Calendar And Notification APIs
 
@@ -1266,6 +1338,8 @@ Currently exposed:
 * `DELETE /api/calendar/:id`
 
 Calendar events can link to tasks and notices where the UI supports those relationships.
+
+`GET /api/calendar` accepts `eventId` for a permission-filtered exact lookup used by Project deep links. It can also accept date-range or search parameters. Events whose only linked records are invisible to the caller remain omitted.
 
 ### 12.2 Notifications
 
@@ -1389,3 +1463,235 @@ Notes:
 ## 14. Notes on Truth
 
 The task lifecycle in the current implementation is not the older `APPROVED / EXECUTED / AWAITING_MEMBER_ACTION` model. If you are updating clients, tests, or docs, use the current `PENDING / ACTIONED / REJECTED` contract plus audit events and tokens as the authoritative model.
+## 15. Operational Areas
+
+Operational-area endpoints and placement payloads are documented in `docs/OPERATIONAL_AREAS.md`.
+
+- `GET /api/operational-areas`
+- `POST /api/operational-areas`
+- `PATCH /api/operational-areas/:id`
+- `PUT /api/operational-areas/memberships/:userId`
+
+Tasks, notices, and integration events accept and return operational placement fields. Existing records default to `areaScope: ORGANISATION`.
+## Operational intelligence endpoints
+
+All endpoints require normal dashboard authentication and derive `wineryId`, user ID, and role from the authenticated server context.
+
+### `POST /api/operations/classify`
+
+Returns a suggestion only; it does not create an object.
+
+```json
+{
+  "text": "We need more takeaway bags",
+  "taskOrigin": "INTERNAL",
+  "inboundMethod": "internal",
+  "suggestedChannel": "none"
+}
+```
+
+The response includes `originalText`, `suggestedType`, `suggestedSubtype`, `confidence`, `classificationSource`, suggested title/body, and the existing structured triage fields.
+
+### `GET /api/operations`
+
+Returns a normalized feed across Tasks, Notices, Requests, and Notes after applying source-domain visibility rules.
+
+Query parameters:
+
+- `types`: comma-separated `TASK,NOTICE,REQUEST,NOTE` values.
+- `search`: searches domain text, comments, customer identity where available, and attachment filenames.
+- `areaId`: an area ID, `organisation`, or `all`.
+- `status`: a source status such as `PENDING`, `ACTIONED`, `APPROVED`, `ACTIVE`, `ARCHIVED`, or `RECORDED`.
+- `sortBy`: `newest` or `oldest`.
+- `page`: 1–20.
+- `pageSize`: 1–50.
+
+The response contains `operations`, per-type `counts`, normalized `filters`, and pagination. Status filters only include object types supporting that status. Counts and pagination never include objects hidden from the authenticated user.
+
+### Requests
+
+- `GET /api/requests` supports `status`, `areaId`, `search`, `page`, and `pageSize`.
+- `POST /api/requests` creates a human-confirmed Request.
+- `GET /api/requests/:id` returns the Request and audit history.
+- `PATCH /api/requests/:id` edits a pending Request.
+- `POST /api/requests/:id/decision` accepts `APPROVED`, `REJECTED`, or `CANCELLED` plus an optional response.
+
+Create payloads accept title, body, original text, subtype, priority, due date, requested user, area placement, source event, and optional AI suggestion metadata. The backend always sets `humanConfirmedType = REQUEST`, `confirmedBy`, and `confirmedAt` from authenticated context.
+
+### Operational records / Notes
+
+- `GET /api/operational-records` supports `areaId`, `search`, `directedToMe`, `page`, and `pageSize`.
+- `POST /api/operational-records` creates a human-confirmed Note.
+- `GET /api/operational-records/:id` returns the Note and audit history.
+- `PATCH /api/operational-records/:id` edits a Note.
+
+Create payloads accept title, body, original text, record type, occurrence time, customer, source/reference, structured metadata, area placement, source event, optional `recipientUserIds`, and optional AI suggestion metadata. `recipientUserIds` is a unique array of up to 100 active users in the same winery; an area-scoped recipient must be able to view at least one selected area. Responses expose both `recipientUserIds` and the corresponding `Recipients` summaries.
+
+`directedToMe=true` returns the visible Notes directed to the authenticated user explicitly or through one of their operational-area memberships. Direction is an attention mechanism rather than a separate privacy boundary; normal winery and area visibility rules still apply first. The backend always sets `humanConfirmedType = NOTE`, `confirmedBy`, and `confirmedAt` from authenticated context.
+
+List and detail routes apply winery isolation first, then operational-area visibility. Cross-tenant and out-of-area direct reads return not-found responses.
+
+### Request and Note collaboration
+
+Both `/api/requests/:id` and `/api/operational-records/:id` expose:
+
+- `GET /comments`
+- `POST /comments`
+- `DELETE /comments/:commentId`
+- `GET /relations`
+- `POST /relations`
+- `DELETE /relations/:relationId`
+- `POST /create-task`
+
+Comment bodies are required and may optionally reference a top-level `parentCommentId`.
+
+Relation creation accepts `targetType`, `targetId`, `relationType`, and optional metadata. The backend verifies visibility of both endpoints and never returns relations whose opposite endpoint is hidden from the caller.
+
+Request-to-Task conversion requires `APPROVED` state. Note-to-Task conversion requires the Note author or a relevant manager. Conversion accepts optional task classification, priority, assignee, and due date fields. The source item is preserved, a `GENERATED_TASK` relationship is created, and repeated requests return the existing Task.
+
+### Notice acknowledgement tracking
+
+Notice create and update payloads accept `requiresAcknowledgement` and nullable `acknowledgementDueAt`. The deadline is ignored when acknowledgement tracking is disabled.
+
+- `PUT /api/notices/:id/acknowledgement` idempotently records that the authenticated eligible recipient has read the notice.
+- `GET /api/notices/:id/acknowledgements` returns the audience-aware recipient completion summary to a manager who can manage that notice.
+
+Notice list and detail responses include `acknowledgement` state with expected, completed, outstanding, completion-rate, overdue, and current-user fields. Eligibility composes directed audience rules with operational-area visibility.
+
+Manager analytics expose `operations.acknowledgements`, including required and fully acknowledged notices, overdue notices, expected/completed/outstanding assignments, completion rate, and acknowledgements recorded in the selected period.
+
+### Cross-object operational intelligence
+
+Manager `GET /api/analytics` responses expose `operations.intelligence`:
+
+- `requestAging`: current pending/overdue totals, average age, four age buckets, and the five oldest Requests with source links.
+- `classification`: evaluated, accepted, and corrected human-confirmed classifications plus suggested-to-confirmed transitions. Current coverage is Requests and Notes, where both fields are durably stored.
+- `conversions`: Tasks generated from Requests or Notes during the selected period, grouped by source type and target Task state.
+- `recurrence`: advisory cross-object clusters with significant keywords, count, object types, area IDs, first/last occurrence, and up to five source examples.
+- `trends`: current-vs-previous-period counts by object type and operational area, with `current`, `previous`, `delta`, and `changePercent`.
+- `suggestedSignals`: thresholded, non-persisted advisory signal payloads that managers can save into the review queue.
+
+Recurrence uses deterministic significant-term overlap and does not mutate records, create work, or claim causal equivalence. Conversion-generated Tasks are excluded from recurrence input so the source item and its generated Task are not counted as separate incidents.
+Recurrence evaluation is bounded to the latest 250 records of each object type in the selected period; the response reports `inputCount` and `maximumItemsPerType`. Classification rates are calculated from the complete stored Request/Note classification cohort for the period rather than that bounded recurrence sample.
+
+### Operational intelligence signal review
+
+Manager/admin-only routes under `/api/operations/intelligence/signals` persist advisory analytics findings for review. Saved signals do not create operational work until a manager explicitly actions them.
+
+- `GET /api/operations/intelligence/config` returns the winery's operational-intelligence scheduler, threshold, and review-reminder controls after applying defaults, plus recommended `presets`, `fieldMetadata`, and recent `auditEvents`.
+- `POST /api/operations/intelligence/config/preview` compares the current saved config with a proposed `preset` and/or config patch over a supplied `period`/`offset` or explicit `start`/`end`. It is read-only and returns `currentConfig`, `previewConfig`, `changedKeys`, structured `changedFields` with before/after values and field descriptions, and signal-count impact including added, removed, and severity-changed suggested signals. Optional `historyPeriods` accepts `1` to `6` and adds a `history` block with per-window comparisons plus aggregate current/preview totals across recent equivalent windows.
+- `PATCH /api/operations/intelligence/config` updates those controls. Payload sections are `scheduler`, `thresholds`, `reminders`, and optional `preset: default | sensitive | conservative`; omitted values keep their current/default setting. The response includes `changedKeys` and recent audit events.
+- `GET /api/operations/intelligence/signals` accepts `status`, `signalType`, `areaId`, `page`, and `pageSize`.
+- `POST /api/operations/intelligence/signals` creates or updates an idempotent signal using winery/fingerprint and suppresses adjacent-window duplicates using `dedupeKey`.
+- `POST /api/operations/intelligence/signals/materialize` calculates current thresholded intelligence for a supplied `period`/`offset` or explicit `start`/`end`, then creates, updates, or suppresses matching saved signals.
+- `POST /api/operations/intelligence/signals/scheduled-run` runs the same materialization path through the scheduler service for the current winery context.
+- `PATCH /api/operations/intelligence/signals/:id` sets `OPEN`, `ACKNOWLEDGED`, or `DISMISSED`.
+- `PATCH /api/operations/intelligence/signals/:id/workflow` updates review workflow fields without closing or actioning the signal.
+- `POST /api/operations/intelligence/signals/:id/create-task` creates one manager-approved Operations Task and marks the signal `ACTION_CREATED`; repeated calls return the existing Task.
+
+Create fields: `signalType`, `severity`, `title`, optional `summary`, optional `fingerprint`, optional `dedupeKey`, optional `evidence`, optional `periodStart` / `periodEnd`, optional `areaId`, optional `suggestedAction`, optional `reviewOwnerUserId`, and optional `reviewDueAt`.
+
+Workflow update fields: `reviewOwnerUserId`, `reviewDueAt`, `suggestedAction`, and `reviewNote`. At least one is required. `reviewOwnerUserId` must belong to the same winery.
+
+Materialization responses include `suggestedCount`, `createdCount`, `updatedCount`, `suppressedDuplicateCount`, and the materialized `signals`. Scheduled-run responses include those aggregate counts plus per-winery `results`.
+
+Supported signal types: `REQUEST_AGING`, `RECURRENCE`, `CLASSIFICATION_CORRECTION`, `CONVERSION_OUTCOME`, `NOTICE_ACKNOWLEDGEMENT`, `TREND`.
+
+Signal-to-Task creation accepts optional `priority`, `assigneeId`, `dueAt`, `suggestedAction`, `reviewNote`, `payload`, and structured `steps`. Missing `assigneeId`, `dueAt`, and `suggestedAction` default from the saved signal's review owner, review due date, and suggested action. These fields affect only the manager-approved action Task; they do not alter the source evidence or underlying operational records.
+
+Persisted signals expose `dedupeKey`, `suggestedAction`, `reviewOwnerUserId`, `ReviewOwner`, `reviewDueAt`, `lastMaterializedAt`, and `materializationCount`. Dedupe suppression targets open or acknowledged signals with the same `dedupeKey` created within the configured adjacent-window suppression period.
+
+The production scheduler is opt-in with `OPERATIONAL_INTELLIGENCE_SCHEDULER_ENABLED=true`. When enabled, the server periodically materializes thresholded suggestions and creates de-duplicated `SYSTEM` notifications for open/acknowledged signals whose `reviewDueAt` is due soon or overdue. Scheduler cadence, reporting period, due-soon window, overdue repeat bucket, and reminder batch size are controlled by the `OPERATIONAL_INTELLIGENCE_*` environment variables in `.env.example`.
+
+Per-winery controls are stored in `WinerySettings.operationalIntelligenceConfig`. Env flags control whether the server-level scheduler loop runs at all; winery config controls whether each winery participates and which thresholds/reminder windows are used.
+
+Config updates create immutable `OperationalIntelligenceConfigAuditEvent` rows with the actor, optional preset, before/after snapshots, and changed field paths. Preview calls are deliberately not audited because they do not mutate settings. `fieldMetadata` explains how each tunable value affects suggested signals or reminders.
+
+Attachment APIs accept `entityType: REQUEST | NOTE` and apply the parent operational item's tenant and area visibility rules.
+
+## Projects
+
+Projects are mounted under `/api/projects` and require normal dashboard authentication. They coordinate existing operational objects but do not replace the source domain's workflow or permissions.
+
+### Project lifecycle
+
+* `GET /api/projects`
+* `POST /api/projects`
+* `GET /api/projects/:id`
+* `PATCH /api/projects/:id`
+
+List filters are `status`, `health`, `ownerUserId`, `involvement`, `areaId`, `search`, `targetFrom`, `targetTo`, `sortBy`, `page`, and `pageSize`. `status=open` selects `PLANNED`, `ACTIVE`, and `ON_HOLD`; `involvement=me` selects only Projects where the caller is owner, lead, participant/stakeholder, or assignee of a `DELEGATED_WORK` Task.
+
+Create and update fields include `title`, `intendedOutcome`, `businessContext`, `status`, `ownerUserId`, `plannedStartAt`, `targetEndAt`, `riskReason`, `riskReviewAt`, `areaScope`, `primaryAreaId`, `linkedAreaIds`, `participantUserIds`, and `notifyParticipants` where applicable. Create also accepts nullable `leadUserId`; later leadership changes use the dedicated governance endpoints below.
+
+Activating a Project requires an eligible owner and target date. Completing with unresolved required work requires `completionOverride: true` and a non-empty `completionReason`. Projects are cancelled rather than hard deleted.
+
+Responses include `Owner`, nullable `Lead`, nullable `LeadGrantor`, `leadGrantedAt`, and authoritative `permissions`: `canView`, `canManage`, `canGovern`, `isLead`, `canDelegateTasks`, `canChangeLeadership`, `canChangeScope`, `canComplete`, and `canCancel`.
+
+Responses also include caller-specific `involvement` with ordered `roles`, `primaryRole`, and `delegatedTaskCount`. Roles are `LEAD`, `OWNER`, `PARTICIPANT`, `STAKEHOLDER`, and `DELEGATED_TASK_ASSIGNEE`. Project visibility is checked before involvement is calculated, so this read model does not broaden access.
+
+### Project leadership and delegation
+
+* `PUT /api/projects/:id/lead` with `{ "leadUserId": 123 }`
+* `DELETE /api/projects/:id/lead`
+* `POST /api/projects/:id/tasks`
+
+Only a user with Project governance authority may appoint, replace, or revoke a lead. A lead must be active, belong to the same winery, differ from the accountable owner, and—for an area-scoped Project—belong to at least one participating area. A Project must have an accountable owner before a lead can be appointed. Closed Projects cannot receive a new lead.
+
+The Project Lead may edit open delivery fields, participants, linked-item metadata, dependencies, and files. The lead cannot change the accountable owner, lead appointment, Project area scope, complete or cancel the Project, authorise a completion override, or reopen a closed Project.
+
+`POST /api/projects/:id/tasks` atomically creates and links delegated Project work. The request is:
+
+```json
+{
+  "title": "Prepare Festival tasting roster",
+  "body": "Coordinate staffing and guest flow with Restaurant.",
+  "dueAt": "2026-08-20T02:00:00.000Z",
+  "priority": "high",
+  "areaId": 4,
+  "assigneeId": 27,
+  "isRequired": true,
+  "isMilestone": false
+}
+```
+
+The selected area must be an active participating Project area (or any active winery area for an organisation-wide Project), and the active assignee must be a member of that area. The operation creates the Task, its Task-area placement, a `ProjectItem` with `linkType = DELEGATED_WORK`, Task audits, a `TASK_DELEGATED` Project audit, and notifications in one transaction. The accountable Project owner is persisted as `Task.createdBy`; the acting lead remains the audit and delegation actor. This prevents a former lead from retaining creator-based access after revocation.
+
+### Participants
+
+* `POST /api/projects/:id/participants`
+* `PATCH /api/projects/:id/participants/:userId`
+* `DELETE /api/projects/:id/participants/:userId`
+
+Participant fields are `userId`, `participationRole: PARTICIPANT | STAKEHOLDER`, and `notificationsEnabled`.
+
+### Linked items
+
+* `GET /api/projects/:id/items`
+* `POST /api/projects/:id/items`
+* `PATCH /api/projects/:id/items/:projectItemId`
+* `DELETE /api/projects/:id/items/:projectItemId`
+* `GET /api/projects/for-item?itemType=TASK&itemId=123`
+
+Supported item types are `TASK`, `REQUEST`, `NOTICE`, `NOTE`, and `CALENDAR_EVENT`. Link fields are `itemType`, `itemId`, `isRequired`, `isMilestone`, and `sortOrder`. Ordinary links have `linkType = REFERENCE` and never grant child-record access; only the dedicated delegated-Task endpoint creates `DELEGATED_WORK` links.
+
+Project participation and ordinary reference linking never grant access to a restricted linked object. Detail responses omit hidden object metadata and return a `restrictedItemCount`. The current lead receives scoped access only to `DELEGATED_WORK` Tasks belonging to that Project; revocation removes that access immediately unless another Task rule independently permits it.
+
+### Dependencies and activity
+
+* `GET /api/projects/:id/dependencies`
+* `POST /api/projects/:id/dependencies`
+* `DELETE /api/projects/:id/dependencies/:dependencyId`
+* `GET /api/projects/:id/activity`
+
+Dependency creation accepts `blockingTaskId` and `blockedTaskId`. Both Tasks must be linked to the Project. Self-dependencies and cycles are rejected.
+
+### Project summaries
+
+List and detail responses expose derived `summary` fields including `health`, nullable `progressPercent`, required/completed Task counts, blocked and overdue counts, pending decision count, past-target state, upcoming milestone, and the next meaningful action.
+
+Progress counts only required Tasks with `workflowState = COMPLETED`; coarse `Task.status = ACTIONED` does not by itself count as completion.
+
+### Project attachments
+
+The existing attachment APIs accept `entityType: PROJECT`. Project visibility is required for reads and Project manage authority is required for upload or deletion.

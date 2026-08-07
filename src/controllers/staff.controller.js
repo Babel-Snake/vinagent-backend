@@ -1,6 +1,6 @@
 const admin = require('../config/firebase');
 const { Op } = require('sequelize');
-const { User } = require('../models');
+const { OperationalArea, User, UserAreaMembership } = require('../models');
 const AppError = require('../utils/AppError');
 const { hashPin, validatePin, verifyPin } = require('../utils/pinAuth');
 
@@ -13,6 +13,17 @@ function staffPayload(user) {
         role: user.role,
         isActive: user.isActive,
         responsibilities: user.responsibilities,
+        areaMemberships: (user.AreaMemberships || []).map(membership => ({
+            id: membership.id,
+            areaId: membership.areaId,
+            membershipRole: membership.membershipRole,
+            isPrimary: Boolean(membership.isPrimary),
+            Area: membership.Area ? {
+                id: membership.Area.id,
+                name: membership.Area.name,
+                isActive: membership.Area.isActive
+            } : undefined
+        })),
         pinEnabled: Boolean(user.pinHash),
         pinUpdatedAt: user.pinUpdatedAt,
         pinLockedUntil: user.pinLockedUntil,
@@ -179,6 +190,12 @@ exports.listStaff = async (req, res, next) => {
                 'pinLockedUntil',
                 'pinLastLoginAt'
             ],
+            include: [{
+                model: UserAreaMembership,
+                as: 'AreaMemberships',
+                include: [{ model: OperationalArea, as: 'Area', attributes: ['id', 'name', 'isActive'] }],
+                required: false
+            }],
             order: [['displayName', 'ASC']]
         });
 

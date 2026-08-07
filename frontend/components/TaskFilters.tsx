@@ -1,41 +1,50 @@
 import { useState } from 'react';
-import { Task, Staff } from '../lib/api';
+import { Task, Staff, OperationalArea } from '../lib/api';
 
-interface TaskFiltersProps {
-    filters: {
+function presentationLabel(value: string) {
+    return value.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, character => character.toUpperCase());
+}
+
+export interface TaskFilterState {
         category: string;
         priority: string;
         assigneeId: string;
         createdById: string;
+        areaId: string;
         status: string;
         sentiment: string;
         search: string;
-        showOnlyFlagged?: boolean;
-        mentionedMe?: boolean;
-        deadlineState?: string;
-        actionedById?: string;
-        sortBy?: string;
-        dateRangeType?: string;
-        dateFrom?: string;
-        dateTo?: string;
-    };
-    onFilterChange: (newFilters: any) => void;
+        showOnlyFlagged: boolean;
+        mentionedMe: boolean;
+        deadlineState: string;
+        actionedById: string;
+        sortBy: string;
+        dateRangeType: string;
+        dateFrom: string;
+        dateTo: string;
+}
+
+interface TaskFiltersProps {
+    filters: TaskFilterState;
+    onFilterChange: (newFilters: TaskFilterState) => void;
     tasks: Task[];
     users: Staff[];
+    areas: OperationalArea[];
     currentUserId?: number | null;
 }
 
-export default function TaskFilters({ filters, onFilterChange, tasks, users, currentUserId }: TaskFiltersProps) {
+export default function TaskFilters({ filters, onFilterChange, tasks, users, areas, currentUserId }: TaskFiltersProps) {
     const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
 
     // Extract Unique Creators
-    const uniqueCreators = Array.from(new Set(tasks.map(t => t.Creator ? JSON.stringify(t.Creator) : '').filter(Boolean)))
-        .map(s => JSON.parse(s));
+    const uniqueCreators = Array.from(new Map(
+        tasks.flatMap(task => task.Creator ? [[task.Creator.id, task.Creator] as const] : [])
+    ).values());
 
     // Extract Unique Categories
     const uniqueCategories = Array.from(new Set(tasks.map(t => t.category).filter(Boolean))).sort();
 
-    const handleChange = (field: string, value: any) => {
+    const handleChange = (field: keyof TaskFilterState, value: string | boolean) => {
         onFilterChange({ ...filters, [field]: value });
     };
 
@@ -72,6 +81,15 @@ export default function TaskFilters({ filters, onFilterChange, tasks, users, cur
 
                 {/* Always-visible toggles */}
                 <div className="flex flex-wrap gap-2">
+                    {currentUserId && (
+                        <button
+                            type="button"
+                            onClick={() => handleChange('assigneeId', filters.assigneeId === 'me' ? 'all' : 'me')}
+                            className={`btn-secondary ${filters.assigneeId === 'me' ? 'border-[var(--brand)] bg-[var(--brand-soft)] text-[var(--brand-strong)]' : ''}`}
+                        >
+                            Assigned to me
+                        </button>
+                    )}
                     <button
                         type="button"
                         onClick={() => handleChange('mentionedMe', !filters.mentionedMe)}
@@ -118,6 +136,20 @@ export default function TaskFilters({ filters, onFilterChange, tasks, users, cur
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-x-6 gap-y-4">
                         {/* Category Filter */}
                         <div>
+                            <label className="mb-1.5 block text-xs font-semibold uppercase text-[var(--muted)]">Operational Area</label>
+                            <select
+                                className="form-control"
+                                value={filters.areaId}
+                                onChange={(e) => handleChange('areaId', e.target.value)}
+                            >
+                                <option value="all">All visible areas</option>
+                                <option value="organisation">Organisation-wide</option>
+                                {areas.map(area => <option key={area.id} value={area.id}>{area.name}</option>)}
+                            </select>
+                        </div>
+
+                        {/* Category Filter */}
+                        <div>
                             <label className="mb-1.5 block text-xs font-semibold uppercase text-[var(--muted)]">Category</label>
                             <select
                                 className="form-control"
@@ -125,8 +157,8 @@ export default function TaskFilters({ filters, onFilterChange, tasks, users, cur
                                 onChange={(e) => handleChange('category', e.target.value)}
                             >
                                 <option value="all">All Categories</option>
-                                {uniqueCategories.map((c: any) => (
-                                    <option key={c} value={c}>{c}</option>
+                                {uniqueCategories.map(c => (
+                                    <option key={c} value={c}>{presentationLabel(c)}</option>
                                 ))}
                             </select>
                         </div>
@@ -189,7 +221,7 @@ export default function TaskFilters({ filters, onFilterChange, tasks, users, cur
                             >
                                 <option value="all">All Creators</option>
                                 <option value="system">System</option>
-                                {uniqueCreators.map((c: any) => (
+                                {uniqueCreators.map(c => (
                                     <option key={c.id} value={c.id}>{c.displayName}</option>
                                 ))}
                             </select>

@@ -1,6 +1,5 @@
 const express = require('express');
 const taskController = require('../controllers/task.controller');
-const { requireRole } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
@@ -9,14 +8,15 @@ const router = express.Router();
 router.post('/autoclassify', taskController.autoclassify);
 router.post('/', taskController.createTask);
 router.get('/', taskController.listTasks);
+router.get('/summary', taskController.getTaskSummary);
 router.get('/:id', taskController.getTask);
 
 // Updates include status changes, notes, assignment, and suggestion refreshes.
 router.patch('/:id', taskController.updateTask);
-router.post('/:id/notices', requireRole(['manager', 'admin']), taskController.linkNotice);
-router.delete('/:id/notices/:noticeId', requireRole(['manager', 'admin']), taskController.unlinkNotice);
+router.post('/:id/notices', taskController.linkNotice);
+router.delete('/:id/notices/:noticeId', taskController.unlinkNotice);
 router.post('/:id/steps', taskController.createTaskStep);
-router.patch('/:id/steps/reorder', requireRole(['manager', 'admin']), taskController.reorderTaskSteps);
+router.patch('/:id/steps/reorder', taskController.reorderTaskSteps);
 router.post('/:id/steps/:stepId/suggestion', taskController.generateTaskStepSuggestion);
 router.post('/:id/steps/:stepId/action', taskController.actionTaskStepSuggestion);
 router.patch('/:id/steps/:stepId', taskController.updateTaskStep);

@@ -4,10 +4,10 @@ const os = require('os');
 const path = require('path');
 const { Attachment, Notice, Task, TaskAction, TaskStep, User } = require('../models');
 const { ForbiddenError, NotFoundError, ValidationError } = require('../utils/errors');
-const noticeService = require('./notice.service');
+const recordVisibility = require('./recordVisibility.service');
 
 const MANAGER_ROLES = new Set(['manager', 'admin']);
-const ENTITY_TYPES = new Set(['TASK', 'TASK_STEP', 'TASK_OUTCOME', 'TASK_FOLLOW_UP', 'NOTICE']);
+const ENTITY_TYPES = new Set(['TASK', 'TASK_STEP', 'TASK_OUTCOME', 'TASK_FOLLOW_UP', 'NOTICE', 'REQUEST', 'NOTE', 'PROJECT']);
 const TASK_ENTITY_TYPES = new Set(['TASK', 'TASK_OUTCOME', 'TASK_FOLLOW_UP']);
 const MAX_ATTACHMENT_BYTES = Number(process.env.ATTACHMENT_MAX_BYTES || 5 * 1024 * 1024);
 const ALLOWED_MIME_TYPES = new Set([
@@ -131,7 +131,12 @@ async function resolveEntity({ entityType, entityId, wineryId, userId, userRole,
   if (TASK_ENTITY_TYPES.has(entityType)) {
     const task = await Task.findOne({ where: { id: entityId, wineryId } });
     if (!task) throw new NotFoundError('Task not found');
-    if (mode === 'mutate') assertCanMutateTask(task, { userId, userRole });
+    if (mode === 'mutate') {
+      assertCanMutateTask(task, { userId, userRole });
+      await recordVisibility.assertCanMutateTask(task, { wineryId, userId, userRole });
+    } else {
+      await recordVisibility.assertCanViewTask(task, { wineryId, userId, userRole });
+    }
     return { task, targetTaskId: task.id };
   }
 
@@ -143,15 +148,45 @@ async function resolveEntity({ entityType, entityId, wineryId, userId, userRole,
     if (!step || !step.Task || Number(step.Task.wineryId) !== Number(wineryId)) {
       throw new NotFoundError('Task step not found');
     }
-    if (mode === 'mutate') assertCanMutateTaskStep(step, step.Task, { userId, userRole });
+    if (mode === 'mutate') {
+      assertCanMutateTaskStep(step, step.Task, { userId, userRole });
+      await recordVisibility.assertCanMutateTask(step.Task, { wineryId, userId, userRole });
+    } else {
+      await recordVisibility.assertCanViewTask(step.Task, { wineryId, userId, userRole });
+    }
     return { step, task: step.Task, targetTaskId: step.Task.id };
   }
 
+  if (entityType === 'REQUEST' || entityType === 'NOTE') {
+    const operationalItemService = require('./operationalItem.service');
+    const item = await operationalItemService.getVisibleOperationalItem({
+      itemType: entityType,
+      itemId: entityId,
+      wineryId,
+      userId,
+      userRole
+    });
+    return { operationalItem: item, operationalItemType: entityType };
+  }
+
+  if (entityType === 'PROJECT') {
+    const projectService = require('./project.service');
+    const projectVisibility = require('./projectVisibility.service');
+    const project = await projectService.loadProject(entityId, wineryId);
+    if (!project) throw new NotFoundError('Project not found');
+    if (mode === 'mutate') {
+      await projectVisibility.assertCanManageProject(project, { wineryId, userId, userRole });
+    } else {
+      await projectVisibility.assertCanViewProject(project, { wineryId, userId, userRole });
+    }
+    return { project };
+  }
+
   const notice = await Notice.findOne({ where: { id: entityId, wineryId } });
-  if (!notice || !noticeService.noticeVisibleToUser(notice, { userId, userRole })) {
+  if (!notice || !(await recordVisibility.canViewNotice(notice, { wineryId, userId, userRole }))) {
     throw new NotFoundError('Notice not found');
   }
-  if (mode === 'mutate' && !noticeService.canManageNotices(userRole)) {
+  if (mode === 'mutate' && !(await recordVisibility.canManageNotice(notice, { wineryId, userId, userRole }))) {
     throw new ForbiddenError('Only managers can manage notice attachments.');
   }
   return { notice };
@@ -260,6 +295,27 @@ async function createAttachment({ wineryId, userId, userRole, data }) {
       attachment,
       userId
     });
+    if (resolved.operationalItemType) {
+      const operationalItemService = require('./operationalItem.service');
+      await operationalItemService.logAudit({
+        itemType: resolved.operationalItemType,
+        itemId: entityId,
+        eventType: 'ATTACHMENT_ADDED',
+        wineryId,
+        actorUserId: userId,
+        metadata: { attachmentId: attachment.id, filename: attachment.filename, mimeType: attachment.mimeType }
+      });
+    }
+    if (resolved.project) {
+      const projectService = require('./project.service');
+      await projectService.logProjectAudit({
+        projectId: resolved.project.id,
+        wineryId,
+        actorUserId: userId,
+        eventType: 'ATTACHMENT_ADDED',
+        metadata: { attachmentId: attachment.id, filename: attachment.filename, mimeType: attachment.mimeType }
+      });
+    }
   } catch (err) {
     await fs.rm(absolutePath, { force: true }).catch(() => {});
     throw err;
@@ -311,9 +367,30 @@ async function deleteAttachment({ attachmentId, wineryId, userId, userRole }) {
   });
 
   if (attachment.entityType === 'NOTICE') {
-    if (!noticeService.canManageNotices(userRole)) {
+    if (!(await recordVisibility.canManageNotice(resolved.notice, { wineryId, userId, userRole }))) {
       throw new ForbiddenError('Only managers can delete notice attachments.');
     }
+  } else if (attachment.entityType === 'REQUEST' || attachment.entityType === 'NOTE') {
+    const operationalItemService = require('./operationalItem.service');
+    const canManage = await operationalItemService.canManageOperationalItem({
+      itemType: attachment.entityType,
+      item: resolved.operationalItem,
+      wineryId,
+      userId,
+      userRole
+    });
+    if (!canManage && Number(attachment.uploadedBy) !== Number(userId)) {
+      throw new ForbiddenError('You can only delete attachments you uploaded.');
+    }
+  } else if (attachment.entityType === 'PROJECT') {
+    await resolveEntity({
+      entityType: attachment.entityType,
+      entityId: attachment.entityId,
+      wineryId,
+      userId,
+      userRole,
+      mode: 'mutate'
+    });
   } else if (!isPrivileged(userRole)) {
     if (Number(attachment.uploadedBy) !== Number(userId)) {
       throw new ForbiddenError('You can only delete attachments you uploaded.');
@@ -340,6 +417,27 @@ async function deleteAttachment({ attachmentId, wineryId, userId, userRole }) {
     attachment,
     userId
   });
+  if (resolved.operationalItemType) {
+    const operationalItemService = require('./operationalItem.service');
+    await operationalItemService.logAudit({
+      itemType: resolved.operationalItemType,
+      itemId: attachment.entityId,
+      eventType: 'ATTACHMENT_DELETED',
+      wineryId,
+      actorUserId: userId,
+      metadata: { attachmentId: attachment.id, filename: attachment.filename }
+    });
+  }
+  if (resolved.project) {
+    const projectService = require('./project.service');
+    await projectService.logProjectAudit({
+      projectId: resolved.project.id,
+      wineryId,
+      actorUserId: userId,
+      eventType: 'ATTACHMENT_DELETED',
+      metadata: { attachmentId: attachment.id, filename: attachment.filename }
+    });
+  }
 
   return { deleted: true };
 }

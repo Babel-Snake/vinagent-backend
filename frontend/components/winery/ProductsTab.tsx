@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { createProduct, updateProduct, deleteProduct } from '../../lib/api';
+import { createProduct, updateProduct, deleteProduct, type Winery, type WineryProduct } from '../../lib/api';
+import ConfirmDialog from '../ui/ConfirmDialog';
 
 const emptyProductForm = {
     name: '',
@@ -22,17 +23,19 @@ const stockStatuses = [
     { value: 'OUT_OF_STOCK', label: 'Out of Stock' }
 ];
 
-export function ProductsTab({ winery, onUpdate }: { winery: any, onUpdate: () => void }) {
+export function ProductsTab({ winery, onUpdate }: { winery: Winery, onUpdate: () => void }) {
     const products = winery.products || [];
     const [newProduct, setNewProduct] = useState(emptyProductForm);
     const [editingProductId, setEditingProductId] = useState<number | null>(null);
     const [editingProduct, setEditingProduct] = useState(emptyProductForm);
     const [loading, setLoading] = useState(false);
     const [savingEdit, setSavingEdit] = useState(false);
+    const [feedback, setFeedback] = useState<string | null>(null);
+    const [productPendingDeletion, setProductPendingDeletion] = useState<WineryProduct | null>(null);
 
-    const keySellingPointsToInput = (value: any) => {
+    const keySellingPointsToInput = (value: unknown) => {
         if (Array.isArray(value)) return value.join(', ');
-        return value || '';
+        return typeof value === 'string' ? value : '';
     };
 
     const buildPayload = (product: typeof emptyProductForm) => ({
@@ -45,30 +48,35 @@ export function ProductsTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
 
     const handleCreate = async (e: React.FormEvent) => {
         e.preventDefault();
+        setFeedback(null);
         setLoading(true);
         try {
             await createProduct(buildPayload(newProduct));
             setNewProduct(emptyProductForm);
             onUpdate();
-        } catch (e) {
-            alert('Failed to add product');
+        } catch (error) {
+            setFeedback(error instanceof Error ? error.message : 'Failed to add product');
         } finally {
             setLoading(false);
         }
     };
 
-    const handleDelete = async (id: number) => {
-        if (!confirm('Are you sure you want to delete this product?')) return;
+    const deletePendingProduct = async () => {
+        const product = productPendingDeletion;
+        if (!product) return;
+        setFeedback(null);
         try {
-            await deleteProduct(id);
-            if (editingProductId === id) handleCancelEdit();
+            await deleteProduct(product.id);
+            if (editingProductId === product.id) handleCancelEdit();
             onUpdate();
-        } catch (e) {
-            alert('Failed to delete product');
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to delete product';
+            setFeedback(message);
+            throw new Error(message);
         }
     };
 
-    const handleEdit = (product: any) => {
+    const handleEdit = (product: WineryProduct) => {
         setEditingProductId(product.id);
         setEditingProduct({
             name: product.name || '',
@@ -90,20 +98,23 @@ export function ProductsTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
 
     const handleUpdate = async (e: React.FormEvent, id: number) => {
         e.preventDefault();
+        setFeedback(null);
         setSavingEdit(true);
         try {
             await updateProduct(id, buildPayload(editingProduct));
             handleCancelEdit();
             onUpdate();
-        } catch (e) {
-            alert('Failed to update product');
+        } catch (error) {
+            setFeedback(error instanceof Error ? error.message : 'Failed to update product');
         } finally {
             setSavingEdit(false);
         }
     };
 
     return (
+        <>
         <div className="space-y-8">
+            {feedback && <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{feedback}</p>}
             {/* List */}
             <div>
                 <h3 className="text-lg font-medium leading-6 text-gray-900 mb-4">Current Products</h3>
@@ -120,7 +131,7 @@ export function ProductsTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200 bg-white">
-                            {products.map((product: any) => (
+                            {products.map(product => (
                                 editingProductId === product.id ? (
                                     <tr key={product.id}>
                                         <td colSpan={6} className="bg-gray-50 px-4 py-5 sm:px-6">
@@ -167,7 +178,7 @@ export function ProductsTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
                                                 </div>
                                                 <div className="sm:col-span-6 flex justify-end gap-3">
                                                     <button type="button" onClick={handleCancelEdit} className="inline-flex justify-center rounded-md border border-gray-300 bg-white py-2 px-4 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50">Cancel</button>
-                                                    <button type="submit" disabled={savingEdit} className="inline-flex justify-center rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:bg-gray-400">
+                                                    <button type="submit" disabled={savingEdit} className="btn-primary">
                                                         {savingEdit ? 'Saving...' : 'Save Product'}
                                                     </button>
                                                 </div>
@@ -182,12 +193,12 @@ export function ProductsTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
                                         <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">${product.price}</td>
                                         <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                                             <span className={`inline-flex rounded-full px-2 text-xs font-semibold leading-5 ${product.stockStatus === 'IN_STOCK' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                                                {product.stockStatus}
+                                                {stockStatuses.find(status => status.value === product.stockStatus)?.label || product.stockStatus}
                                             </span>
                                         </td>
                                         <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
-                                            <button onClick={() => handleEdit(product)} className="mr-4 text-indigo-600 hover:text-indigo-900">Edit</button>
-                                            <button onClick={() => handleDelete(product.id)} className="text-red-600 hover:text-red-900">Delete</button>
+                                            <button type="button" onClick={() => handleEdit(product)} className="mr-4 text-[var(--brand-strong)] hover:underline">Edit</button>
+                                            <button type="button" onClick={() => setProductPendingDeletion(product)} className="text-red-600 hover:text-red-900">Delete</button>
                                         </td>
                                     </tr>
                                 )
@@ -251,12 +262,22 @@ export function ProductsTab({ winery, onUpdate }: { winery: any, onUpdate: () =>
                     </div>
 
                     <div className="sm:col-span-6">
-                        <button type="submit" disabled={loading} className="btn-primary inline-flex justify-center rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:bg-gray-400">
+                        <button type="submit" disabled={loading} className="btn-primary">
                             {loading ? 'Adding...' : 'Add Product'}
                         </button>
                     </div>
                 </form>
             </div>
         </div>
+        <ConfirmDialog
+            open={Boolean(productPendingDeletion)}
+            onClose={() => setProductPendingDeletion(null)}
+            onConfirm={deletePendingProduct}
+            title="Delete product?"
+            description={productPendingDeletion ? `"${productPendingDeletion.name}" will be permanently removed.` : ''}
+            confirmLabel="Delete product"
+            destructive
+        />
+        </>
     );
 }

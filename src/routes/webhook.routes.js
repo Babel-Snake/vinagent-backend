@@ -72,4 +72,10 @@ router.post('/integration/:wineryId/:domain',
     webhookController.handleIntegrationEvent
 );
 
+router.post('/integration/:wineryId/:domain/:areaId',
+    webhookLimiter,
+    validateIntegrationWebhookSignature,
+    webhookController.handleIntegrationEvent
+);
+
 module.exports = router;

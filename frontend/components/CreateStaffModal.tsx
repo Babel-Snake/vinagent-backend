@@ -1,6 +1,8 @@
 'use client';
 import { useState } from 'react';
 import { createStaff } from '../lib/api';
+import { errorMessage } from '../lib/errors';
+import Dialog from './ui/Dialog';
 
 interface CreateStaffModalProps {
     onClose: () => void;
@@ -22,15 +24,15 @@ export default function CreateStaffModal({ onClose }: CreateStaffModalProps) {
             await createStaff({ username, password, pin: pin.trim() || undefined });
             setSuccessUser(username);
             setSuccessPin(pin.trim());
-        } catch (err: any) {
-            setError(err.message);
+        } catch (err: unknown) {
+            setError(errorMessage(err));
         }
     }
 
     if (successUser) {
         return (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                <div className="bg-white rounded-lg max-w-md w-full p-6 text-center">
+            <Dialog open onClose={onClose} title="Staff account created" showHeader={false} className="max-w-md">
+                <div className="p-6 text-center">
                     <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
                         <svg className="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
@@ -51,13 +53,13 @@ export default function CreateStaffModal({ onClose }: CreateStaffModalProps) {
                         Done
                     </button>
                 </div>
-            </div>
+            </Dialog>
         );
     }
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg max-w-md w-full p-6">
+        <Dialog open onClose={onClose} title="Add staff member" showHeader={false} className="max-w-md">
+            <div className="p-6">
                 <div className="flex justify-between items-center mb-4">
                     <h2 className="text-xl font-bold">Add Staff Member</h2>
                     <button onClick={onClose} className="text-gray-400 hover:text-gray-600">✕</button>
@@ -125,6 +127,6 @@ export default function CreateStaffModal({ onClose }: CreateStaffModalProps) {
                     </div>
                 </form>
             </div>
-        </div>
+        </Dialog>
     );
 }

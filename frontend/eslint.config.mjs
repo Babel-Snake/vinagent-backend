@@ -8,6 +8,13 @@ const eslintConfig = defineConfig([
   {
     rules: {
       "@typescript-eslint/no-explicit-any": "warn",
+      "no-console": "error",
+    },
+  },
+  {
+    files: ["lib/clientLogger.ts"],
+    rules: {
+      "no-console": "off",
     },
   },
   // Override default ignores of eslint-config-next.

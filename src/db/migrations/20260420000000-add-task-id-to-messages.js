@@ -17,7 +17,8 @@ module.exports = {
   },
 
   async down(queryInterface) {
-    await queryInterface.removeIndex('Messages', 'messages_task_id_idx');
+    // MySQL may use messages_task_id_idx to enforce the taskId foreign key.
+    // Removing the column drops the constraint and supporting index together.
     await queryInterface.removeColumn('Messages', 'taskId');
   }
 };

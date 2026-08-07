@@ -1,5 +1,13 @@
 'use strict';
 
+async function hasTable(queryInterface, tableName) {
+    const expected = String(tableName).toLowerCase();
+    return (await queryInterface.showAllTables()).some(table => {
+        const name = typeof table === 'object' ? table.tableName || table.name : table;
+        return String(name).toLowerCase() === expected;
+    });
+}
+
 module.exports = {
     async up(queryInterface, Sequelize) {
         await queryInterface.createTable('Tasks', {
@@ -75,7 +83,13 @@ module.exports = {
         });
     },
 
-    async down(queryInterface, Sequelize) {
+    async down(queryInterface) {
+        // CalendarEvents historically existed before it had a dedicated migration owner.
+        // It references Tasks, Users, and Wineries, so it cannot survive a rollback past
+        // the base task migration and would otherwise block all three table removals.
+        if (await hasTable(queryInterface, 'CalendarEvents')) {
+            await queryInterface.dropTable('CalendarEvents');
+        }
         await queryInterface.dropTable('Tasks');
     }
 };

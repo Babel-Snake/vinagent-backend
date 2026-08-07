@@ -84,7 +84,7 @@ module.exports = {
             },
             section: { // e.g., 'shipping', 'access', 'booking'
                 type: Sequelize.STRING,
-                allowNull: false
+                allowNull: true
             },
             question: { // Or 'Header'
                 type: Sequelize.STRING,

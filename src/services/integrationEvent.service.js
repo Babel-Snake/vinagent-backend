@@ -1,7 +1,20 @@
-const { IntegrationEvent, Notice, NoticeTask, Task, User } = require('../models');
+const {
+  IntegrationEvent,
+  IntegrationEventItem,
+  Notice,
+  NoticeArea,
+  NoticeTask,
+  OperationalArea,
+  OperationalRecord,
+  OperationalRequest,
+  Task,
+  User
+} = require('../models');
 const { Op, UniqueConstraintError } = require('sequelize');
 const taskService = require('./taskService');
 const noticeService = require('./notice.service');
+const operationalItemService = require('./operationalItem.service');
+const operationalAreaService = require('./operationalArea.service');
 const { redact } = require('../utils/sanitizer');
 const { ForbiddenError, NotFoundError, ValidationError } = require('../utils/errors');
 const { normalizeInboundEvent, compactString } = require('./integrations/inbound/normalizers');
@@ -61,8 +74,10 @@ function normalizeProvider(value) {
 function serializeIntegrationEvent(event) {
   if (!event) return null;
   const plain = event.toJSON ? event.toJSON() : event;
+  const linkedItems = plain.LinkedItems || [];
   return {
     ...plain,
+    linkedItems,
     isTerminal: TERMINAL_STATUSES.has(plain.status)
   };
 }
@@ -70,8 +85,27 @@ function serializeIntegrationEvent(event) {
 function getEventInclude() {
   return [
     { model: User, as: 'Creator', attributes: ['id', 'displayName', 'email', 'role'] },
-    { model: User, as: 'Reviewer', attributes: ['id', 'displayName', 'email', 'role'] }
+    { model: User, as: 'Reviewer', attributes: ['id', 'displayName', 'email', 'role'] },
+    { model: OperationalArea, as: 'SuggestedArea', attributes: ['id', 'name', 'isActive'] },
+    { model: OperationalArea, as: 'ConfirmedArea', attributes: ['id', 'name', 'isActive'] },
+    {
+      model: IntegrationEventItem,
+      as: 'LinkedItems',
+      include: [{ model: User, as: 'Creator', attributes: ['id', 'displayName', 'email'] }]
+    }
   ];
+}
+
+async function addEventItemLink({ event, wineryId, userId, itemType, itemId, itemKey = null, linkType = 'CREATED', transaction }) {
+  return IntegrationEventItem.create({
+    eventId: event.id,
+    wineryId,
+    itemType,
+    itemId,
+    itemKey,
+    linkType,
+    createdBy: userId
+  }, { transaction });
 }
 
 function normalizeEventCreatePayload(data) {
@@ -96,12 +130,22 @@ function normalizeEventCreatePayload(data) {
     normalizedPayload,
     status,
     receivedAt: toDateOrNull(data.receivedAt) || new Date(),
-    metadata: data.metadata || null
+    metadata: data.metadata || null,
+    suggestedAreaId: data.suggestedAreaId || null,
+    areaConfidence: data.areaConfidence ?? null,
+    areaMappingSource: data.areaMappingSource || (data.suggestedAreaId ? 'MANUAL' : null)
   };
 }
 
 async function createIntegrationEvent({ wineryId, userId = null, data }) {
   const payload = normalizeEventCreatePayload(data);
+  if (payload.suggestedAreaId) {
+    const area = await OperationalArea.findOne({
+      where: { id: payload.suggestedAreaId, wineryId, isActive: true },
+      attributes: ['id']
+    });
+    if (!area) throw new ValidationError('Suggested operational area is invalid or inactive.');
+  }
   const duplicateWhere = payload.externalEventId ? {
     wineryId,
     provider: payload.provider,
@@ -173,13 +217,23 @@ async function listIntegrationEvents({ wineryId, filters = {}, pagination = {} }
   if (filters.provider && filters.provider !== 'all') {
     where.provider = filters.provider;
   }
+  if (filters.areaId && filters.areaId !== 'all') {
+    where[Op.and] = [...(where[Op.and] || []), {
+      [Op.or]: [
+        { confirmedAreaId: Number(filters.areaId) },
+        { confirmedAreaId: null, suggestedAreaId: Number(filters.areaId) }
+      ]
+    }];
+  }
   if (filters.search) {
     const search = `%${String(filters.search).trim()}%`;
-    where[Op.or] = [
-      { provider: { [Op.like]: search } },
-      { eventType: { [Op.like]: search } },
-      { externalEventId: { [Op.like]: search } }
-    ];
+    where[Op.and] = [...(where[Op.and] || []), {
+      [Op.or]: [
+        { provider: { [Op.like]: search } },
+        { eventType: { [Op.like]: search } },
+        { externalEventId: { [Op.like]: search } }
+      ]
+    }];
   }
 
   const result = await IntegrationEvent.findAndCountAll({
@@ -237,6 +291,8 @@ function buildNoticePayload(event, overrides = {}) {
   const priority = NOTICE_PRIORITIES.has(overrides.priority)
     ? overrides.priority
     : (NOTICE_PRIORITIES.has(normalized.priority) ? normalized.priority : 'normal');
+  const primaryAreaId = overrides.primaryAreaId || event.confirmedAreaId || event.suggestedAreaId || null;
+  const requiresAcknowledgement = Boolean(overrides.requiresAcknowledgement);
 
   return {
     title,
@@ -244,9 +300,14 @@ function buildNoticePayload(event, overrides = {}) {
     category,
     priority,
     isPinned: Boolean(overrides.isPinned),
+    requiresAcknowledgement,
+    acknowledgementDueAt: requiresAcknowledgement ? toDateOrNull(overrides.acknowledgementDueAt) : null,
     audienceType: overrides.audienceType || 'all_staff',
     audienceRoles: overrides.audienceRoles || null,
     audienceUserIds: overrides.audienceUserIds || null,
+    areaScope: overrides.areaScope || (primaryAreaId ? 'AREAS' : 'ORGANISATION'),
+    primaryAreaId,
+    linkedAreaIds: overrides.linkedAreaIds || [],
     effectiveFrom: toDateOrNull(overrides.effectiveFrom),
     expiresAt: toDateOrNull(overrides.expiresAt),
     externalSource: compactString(normalized.sourceLabel || event.provider, 100),
@@ -275,6 +336,7 @@ function buildCallTaskPayload(event, overrides = {}) {
   const suggestedAction = overrides.suggestedAction
     || recommendedAction
     || `Review the call summary and follow up with ${contactLabel}.`;
+  const primaryAreaId = overrides.primaryAreaId || event.confirmedAreaId || event.suggestedAreaId || null;
 
   return {
     taskOrigin: 'EXTERNAL',
@@ -284,6 +346,9 @@ function buildCallTaskPayload(event, overrides = {}) {
     category: overrides.category || taskMap.category,
     subType: overrides.subType || taskMap.subType,
     priority,
+    areaScope: overrides.areaScope || (primaryAreaId ? 'AREAS' : 'ORGANISATION'),
+    primaryAreaId,
+    linkedAreaIds: overrides.linkedAreaIds || [],
     sentiment: normalized.category === 'customer_complaint' ? 'NEGATIVE' : 'NEUTRAL',
     payload: {
       summary,
@@ -342,6 +407,7 @@ function buildTaskPayload(event, overrides = {}) {
   if (!title && !body) {
     throw new ValidationError('Integration event needs a title or body before task creation.');
   }
+  const primaryAreaId = overrides.primaryAreaId || event.confirmedAreaId || event.suggestedAreaId || null;
 
   return {
     taskOrigin: 'INTERNAL',
@@ -349,6 +415,9 @@ function buildTaskPayload(event, overrides = {}) {
     category: overrides.category || 'INTERNAL',
     subType: overrides.subType || 'INTEGRATION_REVIEW',
     priority: overrides.priority || 'normal',
+    areaScope: overrides.areaScope || (primaryAreaId ? 'AREAS' : 'ORGANISATION'),
+    primaryAreaId,
+    linkedAreaIds: overrides.linkedAreaIds || [],
     payload: {
       summary: title || body,
       originalText: body || title,
@@ -367,12 +436,34 @@ function buildTaskPayload(event, overrides = {}) {
 
 async function publishNoticeFromEvent({ event, wineryId, userId, data, transaction }) {
   const noticePayload = buildNoticePayload(event, data.notice || {});
+  const { primaryAreaId, linkedAreaIds, ...noticeFields } = noticePayload;
+  const placement = await operationalAreaService.validateAreaPlacement({
+    wineryId,
+    userId,
+    userRole: 'manager',
+    areaScope: noticeFields.areaScope,
+    primaryAreaId,
+    linkedAreaIds,
+    requireManage: true,
+    transaction
+  });
   const notice = await Notice.create({
-    ...noticePayload,
+    ...noticeFields,
+    areaScope: placement.areaScope,
     wineryId,
     createdBy: userId,
     updatedBy: userId
   }, { transaction });
+
+  if (placement.areaScope === 'AREAS') {
+    await NoticeArea.bulkCreate(placement.areaIds.map(areaId => ({
+      noticeId: notice.id,
+      areaId,
+      wineryId
+    })), { transaction });
+  }
+
+  await addEventItemLink({ event, wineryId, userId, itemType: 'NOTICE', itemId: notice.id, itemKey: 'primary', transaction });
 
   const taskIds = Array.isArray(data.taskIds) ? data.taskIds : [];
   const uniqueTaskIds = [...new Set(taskIds.map(Number).filter(id => Number.isInteger(id) && id > 0))];
@@ -424,6 +515,8 @@ async function createTaskFromEvent({ event, wineryId, userId, userRole, data, tr
     data: taskPayload
   });
 
+  await addEventItemLink({ event, wineryId, userId, itemType: 'TASK', itemId: task.id, itemKey: 'primary', transaction });
+
   await event.update({
     status: 'PROCESSED',
     processingError: null,
@@ -450,6 +543,8 @@ async function linkEventToTask({ event, wineryId, userId, data, transaction }) {
     throw new NotFoundError('Task not found');
   }
 
+  await addEventItemLink({ event, wineryId, userId, itemType: 'TASK', itemId: task.id, itemKey: 'primary', linkType: 'LINKED', transaction });
+
   await event.update({
     status: 'PROCESSED',
     processingError: null,
@@ -462,6 +557,151 @@ async function linkEventToTask({ event, wineryId, userId, data, transaction }) {
 
   return {
     taskId: task.id
+  };
+}
+
+function buildOperationalItemPayload(event, itemType, overrides = {}) {
+  const normalized = getNormalizedPayload(event);
+  const title = compactString(overrides.title || normalized.title || normalized.summary || event.eventType, 200);
+  const body = compactString(overrides.body || normalized.body || normalized.summary || title, 10000);
+  if (!title || !body) throw new ValidationError(`${itemType} items require a title and body.`);
+  const primaryAreaId = overrides.primaryAreaId ?? event.confirmedAreaId ?? event.suggestedAreaId ?? null;
+  return {
+    ...overrides,
+    title,
+    body,
+    originalText: overrides.originalText || body,
+    sourceType: 'INTEGRATION',
+    sourceEventId: event.id,
+    priority: overrides.priority || 'normal',
+    areaScope: overrides.areaScope || (primaryAreaId ? 'AREAS' : 'ORGANISATION'),
+    primaryAreaId,
+    linkedAreaIds: overrides.linkedAreaIds || [],
+    aiSuggestedType: overrides.aiSuggestedType || null,
+    aiConfidence: overrides.aiConfidence ?? null,
+    aiSuggestion: overrides.aiSuggestion || null
+  };
+}
+
+async function createNoticeItem({ event, wineryId, userId, data, transaction }) {
+  const noticePayload = buildNoticePayload(event, data);
+  const { primaryAreaId, linkedAreaIds, ...noticeFields } = noticePayload;
+  const placement = await operationalAreaService.validateAreaPlacement({
+    wineryId,
+    userId,
+    userRole: 'manager',
+    areaScope: noticeFields.areaScope,
+    primaryAreaId,
+    linkedAreaIds,
+    requireManage: true,
+    transaction
+  });
+  const notice = await Notice.create({
+    ...noticeFields,
+    areaScope: placement.areaScope,
+    wineryId,
+    createdBy: userId,
+    updatedBy: userId
+  }, { transaction });
+  if (placement.areaScope === 'AREAS') {
+    await NoticeArea.bulkCreate(placement.areaIds.map(areaId => ({ noticeId: notice.id, areaId, wineryId })), { transaction });
+  }
+  return notice;
+}
+
+async function findBatchLinkTarget({ itemType, itemId, wineryId, transaction }) {
+  const modelByType = {
+    TASK: Task,
+    NOTICE: Notice,
+    REQUEST: OperationalRequest,
+    NOTE: OperationalRecord
+  };
+  const model = modelByType[itemType];
+  const item = model && await model.findOne({ where: { id: itemId, wineryId }, transaction });
+  if (!item) throw new NotFoundError(`${itemType.toLowerCase()} not found`);
+  return item;
+}
+
+async function createBatchItem({ event, item, index, wineryId, userId, userRole, transaction }) {
+  const itemKey = item.key || `item-${index + 1}`;
+  let target;
+  if (item.mode === 'LINK') {
+    target = await findBatchLinkTarget({ itemType: item.type, itemId: item.itemId, wineryId, transaction });
+  } else if (item.type === 'TASK') {
+    target = await taskService.createTask({
+      wineryId,
+      userId,
+      userRole,
+      source: 'integration_event',
+      transaction,
+      data: buildTaskPayload(event, item.data)
+    });
+  } else if (item.type === 'NOTICE') {
+    target = await createNoticeItem({ event, wineryId, userId, data: item.data, transaction });
+  } else if (item.type === 'REQUEST') {
+    target = await operationalItemService.createRequest({
+      wineryId,
+      userId,
+      userRole,
+      transaction,
+      data: buildOperationalItemPayload(event, 'REQUEST', item.data)
+    });
+  } else if (item.type === 'NOTE') {
+    target = await operationalItemService.createRecord({
+      wineryId,
+      userId,
+      userRole,
+      transaction,
+      data: buildOperationalItemPayload(event, 'NOTE', item.data)
+    });
+  }
+
+  const link = await addEventItemLink({
+    event,
+    wineryId,
+    userId,
+    itemType: item.type,
+    itemId: target.id,
+    itemKey,
+    linkType: item.mode === 'LINK' ? 'LINKED' : 'CREATED',
+    transaction
+  });
+  return link.toJSON();
+}
+
+async function createItemsFromEvent({ event, wineryId, userId, userRole, data, transaction }) {
+  const items = [];
+  for (let index = 0; index < data.items.length; index += 1) {
+    items.push(await createBatchItem({ event, item: data.items[index], index, wineryId, userId, userRole, transaction }));
+  }
+  const first = items[0];
+  await event.update({
+    status: 'PROCESSED',
+    processingError: null,
+    processedAt: new Date(),
+    reviewedAt: new Date(),
+    reviewedBy: userId,
+    relatedRecordType: first.itemType,
+    relatedRecordId: first.itemId
+  }, { transaction });
+  return { items };
+}
+
+function buildBatchReplay(event, data) {
+  if (data.action !== 'create_items' || event.status !== 'PROCESSED' || !event.LinkedItems?.length) return null;
+  const linkedByKey = new Map(event.LinkedItems.map(item => [item.itemKey, item]));
+  const exactReplay = data.items.length === event.LinkedItems.length && data.items.every((item, index) => {
+    const linked = linkedByKey.get(item.key || `item-${index + 1}`);
+    return linked
+      && linked.itemType === item.type
+      && linked.linkType === (item.mode === 'LINK' ? 'LINKED' : 'CREATED')
+      && (item.mode !== 'LINK' || Number(linked.itemId) === Number(item.itemId));
+  });
+  if (!exactReplay) throw new ValidationError('This integration event was already reviewed with a different item batch.');
+  return {
+    event: serializeIntegrationEvent(event),
+    items: event.LinkedItems.map(item => item.toJSON()),
+    duplicate: true
   };
 }
 
@@ -510,11 +750,13 @@ async function reviewIntegrationEvent({ eventId, wineryId, userId, userRole, dat
     });
   }
 
-  const event = await IntegrationEvent.findOne({ where: { id: eventId, wineryId } });
+  let event = await IntegrationEvent.findOne({ where: { id: eventId, wineryId }, include: getEventInclude() });
   if (!event) {
     throw new NotFoundError('Integration event not found');
   }
   if (TERMINAL_STATUSES.has(event.status)) {
+    const replay = buildBatchReplay(event, data);
+    if (replay) return replay;
     throw new ValidationError('This integration event has already been reviewed.');
   }
 
@@ -522,12 +764,49 @@ async function reviewIntegrationEvent({ eventId, wineryId, userId, userRole, dat
   let related = {};
 
   try {
+    event = await IntegrationEvent.findOne({
+      where: { id: eventId, wineryId },
+      include: getEventInclude(),
+      transaction,
+      lock: transaction.LOCK.UPDATE
+    });
+    if (TERMINAL_STATUSES.has(event.status)) {
+      const replay = buildBatchReplay(event, data);
+      if (replay) {
+        await transaction.commit();
+        return replay;
+      }
+      throw new ValidationError('This integration event has already been reviewed.');
+    }
+    const placementOverrides = data.action === 'publish_notice'
+      ? (data.notice || {})
+      : data.action === 'create_items'
+        ? (data.items.find(item => item.mode !== 'LINK')?.data || {})
+        : (data.task || {});
+    const resolvedConfirmedAreaId = placementOverrides.areaScope === 'ORGANISATION'
+      ? null
+      : (placementOverrides.primaryAreaId || data.confirmedAreaId || event.suggestedAreaId || null);
+    if (resolvedConfirmedAreaId) {
+      const area = await OperationalArea.findOne({
+        where: { id: resolvedConfirmedAreaId, wineryId, isActive: true },
+        attributes: ['id'],
+        transaction
+      });
+      if (!area) throw new ValidationError('Confirmed operational area is invalid or inactive.');
+    }
+    await event.update({
+      confirmedAreaId: resolvedConfirmedAreaId,
+      areaMappingSource: resolvedConfirmedAreaId ? 'MANUAL' : event.areaMappingSource
+    }, { transaction });
+
     if (data.action === 'publish_notice') {
       related = await publishNoticeFromEvent({ event, wineryId, userId, data, transaction });
     } else if (data.action === 'create_task') {
       related = await createTaskFromEvent({ event, wineryId, userId, userRole, data, transaction });
     } else if (data.action === 'link_task') {
       related = await linkEventToTask({ event, wineryId, userId, data, transaction });
+    } else if (data.action === 'create_items') {
+      related = await createItemsFromEvent({ event, wineryId, userId, userRole, data, transaction });
     } else {
       throw new ValidationError('Unsupported integration event review action.');
     }
@@ -535,12 +814,14 @@ async function reviewIntegrationEvent({ eventId, wineryId, userId, userRole, dat
     await transaction.commit();
   } catch (err) {
     if (!transaction.finished) await transaction.rollback();
-    await event.update({
-      status: 'FAILED',
-      processingError: err.message,
-      reviewedAt: new Date(),
-      reviewedBy: userId
-    }).catch(() => {});
+    if (!TERMINAL_STATUSES.has(event.status)) {
+      await event.update({
+        status: 'FAILED',
+        processingError: err.message,
+        reviewedAt: new Date(),
+        reviewedBy: userId
+      }).catch(() => {});
+    }
     throw err;
   }
 

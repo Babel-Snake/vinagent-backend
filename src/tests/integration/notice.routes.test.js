@@ -3,7 +3,7 @@ process.env.NODE_ENV = 'test';
 
 const request = require('supertest');
 const app = require('../../app');
-const { sequelize, Winery, User, Notice, NoticeComment, NoticeTask, Task } = require('../../models');
+const { sequelize, Winery, User, Notice, NoticeAcknowledgement, NoticeComment, NoticeTask, Task } = require('../../models');
 
 describe('Notice Routes', () => {
   const authToken = 'Bearer mock-token';
@@ -53,6 +53,7 @@ describe('Notice Routes', () => {
   });
 
   beforeEach(async () => {
+    await NoticeAcknowledgement.destroy({ where: {}, truncate: true });
     await NoticeComment.destroy({ where: {}, truncate: true });
     await NoticeTask.destroy({ where: {}, truncate: true });
     await Task.destroy({ where: {}, truncate: true });
@@ -85,6 +86,72 @@ describe('Notice Routes', () => {
     expect(res.body.notice.status).toBe('active');
   });
 
+  it('tracks required acknowledgements idempotently and exposes manager completion details', async () => {
+    const dueAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const createRes = await request(app)
+      .post('/api/notices')
+      .set('Authorization', authToken)
+      .send({
+        title: 'New tasting policy',
+        body: 'Read the updated tasting procedure before your next shift.',
+        category: 'STAFF',
+        priority: 'important',
+        requiresAcknowledgement: true,
+        acknowledgementDueAt: dueAt,
+        audienceType: 'all_staff'
+      })
+      .expect(201);
+
+    expect(createRes.body.notice.requiresAcknowledgement).toBe(true);
+    expect(createRes.body.notice.acknowledgement.expectedCount).toBe(2);
+    await User.update({ role: 'staff' }, { where: { id: manager.id } });
+
+    const first = await request(app)
+      .put(`/api/notices/${createRes.body.notice.id}/acknowledgement`)
+      .set('Authorization', authToken)
+      .expect(200);
+    expect(first.body.notice.acknowledgement.currentUserAcknowledgedAt).toBeTruthy();
+
+    await request(app)
+      .put(`/api/notices/${createRes.body.notice.id}/acknowledgement`)
+      .set('Authorization', authToken)
+      .expect(200);
+    expect(await NoticeAcknowledgement.count({ where: { noticeId: createRes.body.notice.id, userId: manager.id } })).toBe(1);
+
+    await request(app)
+      .get(`/api/notices/${createRes.body.notice.id}/acknowledgements`)
+      .set('Authorization', authToken)
+      .expect(403);
+
+    await User.update({ role: 'manager' }, { where: { id: manager.id } });
+    const summary = await request(app)
+      .get(`/api/notices/${createRes.body.notice.id}/acknowledgements`)
+      .set('Authorization', authToken)
+      .expect(200);
+    expect(summary.body.acknowledgement).toMatchObject({ expectedCount: 2, acknowledgedCount: 1, outstandingCount: 1, completionRate: 50 });
+    expect(summary.body.acknowledgement.recipients).toHaveLength(2);
+  });
+
+  it('does not let a manager acknowledge a notice when they are outside its directed audience', async () => {
+    const notice = await Notice.create({
+      title: 'Staff-only acknowledgement',
+      body: 'Only the selected staff member is expected to acknowledge.',
+      category: 'STAFF',
+      priority: 'normal',
+      requiresAcknowledgement: true,
+      audienceType: 'users',
+      audienceUserIds: [staff.id],
+      wineryId: winery.id,
+      createdBy: manager.id
+    });
+
+    await request(app)
+      .put(`/api/notices/${notice.id}/acknowledgement`)
+      .set('Authorization', authToken)
+      .expect(403);
+    expect(await NoticeAcknowledgement.count({ where: { noticeId: notice.id } })).toBe(0);
+  });
+
   it('prevents staff from creating notices but lets staff view them', async () => {
     await Notice.create({
       title: 'Tasting flight changed',
@@ -115,6 +182,45 @@ describe('Notice Routes', () => {
 
     expect(listRes.body.notices).toHaveLength(1);
     expect(listRes.body.notices[0].title).toBe('Tasting flight changed');
+  });
+
+  it('returns stable pagination metadata and distinct notice pages', async () => {
+    const firstCreatedAt = new Date('2026-07-01T08:00:00.000Z');
+    const secondCreatedAt = new Date('2026-07-01T08:01:00.000Z');
+    const firstNotice = await Notice.create({
+      title: 'NOTICE_PAGINATION_MATCH first',
+      body: 'First pagination notice.',
+      category: 'GENERAL',
+      priority: 'normal',
+      wineryId: winery.id,
+      createdBy: manager.id,
+      createdAt: firstCreatedAt,
+      updatedAt: firstCreatedAt
+    });
+    const secondNotice = await Notice.create({
+      title: 'NOTICE_PAGINATION_MATCH second',
+      body: 'Second pagination notice.',
+      category: 'GENERAL',
+      priority: 'normal',
+      wineryId: winery.id,
+      createdBy: manager.id,
+      createdAt: secondCreatedAt,
+      updatedAt: secondCreatedAt
+    });
+
+    const firstPage = await request(app)
+      .get('/api/notices?search=NOTICE_PAGINATION_MATCH&sortBy=oldest&page=1&pageSize=1')
+      .set('Authorization', authToken)
+      .expect(200);
+    const secondPage = await request(app)
+      .get('/api/notices?search=NOTICE_PAGINATION_MATCH&sortBy=oldest&page=2&pageSize=1')
+      .set('Authorization', authToken)
+      .expect(200);
+
+    expect(firstPage.body.pagination).toEqual({ page: 1, pageSize: 1, total: 2, totalPages: 2 });
+    expect(secondPage.body.pagination).toEqual({ page: 2, pageSize: 1, total: 2, totalPages: 2 });
+    expect(firstPage.body.notices.map((notice) => notice.id)).toEqual([firstNotice.id]);
+    expect(secondPage.body.notices.map((notice) => notice.id)).toEqual([secondNotice.id]);
   });
 
   it('filters notices by directed audience for non-manager users', async () => {

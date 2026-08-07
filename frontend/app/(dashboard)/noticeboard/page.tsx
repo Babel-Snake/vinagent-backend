@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useEffectEvent, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
+    acknowledgeNotice,
     archiveNotice,
     createNoticeComment,
     createNotice,
@@ -19,12 +20,24 @@ import {
     NoticeComment,
     NoticeInput,
     NoticePriority,
+    OperationalArea,
+    Pagination as PaginationMeta,
+    fetchOperationalAreas,
     Staff,
+    UserProfile,
     unlinkNoticeTask,
     updateNotice
 } from '../../../lib/api';
 import CalendarEventPicker, { CalendarEventSelection } from '../../../components/CalendarEventPicker';
 import AttachmentPanel from '../../../components/AttachmentPanel';
+import ProjectLinksPanel from '../../../components/ProjectLinksPanel';
+import Pagination from '../../../components/Pagination';
+import TaskLinkPicker from '../../../components/TaskLinkPicker';
+import ConfirmDialog from '../../../components/ui/ConfirmDialog';
+import { clientLogger } from '../../../lib/clientLogger';
+import { operationalLabel } from '../../../lib/operationalPresentation';
+import InvolvementBadge from '../../../components/InvolvementBadge';
+import { involvementSurfaceClass, noticeInvolvement, taskInvolvement } from '../../../lib/involvement';
 
 const NOTICE_CATEGORIES: NoticeCategory[] = [
     'GENERAL',
@@ -123,15 +136,20 @@ export default function NoticeBoardPage() {
     const searchParams = useSearchParams();
     const [notices, setNotices] = useState<Notice[]>([]);
     const [users, setUsers] = useState<Staff[]>([]);
+    const [areas, setAreas] = useState<OperationalArea[]>([]);
     const [userRole, setUserRole] = useState<string | null>(null);
+    const [profile, setProfile] = useState<UserProfile | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [showAdvanced, setShowAdvanced] = useState(false);
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [editingNotice, setEditingNotice] = useState<Notice | null>(null);
     const [viewingNotice, setViewingNotice] = useState<Notice | null>(null);
+    const [noticePendingArchive, setNoticePendingArchive] = useState<Notice | null>(null);
     const [archivingId, setArchivingId] = useState<number | null>(null);
-    const [pagination, setPagination] = useState({ total: 0, page: 1, pageSize: 50, totalPages: 1 });
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(50);
+    const [pagination, setPagination] = useState<PaginationMeta>({ total: 0, page: 1, pageSize: 50, totalPages: 1 });
     const [filters, setFilters] = useState({
         search: '',
         category: 'all',
@@ -139,6 +157,7 @@ export default function NoticeBoardPage() {
         status: 'active',
         pinned: 'all',
         authorId: 'all',
+        areaId: 'all',
         sortBy: 'default',
         dateFrom: '',
         dateTo: '',
@@ -146,21 +165,25 @@ export default function NoticeBoardPage() {
         effectiveTo: ''
     });
 
-    const canManage = userRole === 'manager' || userRole === 'admin';
+    const canManage = userRole === 'manager' || userRole === 'admin'
+        || areas.some(area => area.myMembership?.membershipRole === 'MANAGER');
 
     useEffect(() => {
         let cancelled = false;
 
         async function loadUserContext() {
             try {
-                const [profile, staff] = await Promise.all([
+                const [profile, staff, operationalAreas] = await Promise.all([
                     getMyProfile(),
-                    getUsers().catch(() => [])
+                    getUsers().catch(() => []),
+                    fetchOperationalAreas().catch(() => [])
                 ]);
 
                 if (!cancelled) {
                     setUserRole(profile?.user?.role || null);
+                    setProfile(profile?.user || null);
                     setUsers(staff);
+                    setAreas(operationalAreas);
                 }
             } catch (err) {
                 if (!cancelled) {
@@ -178,7 +201,7 @@ export default function NoticeBoardPage() {
     async function loadNotices() {
         try {
             setLoading(true);
-            const data = await fetchNotices(filters);
+            const data = await fetchNotices({ ...filters, page, pageSize });
             setNotices(data.notices);
             setPagination(data.pagination);
             setError('');
@@ -189,13 +212,17 @@ export default function NoticeBoardPage() {
         }
     }
 
+    const loadNoticesFromEffect = useEffectEvent(() => {
+        void loadNotices();
+    });
+
     useEffect(() => {
         const timer = setTimeout(() => {
-            loadNotices();
+            loadNoticesFromEffect();
         }, 300);
 
         return () => clearTimeout(timer);
-    }, [filters]);
+    }, [filters, page, pageSize]);
 
     useEffect(() => {
         const noticeId = searchParams.get('noticeId');
@@ -221,28 +248,36 @@ export default function NoticeBoardPage() {
     }, [searchParams]);
 
     const stats = useMemo(() => ({
-        loaded: notices.length,
+        matching: pagination.total,
         pinned: notices.filter(notice => notice.isPinned).length,
         urgent: notices.filter(notice => notice.priority === 'urgent').length,
         important: notices.filter(notice => notice.priority === 'important').length,
         expired: notices.filter(notice => notice.isExpired).length,
         archived: notices.filter(notice => notice.isArchived).length
-    }), [notices]);
+    }), [notices, pagination.total]);
 
     function handleFilterChange(field: string, value: string) {
         setFilters(prev => ({ ...prev, [field]: value }));
+        setPage(1);
     }
 
-    async function handleArchive(notice: Notice) {
-        const confirmed = window.confirm(`Archive "${notice.title}"?`);
-        if (!confirmed) return;
+    function handlePageChange(nextPage: number) {
+        const boundedPage = Math.min(Math.max(nextPage, 1), Math.max(pagination.totalPages, 1));
+        if (boundedPage !== page) setPage(boundedPage);
+    }
 
+    function handlePageSizeChange(nextPageSize: number) {
+        setPageSize(nextPageSize);
+        setPage(1);
+    }
+
+    async function archivePendingNotice() {
+        const notice = noticePendingArchive;
+        if (!notice) return;
         setArchivingId(notice.id);
         try {
             await archiveNotice(notice.id);
             await loadNotices();
-        } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to archive notice');
         } finally {
             setArchivingId(null);
         }
@@ -252,7 +287,7 @@ export default function NoticeBoardPage() {
         <div className="page-shell">
             <div className="page-header">
                 <div>
-                    <h1 className="text-2xl font-semibold text-[#1c231f]">NoticeBoard</h1>
+                    <h1 className="page-title">Noticeboard</h1>
                     <p className="page-kicker">
                         Shared internal notices, operational updates, and time-aware context for the winery team.
                     </p>
@@ -277,14 +312,20 @@ export default function NoticeBoardPage() {
                 </div>
             )}
 
-            <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-                <NoticeMetric label="Loaded" value={stats.loaded} tone="slate" />
+            <section className="mb-5" aria-labelledby="notice-signals-heading">
+                <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                    <h2 id="notice-signals-heading" className="text-sm font-bold uppercase tracking-wider text-[#344039]">Current page signals</h2>
+                    <p className="text-xs text-[var(--muted)]">The matching total is exact; the remaining signals describe this page.</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+                <NoticeMetric label="Matching" value={stats.matching} tone="slate" />
                 <NoticeMetric label="Pinned" value={stats.pinned} tone="brand" />
                 <NoticeMetric label="Urgent" value={stats.urgent} tone="red" />
                 <NoticeMetric label="Important" value={stats.important} tone="amber" />
                 <NoticeMetric label="Expired" value={stats.expired} tone="orange" />
                 <NoticeMetric label="Archived" value={stats.archived} tone="teal" />
-            </div>
+                </div>
+            </section>
 
             <div className="surface-panel mb-5 p-4">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
@@ -362,6 +403,18 @@ export default function NoticeBoardPage() {
                                     {NOTICE_CATEGORIES.map(category => (
                                         <option key={category} value={category}>{categoryLabel(category)}</option>
                                     ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="mb-1.5 block text-xs font-semibold uppercase text-[var(--muted)]">Operational Area</label>
+                                <select
+                                    className="form-control"
+                                    value={filters.areaId}
+                                    onChange={(e) => handleFilterChange('areaId', e.target.value)}
+                                >
+                                    <option value="all">All visible areas</option>
+                                    <option value="organisation">Organisation-wide</option>
+                                    {areas.map(area => <option key={area.id} value={area.id}>{area.name}</option>)}
                                 </select>
                             </div>
                             <div>
@@ -460,26 +513,35 @@ export default function NoticeBoardPage() {
                         <NoticeCard
                             key={notice.id}
                             notice={notice}
+                            profile={profile}
                             users={users}
                             canManage={canManage}
                             archiving={archivingId === notice.id}
                             onOpen={() => setViewingNotice(notice)}
                             onEdit={() => setEditingNotice(notice)}
-                            onArchive={() => handleArchive(notice)}
+                            onArchive={() => setNoticePendingArchive(notice)}
                             onRefresh={loadNotices}
                         />
                     ))}
                 </div>
             )}
 
-            <div className="mt-4 text-sm text-[var(--muted)]">
-                Showing {notices.length} of {pagination.total} notice{pagination.total === 1 ? '' : 's'}.
-            </div>
+            {!loading && (
+                <Pagination
+                    pagination={pagination}
+                    itemLabel="notice"
+                    onPageChange={handlePageChange}
+                    onPageSizeChange={handlePageSizeChange}
+                    pageSizeOptions={[20, 50, 100]}
+                />
+            )}
 
             {showCreateModal && (
                 <NoticeFormModal
                     mode="create"
                     users={users}
+                    areas={areas}
+                    canManageOrganisation={userRole === 'manager' || userRole === 'admin'}
                     onClose={() => setShowCreateModal(false)}
                     onSaved={async () => {
                         setShowCreateModal(false);
@@ -491,6 +553,7 @@ export default function NoticeBoardPage() {
             {viewingNotice && (
                 <NoticeDetailModal
                     notice={viewingNotice}
+                    profile={profile}
                     users={users}
                     canManage={canManage}
                     onClose={() => setViewingNotice(null)}
@@ -506,6 +569,8 @@ export default function NoticeBoardPage() {
                     mode="edit"
                     notice={editingNotice}
                     users={users}
+                    areas={areas}
+                    canManageOrganisation={userRole === 'manager' || userRole === 'admin'}
                     onClose={() => setEditingNotice(null)}
                     onSaved={async () => {
                         setEditingNotice(null);
@@ -513,12 +578,23 @@ export default function NoticeBoardPage() {
                     }}
                 />
             )}
+
+            <ConfirmDialog
+                open={Boolean(noticePendingArchive)}
+                onClose={() => setNoticePendingArchive(null)}
+                onConfirm={archivePendingNotice}
+                title="Archive notice?"
+                description={noticePendingArchive ? `“${noticePendingArchive.title}” will be removed from active noticeboard views.` : ''}
+                confirmLabel="Archive notice"
+                destructive
+            />
         </div>
     );
 }
 
 function NoticeCard({
     notice,
+    profile,
     users,
     canManage,
     archiving,
@@ -528,6 +604,7 @@ function NoticeCard({
     onRefresh
 }: {
     notice: Notice;
+    profile?: UserProfile | null;
     users: Staff[];
     canManage: boolean;
     archiving: boolean;
@@ -536,8 +613,10 @@ function NoticeCard({
     onArchive: () => void;
     onRefresh: () => void | Promise<void>;
 }) {
-    const [taskIdInput, setTaskIdInput] = useState('');
     const [linking, setLinking] = useState(false);
+    const [linkError, setLinkError] = useState<string | null>(null);
+    const [actionError, setActionError] = useState<string | null>(null);
+    const [acknowledging, setAcknowledging] = useState(false);
     const author = notice.Author?.displayName || notice.Author?.email || 'Unknown author';
     const created = formatDate(notice.createdAt);
     const effective = formatDate(notice.effectiveFrom);
@@ -545,21 +624,17 @@ function NoticeCard({
     const archived = formatDateTime(notice.archivedAt);
     const linkedTasks = notice.LinkedTasks || [];
     const audience = audienceLabel(notice, users);
+    const involvement = noticeInvolvement(notice, profile);
 
-    async function handleLinkTask() {
-        const taskId = Number(taskIdInput);
-        if (!Number.isInteger(taskId) || taskId < 1) {
-            alert('Enter a valid task ID.');
-            return;
-        }
-
+    async function handleLinkTask(taskId: number) {
         setLinking(true);
+        setLinkError(null);
+        setActionError(null);
         try {
             await linkNoticeTask(notice.id, taskId);
-            setTaskIdInput('');
             await onRefresh();
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to link task');
+            setLinkError(err instanceof Error ? err.message : 'Failed to link task');
         } finally {
             setLinking(false);
         }
@@ -567,13 +642,27 @@ function NoticeCard({
 
     async function handleUnlinkTask(taskId: number) {
         setLinking(true);
+        setActionError(null);
         try {
             await unlinkNoticeTask(notice.id, taskId);
             await onRefresh();
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to unlink task');
+            setActionError(err instanceof Error ? err.message : 'Failed to unlink task');
         } finally {
             setLinking(false);
+        }
+    }
+
+    async function handleAcknowledge() {
+        setAcknowledging(true);
+        setActionError(null);
+        try {
+            await acknowledgeNotice(notice.id);
+            await onRefresh();
+        } catch (err) {
+            setActionError(err instanceof Error ? err.message : 'Failed to acknowledge notice');
+        } finally {
+            setAcknowledging(false);
         }
     }
 
@@ -586,15 +675,17 @@ function NoticeCard({
                 : 'border-[var(--border)] bg-[var(--surface)]';
 
     return (
-        <article className={`rounded-lg border p-4 shadow-sm ${cardTone}`}>
+        <article className={`rounded-lg border p-4 shadow-sm ${cardTone} ${involvementSurfaceClass(involvement)}`}>
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div className="min-w-0 flex-1">
                     <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <InvolvementBadge signal={involvement} />
                         {notice.isPinned && <NoticeBadge tone="brand" label="Pinned" />}
                         <NoticeBadge tone={notice.priority === 'urgent' ? 'red' : notice.priority === 'important' ? 'amber' : 'slate'} label={priorityLabel(notice.priority)} />
                         <NoticeBadge tone="teal" label={categoryLabel(notice.category)} />
                         {notice.isExpired && <NoticeBadge tone="orange" label="Expired" />}
                         {notice.isArchived && <NoticeBadge tone="slate" label="Archived" />}
+                        {notice.requiresAcknowledgement && <NoticeBadge tone={notice.acknowledgement?.isOverdue ? 'red' : 'brand'} label="Acknowledgement required" />}
                     </div>
                     <button
                         type="button"
@@ -616,11 +707,37 @@ function NoticeCard({
                     <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs font-medium text-[var(--muted)]">
                         <span>By {author}</span>
                         <span>To {audience}</span>
+                        <span>{notice.areaScope === 'AREAS' && notice.OperationalAreas?.length
+                            ? notice.OperationalAreas.map(area => area.name).join(' + ')
+                            : 'Organisation-wide'}</span>
                         {created && <span>Created {created}</span>}
                         {effective && <span>Starts {effective}</span>}
                         {expires && <span>Ends {expires}</span>}
                         {archived && <span>Archived {archived}</span>}
                     </div>
+                    {actionError && <p role="alert" className="mt-3 text-sm text-red-700">{actionError}</p>}
+                    {notice.requiresAcknowledgement && (
+                        <div className={`mt-4 rounded-lg border p-3 ${notice.acknowledgement?.isOverdue ? 'border-red-200 bg-red-50' : 'border-lime-200 bg-lime-50'}`}>
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div>
+                                    <div className="text-sm font-semibold text-[#344039]">
+                                        {notice.acknowledgement?.acknowledgedCount || 0} of {notice.acknowledgement?.expectedCount || 0} acknowledged
+                                    </div>
+                                    <div className="mt-0.5 text-xs text-[var(--muted)]">
+                                        {notice.acknowledgementDueAt ? `Due ${formatDate(notice.acknowledgementDueAt)}` : 'No acknowledgement deadline'}
+                                    </div>
+                                </div>
+                                {notice.acknowledgement?.currentUserExpected && !notice.acknowledgement.currentUserAcknowledgedAt && !notice.isArchived && (
+                                    <button type="button" onClick={handleAcknowledge} disabled={acknowledging} className="btn-primary">
+                                        {acknowledging ? 'Acknowledging...' : 'I have read this'}
+                                    </button>
+                                )}
+                                {notice.acknowledgement?.currentUserAcknowledgedAt && (
+                                    <span className="text-sm font-semibold text-emerald-700">Acknowledged</span>
+                                )}
+                            </div>
+                        </div>
+                    )}
                     <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
                         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                             <div className="text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -634,10 +751,13 @@ function NoticeCard({
                             <div className="text-sm text-slate-600">No tasks linked to this notice yet.</div>
                         ) : (
                             <div className="flex flex-wrap gap-2">
-                                {linkedTasks.map(task => (
-                                    <div key={task.id} className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700">
+                                {linkedTasks.map(task => {
+                                    const taskSignal = taskInvolvement(task, profile);
+                                    return (
+                                    <div key={task.id} className={`flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 ${involvementSurfaceClass(taskSignal)}`}>
                                         <span className="font-semibold">Task #{task.id}</span>
-                                        <span>{task.subType ? task.subType.replace(/_/g, ' ') : task.category}</span>
+                                        <InvolvementBadge signal={taskSignal} compact />
+                                        <span>{operationalLabel(task.subType || task.category)}</span>
                                         <span className="rounded bg-slate-100 px-1.5 py-0.5 font-semibold uppercase">{task.status}</span>
                                         {canManage && (
                                             <button
@@ -651,22 +771,17 @@ function NoticeCard({
                                             </button>
                                         )}
                                     </div>
-                                ))}
+                                );})}
                             </div>
                         )}
                         {canManage && (
-                            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-                                <input
-                                    type="number"
-                                    min="1"
-                                    className="form-control sm:max-w-36"
-                                    value={taskIdInput}
-                                    onChange={(e) => setTaskIdInput(e.target.value)}
-                                    placeholder="Task ID"
+                            <div className="mt-3 max-w-xl">
+                                <TaskLinkPicker
+                                    linkedTaskIds={linkedTasks.map(task => task.id)}
+                                    onSelect={handleLinkTask}
+                                    disabled={linking}
                                 />
-                                <button type="button" onClick={handleLinkTask} disabled={linking || !taskIdInput.trim()} className="btn-secondary">
-                                    Link Task
-                                </button>
+                                {linkError && <p role="alert" className="mt-2 text-sm text-red-700">{linkError}</p>}
                             </div>
                         )}
                     </div>
@@ -699,12 +814,14 @@ function NoticeCard({
 
 function NoticeDetailModal({
     notice,
+    profile,
     users,
     canManage,
     onClose,
     onEdit
 }: {
     notice: Notice;
+    profile?: UserProfile | null;
     users: Staff[];
     canManage: boolean;
     onClose: () => void;
@@ -717,6 +834,7 @@ function NoticeDetailModal({
     const [commentError, setCommentError] = useState('');
     const [commentsUnavailable, setCommentsUnavailable] = useState(false);
     const [deletingCommentId, setDeletingCommentId] = useState<number | null>(null);
+    const [commentPendingDeletion, setCommentPendingDeletion] = useState<number | null>(null);
     const [replyingToCommentId, setReplyingToCommentId] = useState<number | null>(null);
     const [replyBody, setReplyBody] = useState('');
     const [replySavingCommentId, setReplySavingCommentId] = useState<number | null>(null);
@@ -728,6 +846,7 @@ function NoticeDetailModal({
     const linkedEvents = notice.CalendarEvents || [];
     const commentCount = useMemo(() => countNoticeComments(comments), [comments]);
     const audience = audienceLabel(notice, users);
+    const involvement = noticeInvolvement(notice, profile);
 
     useEffect(() => {
         let cancelled = false;
@@ -742,7 +861,7 @@ function NoticeDetailModal({
                 }
             } catch (err) {
                 if (!cancelled) {
-                    console.error('Failed to load notice comments', err);
+                    clientLogger.error('Failed to load notice comments', err);
                     setComments([]);
                     setCommentsUnavailable(true);
                     setCommentError('');
@@ -799,10 +918,9 @@ function NoticeDetailModal({
         }
     }
 
-    async function handleDeleteComment(commentId: number) {
-        const confirmed = window.confirm('Delete this notice comment?');
-        if (!confirmed) return;
-
+    async function deletePendingComment() {
+        const commentId = commentPendingDeletion;
+        if (!commentId) return;
         setDeletingCommentId(commentId);
         try {
             await deleteNoticeComment(notice.id, commentId);
@@ -814,7 +932,9 @@ function NoticeDetailModal({
                 })));
             setCommentError('');
         } catch (err) {
-            setCommentError(err instanceof Error ? err.message : 'Failed to delete comment');
+            const message = err instanceof Error ? err.message : 'Failed to delete comment';
+            setCommentError(message);
+            throw new Error(message);
         } finally {
             setDeletingCommentId(null);
         }
@@ -842,7 +962,7 @@ function NoticeDetailModal({
                     {canManage && (
                         <button
                             type="button"
-                            onClick={() => handleDeleteComment(reply.id)}
+                            onClick={() => setCommentPendingDeletion(reply.id)}
                             disabled={deletingCommentId === reply.id}
                             className="rounded px-2 py-1 text-xs font-bold text-red-600 hover:bg-red-50 disabled:opacity-50"
                         >
@@ -888,7 +1008,7 @@ function NoticeDetailModal({
                         {canManage && (
                             <button
                                 type="button"
-                                onClick={() => handleDeleteComment(comment.id)}
+                                onClick={() => setCommentPendingDeletion(comment.id)}
                                 disabled={deletingCommentId === comment.id}
                                 className="rounded px-2 py-1 text-xs font-bold text-red-600 hover:bg-red-50 disabled:opacity-50"
                             >
@@ -946,22 +1066,28 @@ function NoticeDetailModal({
     }
 
     return (
+        <>
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
-            <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg bg-white shadow-xl">
+            <div className={`flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-white shadow-xl ${involvementSurfaceClass(involvement)}`}>
                 <div className="border-b border-[var(--border)] px-6 py-5">
                     <div className="flex items-start justify-between gap-4">
                         <div className="min-w-0">
                             <div className="mb-2 flex flex-wrap items-center gap-2">
+                                <InvolvementBadge signal={involvement} />
                                 {notice.isPinned && <NoticeBadge tone="brand" label="Pinned" />}
                                 <NoticeBadge tone={notice.priority === 'urgent' ? 'red' : notice.priority === 'important' ? 'amber' : 'slate'} label={priorityLabel(notice.priority)} />
                                 <NoticeBadge tone="teal" label={categoryLabel(notice.category)} />
                                 {notice.isExpired && <NoticeBadge tone="orange" label="Expired" />}
                                 {notice.isArchived && <NoticeBadge tone="slate" label="Archived" />}
+                                {notice.requiresAcknowledgement && <NoticeBadge tone={notice.acknowledgement?.isOverdue ? 'red' : 'brand'} label={`${notice.acknowledgement?.completionRate || 0}% acknowledged`} />}
                             </div>
                             <h2 className="break-words text-xl font-semibold text-[#1c231f]">{notice.title}</h2>
                             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs font-medium text-[var(--muted)]">
                                 <span>By {author}</span>
                                 <span>To {audience}</span>
+                                <span>{notice.areaScope === 'AREAS' && notice.OperationalAreas?.length
+                                    ? notice.OperationalAreas.map(area => area.name).join(' + ')
+                                    : 'Organisation-wide'}</span>
                                 {created && <span>Created {created}</span>}
                                 {effective && <span>Starts {effective}</span>}
                                 {expires && <span>Ends {expires}</span>}
@@ -991,6 +1117,10 @@ function NoticeDetailModal({
                         />
                     </div>
 
+                    <div className="mt-6">
+                        <ProjectLinksPanel itemType="NOTICE" itemId={notice.id} compact />
+                    </div>
+
                     {linkedTasks.length > 0 && (
                         <div className="mt-6 rounded-lg border border-slate-200 bg-slate-50 p-3">
                             <div className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Linked Tasks</div>
@@ -998,7 +1128,7 @@ function NoticeDetailModal({
                                 {linkedTasks.map(task => (
                                     <div key={task.id} className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700">
                                         <span className="font-semibold">Task #{task.id}</span>
-                                        <span className="ml-2">{task.subType ? task.subType.replace(/_/g, ' ') : task.category}</span>
+                                        <span className="ml-2">{operationalLabel(task.subType || task.category)}</span>
                                     </div>
                                 ))}
                             </div>
@@ -1085,6 +1215,16 @@ function NoticeDetailModal({
                 </div>
             </div>
         </div>
+        <ConfirmDialog
+            open={commentPendingDeletion !== null}
+            onClose={() => setCommentPendingDeletion(null)}
+            onConfirm={deletePendingComment}
+            title="Delete comment?"
+            description="This comment will be permanently removed from the notice discussion."
+            confirmLabel="Delete comment"
+            destructive
+        />
+        </>
     );
 }
 
@@ -1092,12 +1232,16 @@ function NoticeFormModal({
     mode,
     notice,
     users,
+    areas,
+    canManageOrganisation,
     onClose,
     onSaved
 }: {
     mode: 'create' | 'edit';
     notice?: Notice;
     users: Staff[];
+    areas: OperationalArea[];
+    canManageOrganisation: boolean;
     onClose: () => void;
     onSaved: () => void | Promise<void>;
 }) {
@@ -1106,12 +1250,23 @@ function NoticeFormModal({
     const [category, setCategory] = useState<NoticeCategory>(notice?.category || 'GENERAL');
     const [priority, setPriority] = useState<NoticePriority>(notice?.priority || 'normal');
     const [isPinned, setIsPinned] = useState(Boolean(notice?.isPinned));
+    const [requiresAcknowledgement, setRequiresAcknowledgement] = useState(Boolean(notice?.requiresAcknowledgement));
+    const [acknowledgementDueAt, setAcknowledgementDueAt] = useState(toDateInputValue(notice?.acknowledgementDueAt));
     const [effectiveFrom, setEffectiveFrom] = useState(toDateInputValue(notice?.effectiveFrom));
     const [expiresAt, setExpiresAt] = useState(toDateInputValue(notice?.expiresAt));
     const [isArchived, setIsArchived] = useState(Boolean(notice?.isArchived));
     const [audienceType, setAudienceType] = useState<NoticeAudienceType>(notice?.audienceType || 'all_staff');
     const [audienceRoles, setAudienceRoles] = useState<string[]>(notice?.audienceRoles || ['staff']);
     const [audienceUserIds, setAudienceUserIds] = useState<string[]>((notice?.audienceUserIds || []).map(String));
+    const selectableAreas = canManageOrganisation
+        ? areas
+        : areas.filter(area => area.myMembership?.membershipRole === 'MANAGER');
+    const existingAreaIds = (notice?.OperationalAreas || []).map(area => area.id);
+    const [areaScope, setAreaScope] = useState<'ORGANISATION' | 'AREAS'>(
+        notice?.areaScope || (canManageOrganisation ? 'ORGANISATION' : 'AREAS')
+    );
+    const [primaryAreaId, setPrimaryAreaId] = useState<number | ''>(existingAreaIds[0] || selectableAreas[0]?.id || '');
+    const [linkedAreaIds, setLinkedAreaIds] = useState<number[]>(existingAreaIds.slice(1));
     const [selectedCalendarEvents, setSelectedCalendarEvents] = useState<CalendarEventSelection[]>(
         (notice?.CalendarEvents || []).map(event => ({
             id: event.id,
@@ -1125,6 +1280,7 @@ function NoticeFormModal({
         }))
     );
     const [saving, setSaving] = useState(false);
+    const [formError, setFormError] = useState<string | null>(null);
 
     function toggleAudienceRole(role: string) {
         setAudienceRoles(prev => prev.includes(role) ? prev.filter(value => value !== role) : [...prev, role]);
@@ -1137,17 +1293,22 @@ function NoticeFormModal({
 
     async function handleSubmit(event: React.FormEvent) {
         event.preventDefault();
+        setFormError(null);
 
         if (!title.trim() || !body.trim()) {
-            alert('Title and body are required.');
+            setFormError('Title and body are required.');
             return;
         }
         if (audienceType === 'roles' && audienceRoles.length === 0) {
-            alert('Choose at least one role for this notice.');
+            setFormError('Choose at least one role for this notice.');
             return;
         }
         if (audienceType === 'users' && audienceUserIds.length === 0) {
-            alert('Choose at least one staff member for this notice.');
+            setFormError('Choose at least one staff member for this notice.');
+            return;
+        }
+        if (areaScope === 'AREAS' && primaryAreaId === '') {
+            setFormError('Choose at least one operational area.');
             return;
         }
 
@@ -1159,9 +1320,14 @@ function NoticeFormModal({
                 category,
                 priority,
                 isPinned,
+                requiresAcknowledgement,
+                acknowledgementDueAt: requiresAcknowledgement ? fromEndDateValue(acknowledgementDueAt) : null,
                 audienceType,
                 audienceRoles: audienceType === 'roles' ? audienceRoles : [],
                 audienceUserIds: audienceType === 'users' ? audienceUserIds.map(id => Number(id)) : [],
+                areaScope,
+                primaryAreaId: areaScope === 'AREAS' && primaryAreaId !== '' ? primaryAreaId : null,
+                linkedAreaIds: areaScope === 'AREAS' ? linkedAreaIds : [],
                 calendarEventIds: selectedCalendarEvents.map(event => event.id),
                 effectiveFrom: fromStartDateValue(effectiveFrom),
                 expiresAt: fromEndDateValue(expiresAt)
@@ -1178,7 +1344,7 @@ function NoticeFormModal({
 
             await onSaved();
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to save notice');
+            setFormError(err instanceof Error ? err.message : 'Failed to save notice');
         } finally {
             setSaving(false);
         }
@@ -1198,6 +1364,8 @@ function NoticeFormModal({
                         </svg>
                     </button>
                 </div>
+
+                {formError && <p role="alert" className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{formError}</p>}
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
@@ -1274,6 +1442,44 @@ function NoticeFormModal({
                         )}
                     </div>
 
+                    <div className="rounded-lg border border-[var(--border)] bg-[#f8faf6] p-3">
+                        <label className="mb-1.5 block text-xs font-bold uppercase text-[var(--muted)]">Operational Placement</label>
+                        <select
+                            className="form-control"
+                            value={areaScope}
+                            onChange={(e) => setAreaScope(e.target.value as 'ORGANISATION' | 'AREAS')}
+                        >
+                            {canManageOrganisation && <option value="ORGANISATION">Organisation-wide</option>}
+                            <option value="AREAS" disabled={selectableAreas.length === 0}>Selected areas</option>
+                        </select>
+                        {areaScope === 'AREAS' && (
+                            <div className="mt-3 space-y-3">
+                                <select
+                                    className="form-control"
+                                    value={primaryAreaId}
+                                    onChange={(e) => setPrimaryAreaId(e.target.value ? Number(e.target.value) : '')}
+                                >
+                                    <option value="">Choose primary area</option>
+                                    {selectableAreas.map(area => <option key={area.id} value={area.id}>{area.name}</option>)}
+                                </select>
+                                <div className="flex flex-wrap gap-3">
+                                    {selectableAreas.filter(area => area.id !== Number(primaryAreaId)).map(area => (
+                                        <label key={area.id} className="flex items-center gap-2 text-sm text-[#344039]">
+                                            <input
+                                                type="checkbox"
+                                                checked={linkedAreaIds.includes(area.id)}
+                                                onChange={(e) => setLinkedAreaIds(current => e.target.checked
+                                                    ? [...current, area.id]
+                                                    : current.filter(id => id !== area.id))}
+                                            />
+                                            {area.name}
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
                     <CalendarEventPicker
                         label="Linked Events"
                         selected={selectedCalendarEvents}
@@ -1324,6 +1530,17 @@ function NoticeFormModal({
                                 onChange={(e) => setExpiresAt(e.target.value)}
                             />
                         </div>
+                        {requiresAcknowledgement && (
+                            <div>
+                                <label className="mb-1.5 block text-xs font-bold uppercase text-[var(--muted)]">Acknowledgement Due</label>
+                                <input
+                                    type="date"
+                                    className="form-control"
+                                    value={acknowledgementDueAt}
+                                    onChange={(e) => setAcknowledgementDueAt(e.target.value)}
+                                />
+                            </div>
+                        )}
                     </div>
 
                     <div className="flex flex-wrap gap-4 rounded-lg border border-[var(--border)] bg-[#f8faf6] p-3">
@@ -1344,6 +1561,15 @@ function NoticeFormModal({
                                 className="h-4 w-4 rounded border-gray-300"
                             />
                             Mark urgent
+                        </label>
+                        <label className="flex items-center gap-2 text-sm font-medium text-[#344039]">
+                            <input
+                                type="checkbox"
+                                checked={requiresAcknowledgement}
+                                onChange={(e) => setRequiresAcknowledgement(e.target.checked)}
+                                className="h-4 w-4 rounded border-gray-300"
+                            />
+                            Require acknowledgement
                         </label>
                         {mode === 'edit' && (
                             <label className="flex items-center gap-2 text-sm font-medium text-[#344039]">

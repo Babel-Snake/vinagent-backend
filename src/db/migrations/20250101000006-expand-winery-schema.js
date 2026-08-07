@@ -124,7 +124,24 @@ module.exports = {
         // 'section' from old table can be migrated to 'tags' if we wanted, or just dropped/kept. I'll key 'section' as a legacy field or map it.
         // Let's keep 'section' for now as it maps to 'category' basically.
 
-        // 8. Create WineryIntegrationConfigs
+        // 8. Create WinerySops
+        await queryInterface.createTable('WinerySops', {
+            id: { allowNull: false, autoIncrement: true, primaryKey: true, type: Sequelize.INTEGER },
+            wineryId: {
+                type: Sequelize.INTEGER,
+                allowNull: false,
+                references: { model: 'Wineries', key: 'id' },
+                onUpdate: 'CASCADE',
+                onDelete: 'CASCADE'
+            },
+            title: { type: Sequelize.STRING, allowNull: false },
+            body: { type: Sequelize.TEXT, allowNull: false },
+            isActive: { type: Sequelize.BOOLEAN, allowNull: false, defaultValue: true },
+            createdAt: { allowNull: false, type: Sequelize.DATE },
+            updatedAt: { allowNull: false, type: Sequelize.DATE }
+        });
+
+        // 9. Create WineryIntegrationConfigs
         await queryInterface.createTable('WineryIntegrationConfigs', {
             id: { allowNull: false, autoIncrement: true, primaryKey: true, type: Sequelize.INTEGER },
             wineryId: {
@@ -147,6 +164,7 @@ module.exports = {
     down: async (queryInterface, Sequelize) => {
         // Drop in reverse order
         await queryInterface.dropTable('WineryIntegrationConfigs');
+        await queryInterface.dropTable('WinerySops');
 
         // Reverse rename
         try {

@@ -14,6 +14,7 @@ module.exports = (sequelize, DataTypes) => {
         as: 'LinkedTasks'
       });
       Notice.hasMany(models.NoticeComment, { foreignKey: 'noticeId', as: 'Comments' });
+      Notice.hasMany(models.NoticeAcknowledgement, { foreignKey: 'noticeId', as: 'Acknowledgements' });
       Notice.belongsToMany(models.CalendarEvent, {
         through: models.CalendarEventNotice,
         foreignKey: 'noticeId',
@@ -23,6 +24,13 @@ module.exports = (sequelize, DataTypes) => {
       if (models.IntegrationEvent) {
         Notice.belongsTo(models.IntegrationEvent, { foreignKey: 'sourceEventId', as: 'SourceEvent' });
       }
+      Notice.hasMany(models.NoticeArea, { foreignKey: 'noticeId', as: 'AreaLinks' });
+      Notice.belongsToMany(models.OperationalArea, {
+        through: models.NoticeArea,
+        foreignKey: 'noticeId',
+        otherKey: 'areaId',
+        as: 'OperationalAreas'
+      });
     }
   }
 
@@ -63,6 +71,15 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         defaultValue: false
       },
+      requiresAcknowledgement: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false
+      },
+      acknowledgementDueAt: {
+        type: DataTypes.DATE,
+        allowNull: true
+      },
       audienceType: {
         type: DataTypes.ENUM('all_staff', 'roles', 'users'),
         allowNull: false,
@@ -75,6 +92,11 @@ module.exports = (sequelize, DataTypes) => {
       audienceUserIds: {
         type: DataTypes.JSON,
         allowNull: true
+      },
+      areaScope: {
+        type: DataTypes.ENUM('ORGANISATION', 'AREAS'),
+        allowNull: false,
+        defaultValue: 'ORGANISATION'
       },
       effectiveFrom: {
         type: DataTypes.DATE,

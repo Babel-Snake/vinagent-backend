@@ -4,13 +4,15 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Calendar, dateFnsLocalizer, Views, EventProps } from 'react-big-calendar';
+import { Calendar, dateFnsLocalizer, Views, EventProps, type View } from 'react-big-calendar';
 import { format, parse, startOfWeek, getDay } from 'date-fns';
 import { enUS } from 'date-fns/locale';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
-import { getCalendarEvents, CalendarEvent } from '../../lib/api';
+import { getCalendarEvent, getCalendarEvents, CalendarEvent, type Staff, type UserProfile } from '../../lib/api';
+import { clientLogger } from '../../lib/clientLogger';
 import EventModal from './EventModal';
 import TaskDetailModal from '../TaskDetailModal';
+import { eventInvolvement } from '../../lib/involvement';
 
 const locales = {
     'en-US': enUS,
@@ -26,14 +28,16 @@ const localizer = dateFnsLocalizer({
 
 interface CalendarViewProps {
     userRole: string; // 'manager' | 'admin' | 'staff'
-    users: any[]; // For task assignment in modal if needed, or just passed through
+    users: Staff[];
+    initialEventId?: number | null;
+    currentUser: UserProfile;
 }
 
-export default function CalendarView({ userRole, users }: CalendarViewProps) {
+export default function CalendarView({ userRole, users, initialEventId = null, currentUser }: CalendarViewProps) {
     const router = useRouter();
     const [events, setEvents] = useState<CalendarEvent[]>([]);
     const [date, setDate] = useState(new Date());
-    const [view, setView] = useState(Views.MONTH);
+    const [view, setView] = useState<View>(Views.MONTH);
     const [loading, setLoading] = useState(false);
 
     // Modal States
@@ -56,8 +60,7 @@ export default function CalendarView({ userRole, users }: CalendarViewProps) {
             const fetchedEvents = await getCalendarEvents(start, end);
 
             // React-big-calendar needs Date objects, but our API returns strings.
-            // We need to cast them to any or a compatible type for react-big-calendar
-            // while keeping our CalendarEvent structure.
+            // Normalize those fields for react-big-calendar while retaining the API shape.
             const parsedEvents = fetchedEvents.map(ev => ({
                 ...ev,
                 start: new Date(ev.start),
@@ -66,7 +69,7 @@ export default function CalendarView({ userRole, users }: CalendarViewProps) {
             setEvents(parsedEvents);
 
         } catch (error) {
-            console.error('Failed to fetch events', error);
+            clientLogger.error('Failed to fetch events', error);
         } finally {
             setLoading(false);
         }
@@ -75,6 +78,21 @@ export default function CalendarView({ userRole, users }: CalendarViewProps) {
     useEffect(() => {
         fetchEvents();
     }, [fetchEvents]);
+
+    useEffect(() => {
+        if (!initialEventId) return;
+        let cancelled = false;
+        getCalendarEvent(initialEventId)
+            .then(event => {
+                if (cancelled) return;
+                setDate(new Date(event.start));
+                setSelectedEvent(event);
+                setSelectedSlot(null);
+                setShowEventModal(true);
+            })
+            .catch(error => clientLogger.error('Failed to open linked calendar event', error));
+        return () => { cancelled = true; };
+    }, [initialEventId]);
 
     const handleSelectSlot = ({ start, end }: { start: Date; end: Date }) => {
         if (userRole !== 'manager' && userRole !== 'admin') return;
@@ -93,18 +111,20 @@ export default function CalendarView({ userRole, users }: CalendarViewProps) {
         setDate(newDate);
     };
 
-    const handleViewChange = (newView: any) => {
+    const handleViewChange = (newView: View) => {
         setView(newView);
     };
 
     // Custom Event Styling
     const eventStyleGetter = (event: CalendarEvent) => {
-        let backgroundColor = '#3174ad';
+        let backgroundColor = '#52625a';
         if (event.type === 'reminder') backgroundColor = '#eab308'; // yellow
         if (event.type === 'meeting') backgroundColor = '#10b981'; // green
-        if (event.type === 'event') backgroundColor = '#2563eb'; // blue
+        if (event.type === 'event') backgroundColor = '#7a1f2b'; // winery event
         if (event.type === 'task_deadline') backgroundColor = '#ef4444'; // red
         if (event.type === 'notice') backgroundColor = '#0f766e'; // teal
+        const involvement = eventInvolvement(event, currentUser);
+        const involvementColor = involvement?.kind === 'DIRECT' ? '#0f766e' : involvement?.kind === 'AREA' ? '#7a1f2b' : 'transparent';
 
         return {
             style: {
@@ -112,7 +132,8 @@ export default function CalendarView({ userRole, users }: CalendarViewProps) {
                 borderRadius: '4px',
                 opacity: 0.8,
                 color: 'white',
-                border: '0px',
+                border: involvement ? `3px solid ${involvementColor}` : '0px',
+                boxShadow: involvement ? '0 0 0 1px rgba(255,255,255,0.85) inset' : 'none',
                 display: 'block'
             }
         };
@@ -124,14 +145,18 @@ export default function CalendarView({ userRole, users }: CalendarViewProps) {
             const calendarEvent = event as CalendarEvent;
             const linkedTaskCount = calendarEvent.LinkedTasks?.length || (calendarEvent.LinkedTask || calendarEvent.taskId ? 1 : 0);
             const linkedNoticeCount = calendarEvent.LinkedNotices?.length || (calendarEvent.LinkedNotice || calendarEvent.noticeId ? 1 : 0);
+            const involvement = eventInvolvement(calendarEvent, currentUser);
             return (
                 <span className="rbc-custom-event" style={{ display: 'flex', alignItems: 'center', gap: '4px', width: '100%' }}>
+                    {involvement && <span aria-label={involvement.kind === 'DIRECT' ? 'Directly involves you' : 'Involves your department or role'} title={involvement.kind === 'DIRECT' ? 'Directly yours' : 'Your department'} style={{ flexShrink: 0, fontSize: '0.65em' }}>●</span>}
                     <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {event.title}
                     </span>
                     {linkedTaskCount > 0 && (
-                        <span
-                            role="button"
+                        <button
+                            type="button"
+                            aria-label={linkedTaskCount === 1 ? 'Open linked task' : `${linkedTaskCount} linked tasks`}
+                            className="border-0 bg-transparent p-0 text-inherit underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
                             title={linkedTaskCount === 1 ? 'Open linked task' : `${linkedTaskCount} linked tasks`}
                             onClick={(e) => {
                                 e.stopPropagation();
@@ -152,11 +177,13 @@ export default function CalendarView({ userRole, users }: CalendarViewProps) {
                             }}
                         >
                             T{linkedTaskCount > 1 ? linkedTaskCount : ''}
-                        </span>
+                        </button>
                     )}
                     {linkedNoticeCount > 0 && (
-                        <span
-                            role="button"
+                        <button
+                            type="button"
+                            aria-label={linkedNoticeCount === 1 ? 'Open linked notice' : `${linkedNoticeCount} linked notices`}
+                            className="border-0 bg-transparent p-0 text-inherit underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
                             title={linkedNoticeCount === 1 ? 'Open linked notice' : `${linkedNoticeCount} linked notices`}
                             onClick={(e) => {
                                 e.stopPropagation();
@@ -178,15 +205,15 @@ export default function CalendarView({ userRole, users }: CalendarViewProps) {
                             }}
                         >
                             N{linkedNoticeCount > 1 ? linkedNoticeCount : ''}
-                        </span>
+                        </button>
                     )}
                 </span>
             );
         },
-    }), [router]);
+    }), [currentUser, router]);
 
     return (
-        <div className="h-[calc(100vh-100px)] bg-white p-4 rounded-lg shadow">
+        <div className="h-[min(70vh,48rem)] min-h-[34rem] rounded-lg bg-white p-3 shadow sm:p-4">
             {loading && <div className="text-center text-sm text-gray-500 mb-2">Loading events...</div>}
 
             <Calendar
@@ -215,6 +242,7 @@ export default function CalendarView({ userRole, users }: CalendarViewProps) {
                     initialSlot={selectedSlot}
                     existingEvent={selectedEvent}
                     canEdit={userRole === 'manager' || userRole === 'admin'}
+                    currentUser={currentUser}
 
                     onViewTask={(taskId: number) => {
                         setShowEventModal(false);
@@ -233,6 +261,8 @@ export default function CalendarView({ userRole, users }: CalendarViewProps) {
                     taskId={selectedTaskForPopup}
                     users={users} // We might need to pass staff users here
                     userRole={userRole}
+                    currentUserId={currentUser.id}
+                    currentUserAreaIds={currentUser.areaIds || currentUser.areaMemberships?.map(membership => membership.areaId) || []}
                     onClose={() => setSelectedTaskForPopup(null)}
                     onRefresh={() => { }} // No need to refresh calendar on task update unless dates changed?
                 />

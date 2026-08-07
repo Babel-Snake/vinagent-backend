@@ -77,7 +77,8 @@ function normalizeIntegrationWebhookPayload(body, context) {
         ...(pickObject(payload.metadata) || {}),
         webhook: {
             domain: context.domain,
-            configuredProvider: context.providerConnection?.provider || null
+            configuredProvider: context.providerConnection?.provider || null,
+            areaId: context.areaId || null
         }
     };
 
@@ -89,7 +90,10 @@ function normalizeIntegrationWebhookPayload(body, context) {
         rawPayload,
         normalizedPayload,
         metadata,
-        receivedAt: pickString(payload.receivedAt, payload.timestamp, payload.createdAt)
+        receivedAt: pickString(payload.receivedAt, payload.timestamp, payload.createdAt),
+        suggestedAreaId: context.areaId || null,
+        areaConfidence: context.areaId ? 1 : null,
+        areaMappingSource: context.areaId ? 'RULE' : null
     };
 }
 

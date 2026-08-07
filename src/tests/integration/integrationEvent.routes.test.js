@@ -6,10 +6,13 @@ const app = require('../../app');
 const {
   sequelize,
   IntegrationEvent,
+  IntegrationEventItem,
   Member,
   Notification,
   Notice,
   NoticeTask,
+  OperationalRecord,
+  OperationalRequest,
   Task,
   TaskAction,
   TaskStep,
@@ -47,12 +50,15 @@ describe('Integration Event Routes', () => {
   });
 
   beforeEach(async () => {
+    await IntegrationEventItem.destroy({ where: {} });
     await NoticeTask.destroy({ where: {} });
     await TaskAction.destroy({ where: {} });
     await TaskStep.destroy({ where: {} });
     await Notification.destroy({ where: {} });
     await Task.destroy({ where: {} });
     await Notice.destroy({ where: {} });
+    await OperationalRequest.destroy({ where: {} });
+    await OperationalRecord.destroy({ where: {} });
     await IntegrationEvent.destroy({ where: {} });
     await Member.destroy({ where: {} });
     await User.update({ role: 'manager', wineryId: winery.id }, { where: { id: manager.id } });
@@ -216,6 +222,86 @@ describe('Integration Event Routes', () => {
 
     const steps = await TaskStep.findAll({ where: { taskId: reviewRes.body.task.id } });
     expect(steps).toHaveLength(2);
+  });
+
+  it('creates Task, Notice, Request, and Note results atomically and replays idempotently', async () => {
+    const createRes = await request(app)
+      .post('/api/integration-events')
+      .set('Authorization', authToken)
+      .send({
+        provider: 'zapier',
+        intakeMethod: 'automation',
+        eventType: 'task.suggested',
+        externalEventId: 'multi-result-1',
+        rawPayload: { title: 'Wedding follow-up', body: 'Confirm staffing and retain the customer context.' },
+        normalizedPayload: { title: 'Wedding follow-up', body: 'Confirm staffing and retain the customer context.' }
+      })
+      .expect(201);
+
+    const reviewPayload = {
+      action: 'create_items',
+      items: [
+        { key: 'follow-up-task', type: 'TASK', data: { title: 'Confirm wedding staffing', body: 'Confirm the roster with events.' } },
+        { key: 'staff-notice', type: 'NOTICE', data: { title: 'Wedding staffing review', body: 'Events staffing is being reviewed.' } },
+        { key: 'approval-request', type: 'REQUEST', data: { title: 'Approve extra staffing', body: 'Please approve an additional events shift.' } },
+        { key: 'customer-note', type: 'NOTE', data: { title: 'Wedding enquiry context', body: 'Customer requested a staffing confirmation.', recordType: 'CUSTOMER_CONTEXT' } }
+      ]
+    };
+
+    const reviewRes = await request(app)
+      .post(`/api/integration-events/${createRes.body.event.id}/review`)
+      .set('Authorization', authToken)
+      .send(reviewPayload)
+      .expect(200);
+
+    expect(reviewRes.body.event.status).toBe('PROCESSED');
+    expect(reviewRes.body.event.linkedItems).toHaveLength(4);
+    expect(reviewRes.body.items.map(item => item.itemType)).toEqual(['TASK', 'NOTICE', 'REQUEST', 'NOTE']);
+    expect(await IntegrationEventItem.count({ where: { eventId: createRes.body.event.id } })).toBe(4);
+    expect(await OperationalRequest.count({ where: { sourceEventId: createRes.body.event.id } })).toBe(1);
+    expect(await OperationalRecord.count({ where: { sourceEventId: createRes.body.event.id } })).toBe(1);
+    expect(await Notice.count({ where: { sourceEventId: createRes.body.event.id } })).toBe(1);
+
+    const replayRes = await request(app)
+      .post(`/api/integration-events/${createRes.body.event.id}/review`)
+      .set('Authorization', authToken)
+      .send(reviewPayload)
+      .expect(200);
+
+    expect(replayRes.body.duplicate).toBe(true);
+    expect(replayRes.body.items).toHaveLength(4);
+    expect(await IntegrationEventItem.count({ where: { eventId: createRes.body.event.id } })).toBe(4);
+  });
+
+  it('rolls back every batch item when a later item fails', async () => {
+    const event = await IntegrationEvent.create({
+      provider: 'manual',
+      intakeMethod: 'manual',
+      eventType: 'generic.received',
+      rawPayload: { title: 'Atomic review', body: 'Nothing should partially persist.' },
+      normalizedPayload: { title: 'Atomic review', body: 'Nothing should partially persist.' },
+      status: 'PENDING_REVIEW',
+      wineryId: winery.id,
+      createdBy: manager.id
+    });
+    const noticeCount = await Notice.count();
+
+    await request(app)
+      .post(`/api/integration-events/${event.id}/review`)
+      .set('Authorization', authToken)
+      .send({
+        action: 'create_items',
+        items: [
+          { key: 'temporary-notice', type: 'NOTICE', data: { title: 'Temporary', body: 'Must be rolled back.' } },
+          { key: 'missing-task', type: 'TASK', mode: 'LINK', itemId: 999999 }
+        ]
+      })
+      .expect(404);
+
+    expect(await Notice.count()).toBe(noticeCount);
+    expect(await IntegrationEventItem.count({ where: { eventId: event.id } })).toBe(0);
+    await event.reload();
+    expect(event.status).toBe('FAILED');
   });
 
   it('restricts integration event review APIs to managers and admins', async () => {

@@ -3,6 +3,7 @@
 import { useCallback, useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { dismissNotification, getNotifications, markNotificationRead, Notification } from '../lib/api';
+import { clientLogger } from '../lib/clientLogger';
 
 export default function NotificationCenter() {
     const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -17,7 +18,7 @@ export default function NotificationCenter() {
             setNotifications(data);
             setUnreadCount(data.filter(n => !n.isRead).length);
         } catch (err) {
-            console.error('Failed to load notifications', err);
+            clientLogger.error('Failed to load notifications', err);
         }
     }, []);
 
@@ -52,7 +53,7 @@ export default function NotificationCenter() {
             setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
             setUnreadCount(prev => Math.max(0, prev - 1));
         } catch (err) {
-            console.error(err);
+            clientLogger.error(err);
         }
     }
 
@@ -64,7 +65,7 @@ export default function NotificationCenter() {
                 setUnreadCount(prev => Math.max(0, prev - 1));
             }
         } catch (err) {
-            console.error(err);
+            clientLogger.error(err);
         }
     }
 

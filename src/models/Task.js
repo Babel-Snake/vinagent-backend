@@ -26,6 +26,14 @@ module.exports = (sequelize, DataTypes) => {
         otherKey: 'calendarEventId',
         as: 'CalendarEvents'
       });
+      Task.hasMany(models.TaskArea, { foreignKey: 'taskId', as: 'AreaLinks' });
+      Task.hasMany(models.OperationalIntelligenceSignal, { foreignKey: 'actionTaskId', as: 'IntelligenceSignals' });
+      Task.belongsToMany(models.OperationalArea, {
+        through: models.TaskArea,
+        foreignKey: 'taskId',
+        otherKey: 'areaId',
+        as: 'OperationalAreas'
+      });
     }
   }
 
@@ -143,6 +151,11 @@ module.exports = (sequelize, DataTypes) => {
       priority: {
         type: DataTypes.ENUM('low', 'normal', 'high'),
         defaultValue: 'normal'
+      },
+      areaScope: {
+        type: DataTypes.ENUM('ORGANISATION', 'AREAS'),
+        allowNull: false,
+        defaultValue: 'ORGANISATION'
       },
       wineryId: {
         type: DataTypes.INTEGER,

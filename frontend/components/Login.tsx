@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
 import { auth } from '../lib/firebase';
+import { errorMessage } from '../lib/errors';
+import ConfirmDialog from './ui/ConfirmDialog';
 import {
     clearDefaultWineryContext,
     clearPinSession,
@@ -31,6 +33,7 @@ export default function Login() {
     const [staffCode, setStaffCode] = useState('');
     const [pinCode, setPinCode] = useState('');
     const [error, setError] = useState('');
+    const [changeWineryRequested, setChangeWineryRequested] = useState(false);
 
     const router = useRouter();
 
@@ -56,9 +59,9 @@ export default function Login() {
             setWineryContext(nextContext);
             saveDefaultWineryContext(nextContext);
             setStaffMethod(config.pinLoginEnabled ? 'pin' : 'access_code');
-        } catch (err: any) {
+        } catch (err: unknown) {
             setStaffMethod('access_code');
-            setError(err.message || 'Failed to load staff access settings');
+            setError(errorMessage(err, 'Failed to load staff access settings'));
         } finally {
             setConfigLoading(false);
         }
@@ -86,11 +89,12 @@ export default function Login() {
             await credential.user.getIdToken();
             await storeProfileWinery();
             router.push('/home');
-        } catch (err: any) {
-            if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found') {
+        } catch (err: unknown) {
+            const code = typeof err === 'object' && err && 'code' in err ? String(err.code) : '';
+            if (code === 'auth/invalid-credential' || code === 'auth/user-not-found') {
                 setError('Invalid credentials. Please check your details and try again.');
             } else {
-                setError(err.message || 'Login failed');
+                setError(errorMessage(err, 'Login failed'));
             }
         }
     }
@@ -132,17 +136,17 @@ export default function Login() {
             await credential.user.getIdToken();
             await storeProfileWinery();
             router.push('/home');
-        } catch (err: any) {
-            if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found') {
+        } catch (err: unknown) {
+            const code = typeof err === 'object' && err && 'code' in err ? String(err.code) : '';
+            if (code === 'auth/invalid-credential' || code === 'auth/user-not-found') {
                 setError('Invalid credentials. Please check your details and try again.');
             } else {
-                setError(err.message || 'Login failed');
+                setError(errorMessage(err, 'Login failed'));
             }
         }
     }
 
-    function handleChangeWinery() {
-        if (!confirm('Change the winery configured for this device? A manager will need to sign in again.')) return;
+    function confirmChangeWinery() {
         clearPinSession();
         clearDefaultWineryContext();
         setWineryContext(null);
@@ -176,7 +180,7 @@ export default function Login() {
                         <span className="min-w-0 truncate font-medium text-[#344039]">{wineryName}</span>
                         <button
                             type="button"
-                            onClick={handleChangeWinery}
+                            onClick={() => setChangeWineryRequested(true)}
                             className="shrink-0 text-sm font-medium text-[var(--accent)] hover:text-teal-900"
                         >
                             Change winery
@@ -317,6 +321,15 @@ export default function Login() {
                     )}
                 </div>
             </div>
+            <ConfirmDialog
+                open={changeWineryRequested}
+                onClose={() => setChangeWineryRequested(false)}
+                onConfirm={confirmChangeWinery}
+                title="Change winery on this device?"
+                description="Staff access will be cleared and a manager will need to sign in again."
+                confirmLabel="Change winery"
+                destructive
+            />
         </div>
     );
 }

@@ -59,13 +59,13 @@ function normalizeUpdateTaskBodyForValidation(body = {}) {
 async function listTasks(req, res, next) {
     try {
         const { wineryId, role, id: userId } = req.user;
-        const { status, type, priority, assignedToMe, category, sentiment, assigneeId, createdById, search, dateFrom, dateTo, sortBy, showOnlyFlagged, mentionedMe, actionedById, deadlineState, page, pageSize } = req.query;
+        const { status, type, priority, assignedToMe, category, sentiment, assigneeId, createdById, areaId, search, dateFrom, dateTo, sortBy, showOnlyFlagged, mentionedMe, actionedById, deadlineState, page, pageSize } = req.query;
 
         const result = await taskService.getTasksForWinery({
             wineryId,
             userId,
             userRole: role,
-            filters: { status, type, priority, assignedToMe, category, sentiment, assigneeId, createdById, search, dateFrom, dateTo, sortBy, showOnlyFlagged, mentionedMe, actionedById, deadlineState },
+            filters: { status, type, priority, assignedToMe, category, sentiment, assigneeId, createdById, areaId, search, dateFrom, dateTo, sortBy, showOnlyFlagged, mentionedMe, actionedById, deadlineState },
             pagination: { page, pageSize }
         });
 
@@ -80,12 +80,30 @@ async function listTasks(req, res, next) {
 
 async function getTask(req, res, next) {
     try {
-        const { wineryId } = req.user;
+        const { wineryId, id: userId, role: userRole } = req.user;
         const { id } = req.params;
 
-        const task = await taskService.getTaskById({ taskId: id, wineryId });
+        const task = await taskService.getTaskById({ taskId: id, wineryId, userId, userRole });
 
         res.json({ task });
+    } catch (err) {
+        next(err);
+    }
+}
+
+async function getTaskSummary(req, res, next) {
+    try {
+        const { wineryId, role, id: userId } = req.user;
+        const { status, type, priority, assignedToMe, category, sentiment, assigneeId, createdById, areaId, search, dateFrom, dateTo, sortBy, showOnlyFlagged, mentionedMe, actionedById, deadlineState } = req.query;
+
+        const result = await taskService.getTaskQueueSummary({
+            wineryId,
+            userId,
+            userRole: role,
+            filters: { status, type, priority, assignedToMe, category, sentiment, assigneeId, createdById, areaId, search, dateFrom, dateTo, sortBy, showOnlyFlagged, mentionedMe, actionedById, deadlineState }
+        });
+
+        res.json({ summary: result.summary });
     } catch (err) {
         next(err);
     }
@@ -362,7 +380,7 @@ async function linkNotice(req, res, next) {
             userRole: role
         });
 
-        const task = await taskService.getTaskById({ taskId: id, wineryId });
+        const task = await taskService.getTaskById({ taskId: id, wineryId, userId, userRole: role });
         res.status(201).json({ task });
     } catch (err) {
         next(err);
@@ -371,17 +389,18 @@ async function linkNotice(req, res, next) {
 
 async function unlinkNotice(req, res, next) {
     try {
-        const { wineryId, role } = req.user;
+        const { wineryId, userId, role } = req.user;
         const { id, noticeId } = req.params;
 
         await noticeService.unlinkNoticeTask({
             noticeId,
             taskId: id,
             wineryId,
+            userId,
             userRole: role
         });
 
-        const task = await taskService.getTaskById({ taskId: id, wineryId });
+        const task = await taskService.getTaskById({ taskId: id, wineryId, userId, userRole: role });
         res.json({ task });
     } catch (err) {
         next(err);
@@ -390,6 +409,7 @@ async function unlinkNotice(req, res, next) {
 
 module.exports = {
     listTasks,
+    getTaskSummary,
     getTask,
     createTask,
     updateTask,

@@ -320,3 +320,103 @@ When adding new coverage, keep file names aligned with the existing pattern:
 If implementation, docs, and tests disagree, first verify the live backend behaviour in code. Then update docs and tests together so they continue to describe the same contract.
 
 For normal CI and local test runs, prefer deterministic mock AI. Treat live-AI test runs as an explicit opt-in diagnostic path, not the default contract.
+
+### 9.1 Directed Notes
+
+Operational-record integration coverage must verify:
+
+* a Note can target zero, one, or multiple active same-winery users
+* cross-winery and inactive recipients are rejected
+* area-scoped recipients can view at least one selected area
+* `directedToMe=true` includes direct recipients and the authenticated user's department Notes
+* the targeted filter never bypasses normal winery or operational-area visibility
+
+## 10. Projects
+
+Projects are a coordination layer over Tasks, Requests, Notices, Notes, and Calendar Events. Project tests must preserve each linked domain's source-of-truth and permission rules.
+
+### 10.1 Project lifecycle and permissions
+
+Cover:
+
+* manager/admin creation, editing, activation, hold, completion, reopening, and cancellation
+* activation requiring an eligible owner and target date
+* area managers managing only Projects wholly within areas they manage
+* staff visibility through organisation scope, area membership, ownership, creation, or explicit participation
+* cross-tenant direct reads returning not found
+* same-winery active owner and participant validation
+* incomplete required work preventing completion unless an explicit override reason is recorded
+
+### 10.2 Linked operational items
+
+Cover all supported Project item types:
+
+* `TASK`
+* `REQUEST`
+* `NOTICE`
+* `NOTE`
+* `CALENDAR_EVENT`
+
+Assertions:
+
+* the target belongs to the same winery
+* the linking actor can manage the Project and view the target
+* required state is accepted only for Tasks
+* milestone state is accepted only for Tasks and Calendar Events
+* unlinking preserves the source record
+* hidden linked items never expose source metadata
+* reverse item lookup returns only visible Projects
+
+### 10.3 Progress, health, and attention
+
+Cover:
+
+* only required Tasks contribute to progress
+* `Task.workflowState = COMPLETED` counts as complete
+* `Task.status = ACTIONED` without completed workflow does not count as complete
+* no required Tasks returns null progress
+* blocked Task and unresolved dependency detection
+* overdue required Tasks and past-target Projects
+* pending linked Requests as pending decisions
+* upcoming Calendar Events and milestone Tasks
+* deterministic next-meaningful-action priority
+* health precedence: blocked, overdue, at risk, on track
+
+### 10.4 Dependencies, audit, attachments, and notifications
+
+Cover:
+
+* dependencies require two Tasks linked to the same Project
+* self-dependencies and direct/indirect cycles are rejected
+* removing Task membership removes affected dependency edges
+* every Project mutation writes an immutable ordered Project audit event
+* Project attachments inherit Project view/manage authority
+* new owners and opted-in participants receive scoped in-app notifications
+* routine edits do not broadcast indiscriminately
+
+### 10.5 Scoped Project Lead delegation
+
+Cover:
+
+* only Project governors can appoint, replace, or revoke a lead
+* a lead is active, same-winery, different from the accountable owner, and belongs to at least one participating area
+* the lead can view and coordinate the open Project across all participating departments
+* the lead can edit delivery fields, participants, item roles, dependencies, and files
+* the lead cannot change owner, leadership, participating areas, completion, cancellation, reopening, or completion overrides
+* closed Projects do not expose delivery-management or Task-delegation actions to their lead
+* delegated Task creation rejects non-participating areas, cross-winery/inactive users, and assignees without membership in the receiving area
+* successful delegation atomically creates the Task, area placement, `DELEGATED_WORK` Project link, Task audit, Project audit, and notifications
+* the Task persists the accountable owner as creator while retaining the lead as audit/delegation actor
+* the current lead can view delegated cross-area Tasks but ordinary `REFERENCE` links do not grant child access
+* revoking the lead removes cross-area delegated-Task access unless assignee, area, mention, or another existing Task rule independently grants access
+* migration up/down covers leadership columns, delegated-link type, indexes, and audit enum rollback cleanup
+
+### 10.6 Personal Project dashboard
+
+Cover:
+
+* `status=open` includes planned, active, and on-hold Projects while excluding completed and cancelled Projects
+* `involvement=me` includes ownership, leadership, participant, stakeholder, and delegated-Task assignment relationships
+* a Project that is merely visible through manager or area access is not treated as personal involvement
+* responses explain the relationship with ordered involvement roles and a delegated Task count
+* Home separates active/on-hold Projects from planned Projects and links every card to its permission-checked Project detail

@@ -12,7 +12,7 @@ module.exports = (sequelize, DataTypes) => {
   Attachment.init(
     {
       entityType: {
-        type: DataTypes.ENUM('TASK', 'TASK_STEP', 'TASK_OUTCOME', 'TASK_FOLLOW_UP', 'NOTICE'),
+        type: DataTypes.ENUM('TASK', 'TASK_STEP', 'TASK_OUTCOME', 'TASK_FOLLOW_UP', 'NOTICE', 'REQUEST', 'NOTE', 'PROJECT'),
         allowNull: false
       },
       entityId: {

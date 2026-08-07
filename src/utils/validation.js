@@ -52,7 +52,24 @@ const NOTICE_CATEGORIES = [
 const NOTICE_PRIORITIES = ['normal', 'important', 'urgent'];
 const NOTICE_AUDIENCE_TYPES = ['all_staff', 'roles', 'users'];
 const NOTICE_AUDIENCE_ROLES = ['staff', 'manager', 'admin'];
-const ATTACHMENT_ENTITY_TYPES = ['TASK', 'TASK_STEP', 'TASK_OUTCOME', 'TASK_FOLLOW_UP', 'NOTICE'];
+const ATTACHMENT_ENTITY_TYPES = ['TASK', 'TASK_STEP', 'TASK_OUTCOME', 'TASK_FOLLOW_UP', 'NOTICE', 'REQUEST', 'NOTE', 'PROJECT'];
+const OPERATIONAL_ITEM_TYPES = ['TASK', 'NOTICE', 'REQUEST', 'NOTE'];
+const OPERATIONAL_SOURCE_TYPES = ['MANUAL', 'INTEGRATION', 'AI'];
+const OPERATIONAL_REQUEST_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'];
+const OPERATIONAL_INTELLIGENCE_SIGNAL_TYPES = [
+    'REQUEST_AGING',
+    'RECURRENCE',
+    'CLASSIFICATION_CORRECTION',
+    'CONVERSION_OUTCOME',
+    'NOTICE_ACKNOWLEDGEMENT',
+    'TREND'
+];
+const OPERATIONAL_INTELLIGENCE_SIGNAL_STATUSES = ['OPEN', 'ACKNOWLEDGED', 'DISMISSED', 'ACTION_CREATED'];
+const OPERATIONAL_INTELLIGENCE_SIGNAL_SEVERITIES = ['info', 'warning', 'critical'];
+const PROJECT_STATUSES = ['PLANNED', 'ACTIVE', 'ON_HOLD', 'COMPLETED', 'CANCELLED'];
+const PROJECT_HEALTH_STATES = ['ON_TRACK', 'AT_RISK', 'BLOCKED', 'OVERDUE'];
+const PROJECT_ITEM_TYPES = ['TASK', 'REQUEST', 'NOTICE', 'NOTE', 'CALENDAR_EVENT'];
+const PROJECT_PARTICIPATION_ROLES = ['PARTICIPANT', 'STAKEHOLDER'];
 
 const emailSchema = () => Joi.string().email({ tlds: { allow: false } });
 
@@ -180,6 +197,9 @@ const createTaskSchema = Joi.object({
     memberId: Joi.number().integer().positive().allow(null),
     messageId: Joi.number().integer().positive().allow(null),
     assigneeId: Joi.number().integer().positive().allow(null),
+    areaScope: Joi.string().valid('ORGANISATION', 'AREAS').default('ORGANISATION'),
+    primaryAreaId: Joi.number().integer().positive().allow(null),
+    linkedAreaIds: Joi.array().items(Joi.number().integer().positive()).max(20).default([]),
     parentTaskId: Joi.number().integer().positive().allow(null),
     dueAt: Joi.date().iso().allow(null),
     resolutionSummary: Joi.string().max(2000).allow('', null),
@@ -242,6 +262,9 @@ const updateTaskSchema = Joi.object({
     suggestedRecipientEmail: emailSchema().allow('', null),
     suggestedCc: Joi.string().max(1000).allow('', null),
     assigneeId: Joi.number().integer().positive().allow(null),
+    areaScope: Joi.string().valid('ORGANISATION', 'AREAS'),
+    primaryAreaId: Joi.number().integer().positive().allow(null),
+    linkedAreaIds: Joi.array().items(Joi.number().integer().positive()).max(20),
     parentTaskId: Joi.number().integer().positive().allow(null),
     dueAt: Joi.date().iso().allow(null),
     resolutionSummary: Joi.string().max(2000).allow('', null),
@@ -261,9 +284,14 @@ const createNoticeSchema = Joi.object({
     category: Joi.string().valid(...NOTICE_CATEGORIES).default('GENERAL'),
     priority: Joi.string().valid(...NOTICE_PRIORITIES).default('normal'),
     isPinned: Joi.boolean().default(false),
+    requiresAcknowledgement: Joi.boolean().default(false),
+    acknowledgementDueAt: Joi.date().iso().allow(null),
     audienceType: Joi.string().valid(...NOTICE_AUDIENCE_TYPES).default('all_staff'),
     audienceRoles: Joi.array().items(Joi.string().valid(...NOTICE_AUDIENCE_ROLES)).max(10).default([]),
     audienceUserIds: Joi.array().items(Joi.number().integer().positive()).max(100).default([]),
+    areaScope: Joi.string().valid('ORGANISATION', 'AREAS').default('ORGANISATION'),
+    primaryAreaId: Joi.number().integer().positive().allow(null),
+    linkedAreaIds: Joi.array().items(Joi.number().integer().positive()).max(20).default([]),
     calendarEventIds: Joi.array().items(Joi.number().integer().positive()).max(50).default([]),
     effectiveFrom: Joi.date().iso().allow(null),
     expiresAt: Joi.date().iso().allow(null)
@@ -275,6 +303,9 @@ const createNoticeSchema = Joi.object({
             return helpers.message('Expiry date must be after the effective date.');
         }
     }
+    if (value.acknowledgementDueAt && !value.requiresAcknowledgement) {
+        return helpers.message('Acknowledgement due date requires acknowledgement tracking.');
+    }
     return value;
 }, 'notice date validation');
 
@@ -284,9 +315,14 @@ const updateNoticeSchema = Joi.object({
     category: Joi.string().valid(...NOTICE_CATEGORIES),
     priority: Joi.string().valid(...NOTICE_PRIORITIES),
     isPinned: Joi.boolean(),
+    requiresAcknowledgement: Joi.boolean(),
+    acknowledgementDueAt: Joi.date().iso().allow(null),
     audienceType: Joi.string().valid(...NOTICE_AUDIENCE_TYPES),
     audienceRoles: Joi.array().items(Joi.string().valid(...NOTICE_AUDIENCE_ROLES)).max(10),
     audienceUserIds: Joi.array().items(Joi.number().integer().positive()).max(100),
+    areaScope: Joi.string().valid('ORGANISATION', 'AREAS'),
+    primaryAreaId: Joi.number().integer().positive().allow(null),
+    linkedAreaIds: Joi.array().items(Joi.number().integer().positive()).max(20),
     calendarEventIds: Joi.array().items(Joi.number().integer().positive()).max(50),
     effectiveFrom: Joi.date().iso().allow(null),
     expiresAt: Joi.date().iso().allow(null),
@@ -399,12 +435,52 @@ const wineryPolicySchema = Joi.object({
     eventPolicy: Joi.string().max(2000).allow('')
 });
 
+const wineryFaqSchema = Joi.object({
+    areaId: Joi.number().integer().positive().allow(null),
+    question: Joi.string().trim().required().max(500),
+    answer: Joi.string().trim().required().max(10000),
+    tags: Joi.array().items(Joi.string().trim().max(100)).max(50).default([]),
+    isActive: Joi.boolean().default(true)
+});
+
+const wineryFaqUpdateSchema = Joi.object({
+    question: Joi.string().trim().max(500),
+    answer: Joi.string().trim().max(10000),
+    tags: Joi.array().items(Joi.string().trim().max(100)).max(50),
+    isActive: Joi.boolean()
+}).min(1);
+
 const winerySopSchema = Joi.object({
+    areaId: Joi.number().integer().positive().allow(null),
     title: Joi.string().required().max(200),
-    body: Joi.string().required().max(5000)
+    body: Joi.string().required().max(5000),
+    isActive: Joi.boolean().default(true)
+});
+
+const winerySopUpdateSchema = Joi.object({
+    title: Joi.string().max(200),
+    body: Joi.string().max(5000),
+    isActive: Joi.boolean()
+}).min(1);
+
+const operationalAreaProfileSchema = Joi.object({
+    publicEmail: Joi.string().email().max(254).allow('', null),
+    publicPhone: Joi.string().max(100).allow('', null),
+    openingHoursText: Joi.string().max(2000).allow('', null),
+    guestDirections: Joi.string().max(2000).allow('', null),
+    serviceNotes: Joi.string().max(5000).allow('', null)
+});
+
+const areaProductListingSchema = Joi.object({
+    isAvailable: Joi.boolean(),
+    priceOverride: Joi.number().precision(2).min(0).allow(null),
+    stockStatusOverride: Joi.string().valid('IN_STOCK', 'LOW_STOCK', 'OUT_OF_STOCK').allow(null),
+    isFeatured: Joi.boolean(),
+    salesNotes: Joi.string().max(5000).allow('', null)
 });
 
 const INTEGRATION_DOMAINS = ['sms', 'email', 'pos', 'crm', 'booking', 'delivery'];
+const AREA_INTEGRATION_DOMAINS = ['pos', 'crm', 'booking', 'delivery'];
 const INTEGRATION_STATUSES = ['not_connected', 'connected', 'error', 'needs_reauth'];
 const INTEGRATION_AUTH_METHODS = ['none', 'api_key', 'oauth', 'webhook', 'manual'];
 const INTEGRATION_EVENT_TYPES = [
@@ -426,7 +502,7 @@ const INTEGRATION_EVENT_STATUSES = [
     'DUPLICATE'
 ];
 const INTEGRATION_INTAKE_METHODS = ['webhook', 'api', 'automation', 'email', 'manual', 'import', 'provider_adapter'];
-const INTEGRATION_REVIEW_ACTIONS = ['publish_notice', 'create_task', 'link_task', 'ignore', 'archive'];
+const INTEGRATION_REVIEW_ACTIONS = ['publish_notice', 'create_task', 'link_task', 'create_items', 'ignore', 'archive'];
 
 const providerConnectionSchema = Joi.object({
     provider: Joi.string().max(100).allow('', null),
@@ -469,6 +545,17 @@ const wineryIntegrationTestSchema = Joi.object({
     domain: Joi.string().valid(...INTEGRATION_DOMAINS).required()
 });
 
+const areaIntegrationConfigSchema = Joi.object({
+    providerConnections: Joi.object()
+        .pattern(Joi.string().valid(...AREA_INTEGRATION_DOMAINS), providerConnectionSchema)
+        .min(1)
+        .required()
+});
+
+const areaIntegrationTestSchema = Joi.object({
+    domain: Joi.string().valid(...AREA_INTEGRATION_DOMAINS).required()
+});
+
 const emailSyncSchema = Joi.object({
     limit: Joi.number().integer().min(1).max(100).optional()
 });
@@ -481,13 +568,17 @@ const integrationEventCreateSchema = Joi.object({
     rawPayload: Joi.object().unknown(true).default({}),
     normalizedPayload: Joi.object().unknown(true).optional(),
     metadata: Joi.object().unknown(true).optional(),
-    receivedAt: Joi.date().iso().allow(null)
+    receivedAt: Joi.date().iso().allow(null),
+    suggestedAreaId: Joi.number().integer().positive().allow(null),
+    areaConfidence: Joi.number().min(0).max(1).allow(null),
+    areaMappingSource: Joi.string().valid('RULE', 'MANUAL', 'ADAPTER', 'AI', 'DEFAULT').allow(null)
 });
 
 const integrationEventListSchema = Joi.object({
     status: Joi.string().valid(...INTEGRATION_EVENT_STATUSES, 'all').default('all'),
     eventType: Joi.string().valid(...INTEGRATION_EVENT_TYPES, 'all').default('all'),
     provider: Joi.string().trim().max(100).allow('all').default('all'),
+    areaId: Joi.alternatives().try(Joi.number().integer().positive(), Joi.string().valid('all')).default('all'),
     search: Joi.string().trim().max(200).allow('', null),
     page: Joi.number().integer().min(1).optional(),
     pageSize: Joi.number().integer().min(1).max(100).optional()
@@ -498,15 +589,28 @@ const integrationEventReviewSchema = Joi.object({
     reason: Joi.string().trim().max(1000).allow('', null),
     taskId: Joi.number().integer().positive().optional(),
     taskIds: Joi.array().items(Joi.number().integer().positive()).max(50).default([]),
+    confirmedAreaId: Joi.number().integer().positive().allow(null),
+    items: Joi.array().items(Joi.object({
+        key: Joi.string().trim().min(1).max(100).optional(),
+        type: Joi.string().valid('TASK', 'NOTICE', 'REQUEST', 'NOTE').required(),
+        mode: Joi.string().valid('CREATE', 'LINK').default('CREATE'),
+        itemId: Joi.number().integer().positive().optional(),
+        data: Joi.object().unknown(true).default({})
+    }).unknown(false)).max(10).default([]),
     notice: Joi.object({
         title: Joi.string().trim().max(200),
         body: Joi.string().trim().max(10000),
         category: Joi.string().valid(...NOTICE_CATEGORIES),
         priority: Joi.string().valid(...NOTICE_PRIORITIES),
         isPinned: Joi.boolean(),
+        requiresAcknowledgement: Joi.boolean(),
+        acknowledgementDueAt: Joi.date().iso().allow(null),
         audienceType: Joi.string().valid(...NOTICE_AUDIENCE_TYPES),
         audienceRoles: Joi.array().items(Joi.string().valid(...NOTICE_AUDIENCE_ROLES)).max(10),
         audienceUserIds: Joi.array().items(Joi.number().integer().positive()).max(100),
+        areaScope: Joi.string().valid('ORGANISATION', 'AREAS'),
+        primaryAreaId: Joi.number().integer().positive().allow(null),
+        linkedAreaIds: Joi.array().items(Joi.number().integer().positive()).max(20),
         effectiveFrom: Joi.date().iso().allow(null),
         expiresAt: Joi.date().iso().allow(null)
     }).unknown(false).default({}),
@@ -518,14 +622,61 @@ const integrationEventReviewSchema = Joi.object({
         priority: Joi.string().valid(...PRIORITIES),
         dueAt: Joi.date().iso().allow(null),
         suggestedAction: Joi.string().max(4000).allow('', null),
+        areaScope: Joi.string().valid('ORGANISATION', 'AREAS'),
+        primaryAreaId: Joi.number().integer().positive().allow(null),
+        linkedAreaIds: Joi.array().items(Joi.number().integer().positive()).max(20),
         steps: Joi.array().items(taskStepCreateSchema).max(20)
     }).unknown(false).default({})
 }).custom((value, helpers) => {
     if (value.action === 'link_task' && !value.taskId) {
         return helpers.message('A taskId is required when linking an event to an existing task.');
     }
+    if (value.action === 'create_items') {
+        if (!value.items.length) return helpers.message('At least one item is required for batch creation.');
+        const keys = value.items.map((item, index) => item.key || `item-${index + 1}`);
+        if (new Set(keys).size !== keys.length) return helpers.message('Batch item keys must be unique.');
+        if (value.items.some(item => item.mode === 'LINK' && !item.itemId)) {
+            return helpers.message('An itemId is required for each linked batch item.');
+        }
+    }
     return value;
 }, 'integration event review validation');
+
+const operationalIntelligenceConfigSchema = Joi.object({
+    preset: Joi.string().valid('default', 'sensitive', 'conservative').optional(),
+    scheduler: Joi.object({
+        enabled: Joi.boolean().optional(),
+        period: Joi.string().valid('day', 'week', 'month', 'year').optional(),
+        offset: Joi.number().integer().min(0).max(52).optional()
+    }).optional(),
+    thresholds: Joi.object({
+        requestAgingOverdueCount: Joi.number().integer().min(0).max(1000).optional(),
+        requestAgingOverSevenDaysCount: Joi.number().integer().min(0).max(1000).optional(),
+        requestAgingAverageAgeHours: Joi.number().integer().min(1).max(1440).optional(),
+        classificationMinimumEvaluated: Joi.number().integer().min(1).max(10000).optional(),
+        classificationMinimumCorrected: Joi.number().integer().min(1).max(10000).optional(),
+        classificationCorrectionRate: Joi.number().integer().min(1).max(100).optional(),
+        conversionMinimumTotal: Joi.number().integer().min(1).max(10000).optional(),
+        conversionCompletionRate: Joi.number().integer().min(0).max(100).optional(),
+        trendMinimumDelta: Joi.number().integer().min(1).max(10000).optional(),
+        trendMinimumChangePercent: Joi.number().integer().min(1).max(1000).optional(),
+        trendWarningDelta: Joi.number().integer().min(1).max(10000).optional(),
+        noticeOutstandingCount: Joi.number().integer().min(1).max(10000).optional()
+    }).optional(),
+    reminders: Joi.object({
+        dueSoonHours: Joi.number().integer().min(1).max(720).optional(),
+        overdueRepeatHours: Joi.number().integer().min(1).max(720).optional(),
+        batchSize: Joi.number().integer().min(1).max(1000).optional()
+    }).optional()
+}).min(1);
+
+const operationalIntelligenceConfigPreviewSchema = operationalIntelligenceConfigSchema.keys({
+    period: Joi.string().valid('day', 'week', 'month', 'year').default('month'),
+    offset: Joi.number().integer().min(0).max(120).default(0),
+    historyPeriods: Joi.number().integer().min(1).max(6).default(1),
+    start: Joi.date().iso(),
+    end: Joi.date().iso().greater(Joi.ref('start'))
+}).and('start', 'end').min(1);
 
 const winerySettingsSchema = Joi.object({
     identityMatchingConfig: Joi.object({
@@ -542,7 +693,8 @@ const winerySettingsSchema = Joi.object({
         pinSessionHours: Joi.number().integer().min(1).max(24).default(8),
         pinMaxAttempts: Joi.number().integer().min(3).max(10).default(5),
         pinLockoutMinutes: Joi.number().integer().min(1).max(60).default(5)
-    }).optional()
+    }).optional(),
+    operationalIntelligenceConfig: operationalIntelligenceConfigSchema.optional()
 }).min(1);
 
 // --- MEMBER SCHEMAS ---
@@ -627,8 +779,320 @@ const wineryContactSchema = Joi.object({
     notes: Joi.string().max(1000).allow('', null),
     reportsToId: Joi.number().integer().allow(null).optional(),
     responsibilities: Joi.string().max(2000).allow('', null),
-    isActive: Joi.boolean().default(true)
+    isActive: Joi.boolean().default(true),
+    primaryAreaId: Joi.number().integer().positive().allow(null),
+    linkedAreaIds: Joi.array().items(Joi.number().integer().positive()).unique().max(50)
 });
+
+const operationalAreaCreateSchema = Joi.object({
+    name: Joi.string().trim().min(1).max(120).required(),
+    description: Joi.string().trim().max(2000).allow('', null),
+    isActive: Joi.boolean().default(true),
+    sortOrder: Joi.number().integer().min(0).max(10000).default(0)
+});
+
+const operationalAreaUpdateSchema = Joi.object({
+    name: Joi.string().trim().min(1).max(120),
+    description: Joi.string().trim().max(2000).allow('', null),
+    isActive: Joi.boolean(),
+    sortOrder: Joi.number().integer().min(0).max(10000)
+}).min(1);
+
+const areaMembershipReplaceSchema = Joi.object({
+    memberships: Joi.array().items(Joi.object({
+        areaId: Joi.number().integer().positive().required(),
+        membershipRole: Joi.string().valid('MEMBER', 'MANAGER').default('MEMBER'),
+        isPrimary: Joi.boolean().default(false)
+    }).unknown(false)).max(50).required()
+});
+
+const operationalPlacementFields = {
+    areaScope: Joi.string().valid('ORGANISATION', 'AREAS').default('ORGANISATION'),
+    primaryAreaId: Joi.number().integer().positive().allow(null),
+    linkedAreaIds: Joi.array().items(Joi.number().integer().positive()).unique().max(50).default([])
+};
+
+const operationalAiFields = {
+    aiSuggestedType: Joi.string().valid(...OPERATIONAL_ITEM_TYPES).allow(null),
+    aiConfidence: Joi.number().min(0).max(1).precision(4).allow(null),
+    aiSuggestion: Joi.object().unknown(true).allow(null)
+};
+
+const createOperationalRequestSchema = Joi.object({
+    title: Joi.string().trim().min(1).max(255).required(),
+    body: Joi.string().trim().min(1).max(10000).required(),
+    originalText: Joi.string().max(10000).allow('', null),
+    subtype: Joi.string().trim().max(100).allow('', null),
+    priority: Joi.string().valid(...PRIORITIES).default('normal'),
+    dueAt: Joi.date().iso().allow(null),
+    requestedFromUserId: Joi.number().integer().positive().allow(null),
+    sourceType: Joi.string().valid(...OPERATIONAL_SOURCE_TYPES).default('MANUAL'),
+    sourceEventId: Joi.number().integer().positive().allow(null),
+    ...operationalPlacementFields,
+    ...operationalAiFields
+}).unknown(false);
+
+const updateOperationalRequestSchema = Joi.object({
+    title: Joi.string().trim().min(1).max(255),
+    body: Joi.string().trim().min(1).max(10000),
+    subtype: Joi.string().trim().max(100).allow('', null),
+    priority: Joi.string().valid(...PRIORITIES),
+    dueAt: Joi.date().iso().allow(null),
+    requestedFromUserId: Joi.number().integer().positive().allow(null),
+    areaScope: Joi.string().valid('ORGANISATION', 'AREAS'),
+    primaryAreaId: Joi.number().integer().positive().allow(null),
+    linkedAreaIds: Joi.array().items(Joi.number().integer().positive()).unique().max(50)
+}).min(1).unknown(false);
+
+const decideOperationalRequestSchema = Joi.object({
+    status: Joi.string().valid('APPROVED', 'REJECTED', 'CANCELLED').required(),
+    response: Joi.string().trim().max(5000).allow('', null)
+}).unknown(false);
+
+const createOperationalRecordSchema = Joi.object({
+    title: Joi.string().trim().min(1).max(255).required(),
+    body: Joi.string().trim().min(1).max(10000).required(),
+    originalText: Joi.string().max(10000).allow('', null),
+    recordType: Joi.string().trim().max(100).allow('', null),
+    sourceType: Joi.string().valid(...OPERATIONAL_SOURCE_TYPES).default('MANUAL'),
+    sourceReference: Joi.string().trim().max(255).allow('', null),
+    occurredAt: Joi.date().iso().allow(null),
+    memberId: Joi.number().integer().positive().allow(null),
+    sourceEventId: Joi.number().integer().positive().allow(null),
+    metadata: Joi.object().unknown(true).allow(null),
+    recipientUserIds: Joi.array().items(Joi.number().integer().positive()).unique().max(100).default([]),
+    ...operationalPlacementFields,
+    ...operationalAiFields
+}).unknown(false);
+
+const updateOperationalRecordSchema = Joi.object({
+    title: Joi.string().trim().min(1).max(255),
+    body: Joi.string().trim().min(1).max(10000),
+    recordType: Joi.string().trim().max(100).allow('', null),
+    sourceReference: Joi.string().trim().max(255).allow('', null),
+    occurredAt: Joi.date().iso().allow(null),
+    memberId: Joi.number().integer().positive().allow(null),
+    metadata: Joi.object().unknown(true).allow(null),
+    recipientUserIds: Joi.array().items(Joi.number().integer().positive()).unique().max(100),
+    areaScope: Joi.string().valid('ORGANISATION', 'AREAS'),
+    primaryAreaId: Joi.number().integer().positive().allow(null),
+    linkedAreaIds: Joi.array().items(Joi.number().integer().positive()).unique().max(50)
+}).min(1).unknown(false);
+
+const operationalItemListSchema = Joi.object({
+    page: Joi.number().integer().min(1).max(100000).default(1),
+    pageSize: Joi.number().integer().min(1).max(100).default(25),
+    search: Joi.string().trim().max(200).allow(''),
+    areaId: Joi.alternatives().try(
+        Joi.string().valid('all', 'organisation'),
+        Joi.number().integer().positive()
+    ).default('all'),
+    status: Joi.string().valid('all', ...OPERATIONAL_REQUEST_STATUSES).default('all'),
+    directedToMe: Joi.boolean().default(false)
+}).unknown(false);
+
+const operationalItemCommentSchema = Joi.object({
+    body: Joi.string().trim().min(1).max(5000).required(),
+    parentCommentId: Joi.number().integer().positive().allow(null)
+}).unknown(false);
+
+const operationalItemRelationSchema = Joi.object({
+    targetType: Joi.string().valid(...OPERATIONAL_ITEM_TYPES).required(),
+    targetId: Joi.number().integer().positive().required(),
+    relationType: Joi.string().valid(
+        'CREATED_FROM', 'RELATES_TO', 'BLOCKS', 'DUPLICATES',
+        'GENERATED_TASK', 'FOLLOW_UP_FOR', 'COMPLETION_RECORD'
+    ).default('RELATES_TO'),
+    metadata: Joi.object().unknown(true).allow(null)
+}).unknown(false);
+
+const operationalItemConversionSchema = Joi.object({
+    category: Joi.string().valid(...CATEGORIES).default('INTERNAL'),
+    subType: Joi.string().trim().max(100).allow('', null),
+    priority: Joi.string().valid(...PRIORITIES).default('normal'),
+    assigneeId: Joi.number().integer().positive().allow(null),
+    dueAt: Joi.date().iso().allow(null),
+    suggestedAction: Joi.string().trim().max(4000).allow('', null)
+}).unknown(false);
+
+const operationsFeedQuerySchema = Joi.object({
+    types: Joi.string().trim().max(100).custom((value, helpers) => {
+        const values = String(value).split(',').map(type => type.trim().toUpperCase()).filter(Boolean);
+        if (values.length === 0 || values.some(type => !OPERATIONAL_ITEM_TYPES.includes(type))) {
+            return helpers.error('any.only');
+        }
+        return [...new Set(values)].join(',');
+    }).default('TASK,NOTICE,REQUEST,NOTE'),
+    search: Joi.string().trim().max(200).allow('').default(''),
+    areaId: Joi.alternatives().try(
+        Joi.string().valid('all', 'organisation'),
+        Joi.number().integer().positive()
+    ).default('all'),
+    status: Joi.string().trim().uppercase().valid(
+        'ALL', 'PENDING', 'ACTIONED', 'REJECTED', 'APPROVED', 'CANCELLED',
+        'ACTIVE', 'EXPIRED', 'ARCHIVED', 'RECORDED'
+    ).default('ALL'),
+    sortBy: Joi.string().valid('newest', 'oldest').default('newest'),
+    page: Joi.number().integer().min(1).max(20).default(1),
+    pageSize: Joi.number().integer().min(1).max(50).default(25)
+}).unknown(false);
+
+const projectCreateSchema = Joi.object({
+    title: Joi.string().trim().min(1).max(255).required(),
+    intendedOutcome: Joi.string().trim().min(1).max(10000).required(),
+    businessContext: Joi.string().trim().max(10000).allow('', null),
+    status: Joi.string().valid(...PROJECT_STATUSES).default('PLANNED'),
+    ownerUserId: Joi.number().integer().positive().allow(null),
+    leadUserId: Joi.number().integer().positive().allow(null),
+    plannedStartAt: Joi.date().iso().allow(null),
+    targetEndAt: Joi.date().iso().allow(null),
+    riskReason: Joi.string().trim().max(5000).allow('', null),
+    riskReviewAt: Joi.date().iso().allow(null),
+    areaScope: Joi.string().valid('ORGANISATION', 'AREAS').default('ORGANISATION'),
+    primaryAreaId: Joi.number().integer().positive().allow(null),
+    linkedAreaIds: Joi.array().items(Joi.number().integer().positive()).unique().max(50).default([]),
+    participantUserIds: Joi.array().items(Joi.number().integer().positive()).unique().max(100).default([])
+}).unknown(false);
+
+const projectUpdateSchema = Joi.object({
+    title: Joi.string().trim().min(1).max(255),
+    intendedOutcome: Joi.string().trim().min(1).max(10000),
+    businessContext: Joi.string().trim().max(10000).allow('', null),
+    status: Joi.string().valid(...PROJECT_STATUSES),
+    ownerUserId: Joi.number().integer().positive().allow(null),
+    plannedStartAt: Joi.date().iso().allow(null),
+    targetEndAt: Joi.date().iso().allow(null),
+    riskReason: Joi.string().trim().max(5000).allow('', null),
+    riskReviewAt: Joi.date().iso().allow(null),
+    areaScope: Joi.string().valid('ORGANISATION', 'AREAS'),
+    primaryAreaId: Joi.number().integer().positive().allow(null),
+    linkedAreaIds: Joi.array().items(Joi.number().integer().positive()).unique().max(50),
+    completionOverride: Joi.boolean().default(false),
+    completionReason: Joi.string().trim().max(5000).allow('', null),
+    notifyParticipants: Joi.boolean().default(false)
+}).min(1).unknown(false);
+
+const projectListSchema = Joi.object({
+    status: Joi.string().valid('all', 'open', ...PROJECT_STATUSES).default('all'),
+    health: Joi.string().valid('all', ...PROJECT_HEALTH_STATES).default('all'),
+    ownerUserId: Joi.alternatives().try(Joi.string().valid('all', 'me'), Joi.number().integer().positive()).default('all'),
+    involvement: Joi.string().valid('all', 'me').default('all'),
+    areaId: Joi.alternatives().try(Joi.string().valid('all', 'organisation'), Joi.number().integer().positive()).default('all'),
+    search: Joi.string().trim().max(200).allow('').default(''),
+    targetFrom: Joi.date().iso(),
+    targetTo: Joi.date().iso(),
+    sortBy: Joi.string().valid('updated', 'target_soonest', 'target_latest', 'created_newest', 'created_oldest').default('updated'),
+    page: Joi.number().integer().min(1).max(100000).default(1),
+    pageSize: Joi.number().integer().min(1).max(100).default(25)
+}).unknown(false);
+
+const projectParticipantCreateSchema = Joi.object({
+    userId: Joi.number().integer().positive().required(),
+    participationRole: Joi.string().valid(...PROJECT_PARTICIPATION_ROLES).default('PARTICIPANT'),
+    notificationsEnabled: Joi.boolean().default(true)
+}).unknown(false);
+
+const projectParticipantUpdateSchema = Joi.object({
+    participationRole: Joi.string().valid(...PROJECT_PARTICIPATION_ROLES),
+    notificationsEnabled: Joi.boolean()
+}).min(1).unknown(false);
+
+const projectItemCreateSchema = Joi.object({
+    itemType: Joi.string().valid(...PROJECT_ITEM_TYPES).required(),
+    itemId: Joi.number().integer().positive().required(),
+    isRequired: Joi.boolean().default(false),
+    isMilestone: Joi.boolean().default(false),
+    sortOrder: Joi.number().integer().min(0).default(0)
+}).unknown(false);
+
+const projectItemUpdateSchema = Joi.object({
+    isRequired: Joi.boolean(),
+    isMilestone: Joi.boolean(),
+    sortOrder: Joi.number().integer().min(0)
+}).min(1).unknown(false);
+
+const projectItemLookupSchema = Joi.object({
+    itemType: Joi.string().valid(...PROJECT_ITEM_TYPES).required(),
+    itemId: Joi.number().integer().positive().required()
+}).unknown(false);
+
+const projectDependencyCreateSchema = Joi.object({
+    blockingTaskId: Joi.number().integer().positive().required(),
+    blockedTaskId: Joi.number().integer().positive().required()
+}).unknown(false);
+
+const projectLeadSchema = Joi.object({
+    leadUserId: Joi.number().integer().positive().required()
+}).unknown(false);
+
+const projectTaskCreateSchema = Joi.object({
+    title: Joi.string().trim().min(1).max(255).required(),
+    body: Joi.string().trim().max(4000).allow('', null),
+    dueAt: Joi.date().iso().allow(null),
+    priority: Joi.string().valid(...PRIORITIES).default('normal'),
+    assigneeId: Joi.number().integer().positive().required(),
+    areaId: Joi.number().integer().positive().required(),
+    isRequired: Joi.boolean().default(true),
+    isMilestone: Joi.boolean().default(false)
+}).unknown(false);
+
+const operationalIntelligenceSignalListSchema = Joi.object({
+    status: Joi.string().trim().uppercase().valid('ALL', ...OPERATIONAL_INTELLIGENCE_SIGNAL_STATUSES).default('ALL'),
+    signalType: Joi.string().trim().uppercase().valid('ALL', ...OPERATIONAL_INTELLIGENCE_SIGNAL_TYPES).default('ALL'),
+    areaId: Joi.alternatives().try(
+        Joi.string().valid('all'),
+        Joi.number().integer().positive()
+    ).default('all'),
+    page: Joi.number().integer().min(1).max(20).default(1),
+    pageSize: Joi.number().integer().min(1).max(50).default(25)
+}).unknown(false);
+
+const operationalIntelligenceSignalCreateSchema = Joi.object({
+    signalType: Joi.string().trim().uppercase().valid(...OPERATIONAL_INTELLIGENCE_SIGNAL_TYPES).required(),
+    severity: Joi.string().trim().lowercase().valid(...OPERATIONAL_INTELLIGENCE_SIGNAL_SEVERITIES).default('info'),
+    title: Joi.string().trim().min(3).max(255).required(),
+    summary: Joi.string().trim().max(4000).allow('', null),
+    fingerprint: Joi.string().trim().max(128).allow('', null),
+    dedupeKey: Joi.string().trim().max(255).allow('', null),
+    evidence: Joi.object().unknown(true).allow(null),
+    suggestedAction: Joi.string().trim().max(4000).allow('', null),
+    periodStart: Joi.date().iso().allow(null),
+    periodEnd: Joi.date().iso().allow(null),
+    areaId: Joi.number().integer().positive().allow(null),
+    reviewOwnerUserId: Joi.number().integer().positive().allow(null),
+    reviewDueAt: Joi.date().iso().allow(null)
+}).unknown(false);
+
+const operationalIntelligenceSignalMaterializeSchema = Joi.object({
+    period: Joi.string().valid('day', 'week', 'month', 'year').default('month'),
+    offset: Joi.number().integer().min(0).max(120).default(0),
+    start: Joi.date().iso(),
+    end: Joi.date().iso().greater(Joi.ref('start'))
+}).and('start', 'end').unknown(false);
+
+const operationalIntelligenceSignalReviewSchema = Joi.object({
+    status: Joi.string().trim().uppercase().valid('OPEN', 'ACKNOWLEDGED', 'DISMISSED').required(),
+    reviewNote: Joi.string().trim().max(4000).allow('', null)
+}).unknown(false);
+
+const operationalIntelligenceSignalWorkflowSchema = Joi.object({
+    reviewOwnerUserId: Joi.number().integer().positive().allow(null),
+    reviewDueAt: Joi.date().iso().allow(null),
+    suggestedAction: Joi.string().trim().max(4000).allow('', null),
+    reviewNote: Joi.string().trim().max(4000).allow('', null)
+}).or('reviewOwnerUserId', 'reviewDueAt', 'suggestedAction', 'reviewNote').unknown(false);
+
+const operationalIntelligenceSignalTaskSchema = Joi.object({
+    title: Joi.string().trim().max(255).allow('', null),
+    subType: Joi.string().trim().max(100).allow('', null),
+    priority: Joi.string().valid(...PRIORITIES),
+    assigneeId: Joi.number().integer().positive().allow(null),
+    dueAt: Joi.date().iso().allow(null),
+    suggestedAction: Joi.string().trim().max(4000).allow('', null),
+    reviewNote: Joi.string().trim().max(4000).allow('', null),
+    payload: Joi.object().unknown(true),
+    steps: Joi.array().items(taskStepCreateSchema).max(20)
+}).unknown(false);
 
 module.exports = {
     validate,
@@ -654,16 +1118,55 @@ module.exports = {
     voiceWebhookSchema,
     wineryBrandSchema,
     wineryBookingsSchema,
+    operationalAreaProfileSchema,
+    areaProductListingSchema,
     wineryPolicySchema,
+    wineryFaqSchema,
+    wineryFaqUpdateSchema,
     winerySopSchema,
+    winerySopUpdateSchema,
     wineryIntegrationSchema,
     wineryIntegrationTestSchema,
+    areaIntegrationConfigSchema,
+    areaIntegrationTestSchema,
     emailSyncSchema,
     integrationEventCreateSchema,
     integrationEventListSchema,
     integrationEventReviewSchema,
     winerySettingsSchema,
     wineryContactSchema,
+    operationalAreaCreateSchema,
+    operationalAreaUpdateSchema,
+    areaMembershipReplaceSchema,
+    createOperationalRequestSchema,
+    updateOperationalRequestSchema,
+    decideOperationalRequestSchema,
+    createOperationalRecordSchema,
+    updateOperationalRecordSchema,
+    operationalItemListSchema,
+    operationalItemCommentSchema,
+    operationalItemRelationSchema,
+    operationalItemConversionSchema,
+    operationsFeedQuerySchema,
+    projectCreateSchema,
+    projectUpdateSchema,
+    projectListSchema,
+    projectParticipantCreateSchema,
+    projectParticipantUpdateSchema,
+    projectItemCreateSchema,
+    projectItemUpdateSchema,
+    projectItemLookupSchema,
+    projectDependencyCreateSchema,
+    projectLeadSchema,
+    projectTaskCreateSchema,
+    operationalIntelligenceSignalListSchema,
+    operationalIntelligenceSignalCreateSchema,
+    operationalIntelligenceSignalMaterializeSchema,
+    operationalIntelligenceSignalReviewSchema,
+    operationalIntelligenceSignalWorkflowSchema,
+    operationalIntelligenceConfigSchema,
+    operationalIntelligenceConfigPreviewSchema,
+    operationalIntelligenceSignalTaskSchema,
     createMemberSchema,
     updateMemberSchema,
     mergeMemberSchema,
@@ -676,6 +1179,7 @@ module.exports = {
     TASK_ORIGINS,
     INBOUND_METHODS,
     INTEGRATION_DOMAINS,
+    AREA_INTEGRATION_DOMAINS,
     INTEGRATION_STATUSES,
     INTEGRATION_AUTH_METHODS,
     INTEGRATION_EVENT_TYPES,

@@ -73,6 +73,10 @@ module.exports = (sequelize, DataTypes) => {
         authConfig: {
             type: DataTypes.JSON,
             allowNull: true
+        },
+        operationalIntelligenceConfig: {
+            type: DataTypes.JSON,
+            allowNull: true
         }
     }, {
         sequelize,

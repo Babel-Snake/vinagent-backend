@@ -9,7 +9,7 @@ async function hasTable(queryInterface, tableName) {
   const tables = await queryInterface.showAllTables();
   return tables.some((table) => {
     const name = typeof table === 'object' ? table.tableName || table.name : table;
-    return name === tableName;
+    return String(name).toLowerCase() === String(tableName).toLowerCase();
   });
 }
 
@@ -145,11 +145,9 @@ module.exports = {
       defaultValue: 'other'
     });
 
-    if (await hasIndex(queryInterface, 'CalendarEvents', 'idx_calendar_events_notice_id')) {
-      await queryInterface.removeIndex('CalendarEvents', 'idx_calendar_events_notice_id');
-    }
-
     if (await hasColumn(queryInterface, 'CalendarEvents', 'noticeId')) {
+      // MySQL may use idx_calendar_events_notice_id for the noticeId foreign key.
+      // Removing the column drops the constraint and its supporting index safely.
       await queryInterface.removeColumn('CalendarEvents', 'noticeId');
     }
   }

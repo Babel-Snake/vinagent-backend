@@ -1,5 +1,5 @@
-const { WinerySettings } = require('../../../models');
 const MockBookingProvider = require('./providers/mock');
+const integrationConnectionService = require('../../integrationConnection.service');
 // const TockBookingProvider = require('./providers/tock'); // Future
 
 class BookingIntegrationFactory {
@@ -8,11 +8,15 @@ class BookingIntegrationFactory {
      * @param {number} wineryId
      * @returns {Promise<BookingAdapter>}
      */
-    async getProvider(wineryId) {
-        const settings = await WinerySettings.findOne({ where: { wineryId } });
-
-        const providerName = settings ? settings.bookingProvider : 'mock';
-        const config = settings ? settings.bookingConfig : {};
+    async getProvider(wineryId, { areaId = null, transaction = null } = {}) {
+        const resolved = await integrationConnectionService.resolveExecutionConfig({
+            wineryId,
+            areaId,
+            domain: 'booking',
+            transaction
+        });
+        const providerName = resolved.provider;
+        const config = resolved.config;
 
         switch (providerName) {
             case 'mock':

@@ -1,4 +1,4 @@
-const { Member, TaskAction } = require('../models');
+const { Member, TaskAction, TaskArea } = require('../models');
 const memberActionTokenService = require('./memberActionTokenService');
 const logger = require('../config/logger');
 const { clearTaskOutcomeFields } = require('../utils/taskOutcome');
@@ -20,6 +20,20 @@ function _cloneTaskPayload(task) {
         return { ...task.payload };
     }
     return {};
+}
+
+async function _getPrimaryAreaId(task, transaction) {
+    if (task.areaScope !== 'AREAS') return null;
+    const primary = await TaskArea.findOne({
+        where: {
+            taskId: task.id,
+            wineryId: task.wineryId,
+            relationshipType: 'PRIMARY'
+        },
+        attributes: ['areaId'],
+        transaction
+    });
+    return primary?.areaId || null;
 }
 
 function _extractAddressPayload(task) {
@@ -269,7 +283,8 @@ async function _executeBooking(task, transaction) {
     if (!member) throw new Error('Member not found for booking');
 
     const bookingFactory = require('./integrations/booking');
-    const provider = await bookingFactory.getProvider(task.wineryId);
+    const areaId = await _getPrimaryAreaId(task, transaction);
+    const provider = await bookingFactory.getProvider(task.wineryId, { areaId, transaction });
 
     try {
         const result = await provider.createReservation({
@@ -348,7 +363,8 @@ async function _executeOrderUpdate(task, transaction) {
         return member;
     }
 
-    const provider = await crmFactory.getProvider(task.wineryId);
+    const areaId = await _getPrimaryAreaId(task, transaction);
+    const provider = await crmFactory.getProvider(task.wineryId, { areaId, transaction });
 
     try {
         const externalMember = member?.externalRef

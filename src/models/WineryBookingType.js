@@ -5,10 +5,16 @@ module.exports = (sequelize, DataTypes) => {
     class WineryBookingType extends Model {
         static associate(models) {
             WineryBookingType.belongsTo(models.Winery, { foreignKey: 'wineryId' });
+            WineryBookingType.belongsTo(models.OperationalArea, { foreignKey: 'areaId', as: 'Area' });
         }
     }
     WineryBookingType.init({
         wineryId: { type: DataTypes.INTEGER, allowNull: false },
+        areaId: {
+            type: DataTypes.INTEGER,
+            allowNull: true,
+            references: { model: 'OperationalAreas', key: 'id' }
+        },
         name: { type: DataTypes.STRING, allowNull: false },
         description: DataTypes.TEXT,
         durationMinutes: DataTypes.INTEGER,

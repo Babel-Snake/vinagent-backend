@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { updateBrand } from '../../lib/api';
+import { updateBrand, type Winery } from '../../lib/api';
+import { clientLogger } from '../../lib/clientLogger';
 
-export function BrandTab({ winery, onUpdate }: { winery: any, onUpdate: () => void }) {
+export function BrandTab({ winery, onUpdate }: { winery: Winery, onUpdate: () => void }) {
     const profile = winery.brandProfile || {};
     const [formData, setFormData] = useState({
         brandStoryShort: profile.brandStoryShort || '',
@@ -17,9 +18,11 @@ export function BrandTab({ winery, onUpdate }: { winery: any, onUpdate: () => vo
         dontSayExamples: profile.dontSayExamples ? JSON.stringify(profile.dontSayExamples) : ''
     });
     const [saving, setSaving] = useState(false);
+    const [feedback, setFeedback] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        setFeedback(null);
         setSaving(true);
         try {
             // Parse JSON fields safely
@@ -27,25 +30,26 @@ export function BrandTab({ winery, onUpdate }: { winery: any, onUpdate: () => vo
                 ...formData,
                 doSayExamples: formData.doSayExamples ? JSON.parse(formData.doSayExamples) : [],
                 dontSayExamples: formData.dontSayExamples ? JSON.parse(formData.dontSayExamples) : [],
-                formalityLevel: parseInt(formData.formalityLevel as any)
+                formalityLevel: Number(formData.formalityLevel)
             };
             await updateBrand(payload);
-            alert('Brand Settings Saved!');
+            setFeedback({ tone: 'success', message: 'Brand and voice settings saved.' });
             onUpdate();
         } catch (e) {
-            console.error(e);
-            alert('Failed to save (Check JSON syntax for examples)');
+            clientLogger.error(e);
+            setFeedback({ tone: 'error', message: e instanceof Error ? e.message : 'Failed to save. Check JSON syntax for examples.' });
         } finally {
             setSaving(false);
         }
     };
 
-    const handleChange = (field: string, value: any) => {
+    const handleChange = (field: keyof typeof formData, value: string | number) => {
         setFormData(prev => ({ ...prev, [field]: value }));
     };
 
     return (
         <form onSubmit={handleSubmit} className="space-y-6 max-w-3xl">
+            {feedback && <p role={feedback.tone === 'error' ? 'alert' : 'status'} className={`rounded-md border px-3 py-2 text-sm ${feedback.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-red-200 bg-red-50 text-red-800'}`}>{feedback.message}</p>}
             {/* ID */}
             <div>
                 <label className="block text-sm font-medium text-gray-700">Winery Story (Short)</label>
@@ -101,7 +105,7 @@ export function BrandTab({ winery, onUpdate }: { winery: any, onUpdate: () => vo
             </div>
 
             <div>
-                <button type="submit" disabled={saving} className="btn-primary inline-flex justify-center rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:bg-gray-400">
+                <button type="submit" disabled={saving} className="btn-primary">
                     {saving ? 'Saving...' : 'Save Brand Settings'}
                 </button>
             </div>

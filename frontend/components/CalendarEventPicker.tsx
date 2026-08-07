@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { CalendarEvent, searchCalendarEvents } from '../lib/api';
+import { clientLogger } from '../lib/clientLogger';
+import { operationalLabel } from '../lib/operationalPresentation';
 
 export type CalendarEventSelection = {
     id: number;
@@ -20,7 +22,7 @@ function formatEventMeta(event: CalendarEvent) {
             minute: '2-digit'
         });
 
-    return [dateText, event.type?.replace(/_/g, ' ')]
+    return [dateText, event.type ? operationalLabel(event.type) : null]
         .filter(Boolean)
         .join(' - ');
 }
@@ -65,7 +67,7 @@ export default function CalendarEventPicker({
                 setSuggestions(events.filter(event => !selectedIds.has(event.id)));
                 setShowSuggestions(true);
             } catch (err) {
-                console.error('Failed to search calendar events', err);
+                clientLogger.error('Failed to search calendar events', err);
             }
         }, 300);
 

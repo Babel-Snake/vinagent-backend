@@ -2,13 +2,16 @@
 
 import { Component, type ReactNode, useEffect, useState } from 'react';
 import { getTask, Task, Staff } from '../lib/api';
+import { clientLogger } from '../lib/clientLogger';
 import TaskCard from './TaskCard';
+import ProjectLinksPanel from './ProjectLinksPanel';
 
 interface TaskDetailModalProps {
     taskId: number;
     users: Staff[];
     userRole: string | null;
     currentUserId?: number | null;
+    currentUserAreaIds?: number[];
     onClose: () => void;
     onRefresh: () => void;
     isFlagged?: boolean;
@@ -101,11 +104,11 @@ function taskModalDebugSnapshot() {
 function logTaskModalDebugError(label: string, error: unknown, extra?: Record<string, unknown>) {
     if (!isTaskModalDebugEnabled()) return;
 
-    console.groupCollapsed(`[TaskModalDebug] ${label}`);
-    console.error(error);
-    if (extra) console.log(extra);
-    console.table(taskModalDebugSnapshot());
-    console.groupEnd();
+    clientLogger.groupCollapsed(`[TaskModalDebug] ${label}`);
+    clientLogger.error(error);
+    if (extra) clientLogger.log(extra);
+    clientLogger.table(taskModalDebugSnapshot());
+    clientLogger.groupEnd();
 }
 
 interface TaskCardPanelErrorBoundaryProps {
@@ -128,7 +131,7 @@ class TaskCardPanelErrorBoundary extends Component<TaskCardPanelErrorBoundaryPro
     }
 
     componentDidCatch(error: Error) {
-        console.error('Task detail panel render failed', error);
+        clientLogger.error('Task detail panel render failed', error);
         logTaskModalDebugError('task card error boundary caught render failure', error);
     }
 
@@ -151,6 +154,7 @@ export default function TaskDetailModal({
     users,
     userRole,
     currentUserId,
+    currentUserAreaIds = [],
     onClose,
     onRefresh,
     isFlagged,
@@ -167,8 +171,8 @@ export default function TaskDetailModal({
                 const data = await getTask(taskId);
                 setTask(data);
                 if (isTaskModalDebugEnabled()) {
-                    console.groupCollapsed(`[TaskModalDebug] task loaded task=${taskId}`);
-                    console.log({
+                    clientLogger.groupCollapsed(`[TaskModalDebug] task loaded task=${taskId}`);
+                    clientLogger.log({
                         taskId,
                         status: data.status,
                         category: data.category,
@@ -177,7 +181,7 @@ export default function TaskDetailModal({
                         stepCount: Array.isArray(data.TaskSteps) ? data.TaskSteps.length : 0,
                         subTaskCount: Array.isArray(data.SubTasks) ? data.SubTasks.length : 0
                     });
-                    console.table((data.TaskActions || []).map((action, index) => ({
+                    clientLogger.table((data.TaskActions || []).map((action, index) => ({
                         index,
                         id: action.id,
                         actionType: action.actionType,
@@ -187,7 +191,7 @@ export default function TaskDetailModal({
                             ? Object.keys(action.details).join(',')
                             : ''
                     })));
-                    console.groupEnd();
+                    clientLogger.groupEnd();
                 }
             } catch (err: unknown) {
                 setError(errorMessage(err));
@@ -219,11 +223,11 @@ export default function TaskDetailModal({
         window.addEventListener('unhandledrejection', handleUnhandledRejection);
 
         if (isTaskModalDebugEnabled()) {
-            console.info(`[TaskModalDebug] modal debug listeners active for task=${taskId}`);
+            clientLogger.info(`[TaskModalDebug] modal debug listeners active for task=${taskId}`);
             window.setTimeout(() => {
-                console.groupCollapsed(`[TaskModalDebug] modal mounted task=${taskId}`);
-                console.table(taskModalDebugSnapshot());
-                console.groupEnd();
+                clientLogger.groupCollapsed(`[TaskModalDebug] modal mounted task=${taskId}`);
+                clientLogger.table(taskModalDebugSnapshot());
+                clientLogger.groupEnd();
             }, 0);
         }
 
@@ -302,10 +306,11 @@ export default function TaskDetailModal({
                                     users={users}
                                     userRole={userRole}
                                     currentUserId={currentUserId}
+                                    currentUserAreaIds={currentUserAreaIds}
                                     onRefresh={() => {
                                         onRefresh();
                                         // Reload this modal's data too
-                                        getTask(taskId).then(setTask).catch(console.error);
+                                        getTask(taskId).then(setTask).catch(clientLogger.error);
                                     }}
                                     canAssign={userRole !== 'staff'}
                                     isFlagged={isFlagged}
@@ -314,6 +319,7 @@ export default function TaskDetailModal({
                                     highlighted={false} // Force no highlight style
                                 />
                             </TaskCardPanelErrorBoundary>
+                            <ProjectLinksPanel itemType="TASK" itemId={task.id} />
                         </div>
                     ) : null}
                 </div>

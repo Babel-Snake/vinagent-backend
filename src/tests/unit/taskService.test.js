@@ -40,6 +40,10 @@ jest.mock('../../models', () => ({
     Notification: {
         create: jest.fn(),
         findAll: jest.fn()
+    },
+    Project: {},
+    ProjectItem: {
+        findAll: jest.fn()
     }
 }));
 
@@ -57,7 +61,7 @@ jest.mock('../../services/audit.service', () => ({
     logTaskAction: jest.fn()
 }));
 
-const { Task, TaskStep, WinerySettings, Notification } = require('../../models');
+const { Task, TaskStep, WinerySettings, Notification, ProjectItem } = require('../../models');
 const executionService = require('../../services/execution.service');
 
 describe('TaskService Unit Tests', () => {
@@ -67,6 +71,7 @@ describe('TaskService Unit Tests', () => {
         Task.findAll.mockResolvedValue([]);
         TaskStep.findAll.mockResolvedValue([]);
         Notification.findAll.mockResolvedValue([]);
+        ProjectItem.findAll.mockResolvedValue([]);
     });
 
     describe('updateTask', () => {

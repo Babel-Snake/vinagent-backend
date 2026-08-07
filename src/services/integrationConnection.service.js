@@ -1,8 +1,13 @@
 const crypto = require('crypto');
-const { WineryIntegrationConfig, WinerySettings } = require('../models');
+const {
+  WineryIntegrationConfig,
+  WinerySettings,
+  OperationalAreaIntegrationConfig
+} = require('../models');
 const { ValidationError } = require('../utils/errors');
 
 const DOMAINS = ['sms', 'email', 'pos', 'crm', 'booking', 'delivery'];
+const AREA_DOMAINS = ['pos', 'crm', 'booking', 'delivery'];
 
 const PROVIDER_FIELDS = {
   sms: 'smsProvider',
@@ -112,6 +117,15 @@ function serializeIntegrationConfig(config) {
   };
 }
 
+function serializeAreaIntegrationConfig(config) {
+  if (!config) return null;
+  const plain = config.toJSON ? config.toJSON() : { ...config };
+  return {
+    ...plain,
+    providerConnections: sanitizeProviderConnections(plain.providerConnections)
+  };
+}
+
 function mapCrmProviderToExecution(provider) {
   if (provider === 'commerce7' || provider === 'winedirect') return provider;
   return 'mock';
@@ -176,6 +190,43 @@ function normalizeProviderConnections(payload = {}, existingConfig = null) {
 
     return connections;
   }, {});
+}
+
+function areaWebhookPath({ wineryId, areaId, domain }) {
+  return `/api/webhooks/integration/${wineryId}/${domain}/${areaId}`;
+}
+
+function normalizeAreaProviderConnections(payload = {}, existingConfig = null, context = {}) {
+  const incomingConnections = parseJsonObject(payload.providerConnections);
+  const existingConnections = parseJsonObject(existingConfig?.providerConnections);
+  const nextConnections = { ...existingConnections };
+
+  for (const domain of AREA_DOMAINS) {
+    if (!Object.prototype.hasOwnProperty.call(incomingConnections, domain)) continue;
+
+    const incoming = parseJsonObject(incomingConnections[domain]);
+    const existing = parseJsonObject(existingConnections[domain]);
+    const providerField = PROVIDER_FIELDS[domain];
+    const provider = incoming.provider || existing.provider || DEFAULT_PROVIDERS[domain];
+    const normalized = normalizeProviderConnections({
+      [providerField]: provider,
+      providerConnections: {
+        [domain]: {
+          ...incoming,
+          webhookUrl: incoming.webhookUrl
+            ?? existing.webhookUrl
+            ?? areaWebhookPath({ ...context, domain })
+        }
+      }
+    }, {
+      [providerField]: existing.provider || provider,
+      providerConnections: { [domain]: existing }
+    });
+
+    nextConnections[domain] = normalized[domain];
+  }
+
+  return nextConnections;
 }
 
 function buildProviderConfig(connection, selectedProvider) {
@@ -301,18 +352,79 @@ async function testConnection({ wineryId, domain }) {
   return testedConnection;
 }
 
+async function testAreaConnection({ wineryId, areaId, domain }) {
+  const config = await OperationalAreaIntegrationConfig.findOne({ where: { wineryId, areaId } });
+  if (!config) {
+    const err = new Error('Area integration config not found');
+    err.statusCode = 404;
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+
+  const connections = parseJsonObject(config.providerConnections);
+  if (!connections[domain]) {
+    const err = new Error('Area integration override not found');
+    err.statusCode = 404;
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+
+  const testedConnection = assessConnection(config, domain);
+  await config.update({
+    providerConnections: {
+      ...connections,
+      [domain]: testedConnection
+    }
+  });
+  return testedConnection;
+}
+
+async function resolveExecutionConfig({ wineryId, areaId = null, domain, transaction = null }) {
+  if (!['booking', 'crm'].includes(domain)) {
+    throw new ValidationError(`Execution configuration is not supported for '${domain}'.`);
+  }
+
+  if (areaId) {
+    const areaConfig = await OperationalAreaIntegrationConfig.findOne({
+      where: { wineryId, areaId },
+      transaction
+    });
+    const connection = parseJsonObject(areaConfig?.providerConnections)[domain];
+    if (connection) {
+      const selectedProvider = connection.provider || DEFAULT_PROVIDERS[domain];
+      return {
+        provider: connection.executionProvider || getExecutionProvider(domain, selectedProvider),
+        config: buildProviderConfig(connection, selectedProvider),
+        source: 'area'
+      };
+    }
+  }
+
+  const settings = await WinerySettings.findOne({ where: { wineryId }, transaction });
+  return {
+    provider: settings?.[`${domain}Provider`] || 'mock',
+    config: settings?.[`${domain}Config`] || {},
+    source: 'winery'
+  };
+}
+
 module.exports = {
   DOMAINS,
+  AREA_DOMAINS,
   DEFAULT_CAPABILITIES,
   digestWebhookSecret,
   hashWebhookSecret,
   normalizeProviderConnections,
+  normalizeAreaProviderConnections,
   parseJsonObject,
   sanitizeProviderConnection,
   sanitizeProviderConnections,
   serializeIntegrationConfig,
+  serializeAreaIntegrationConfig,
   syncExecutionSettings,
   testConnection,
+  testAreaConnection,
+  resolveExecutionConfig,
   mapCrmProviderToExecution,
   mapBookingProviderToExecution
 };

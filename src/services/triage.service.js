@@ -12,6 +12,7 @@ const logger = require('../config/logger');
 const { STEP_TYPES, WAITING_ON } = require('../utils/validation');
 const { inferStepType, inferWaitingOn, getWorkflowTemplateForTask } = require('./taskWorkflowTemplates');
 const { classifyMessageHeuristically } = require('./taskClassificationHeuristics');
+const { classifyOperationalType } = require('./operationalClassification.service');
 
 function normalizeSuggestedSteps(rawSteps, context = {}) {
     const fallback = getWorkflowTemplateForTask(context);
@@ -124,6 +125,7 @@ async function triageMessage(message, context = {}) {
 
 
 
+    const operationalClassification = classifyOperationalType(messageBody, result);
     const suggestedSteps = normalizeSuggestedSteps(result.suggestedSteps, {
         category: result.category,
         subType: result.subType,
@@ -152,6 +154,9 @@ async function triageMessage(message, context = {}) {
         suggestedAction: result.suggestedAction || undefined,
         suggestedRecipientEmail: suggestedChannel === 'email' ? result.suggestedRecipientEmail || undefined : undefined,
         suggestedCc: suggestedChannel === 'email' ? result.suggestedCc || undefined : undefined,
+        suggestedType: operationalClassification.suggestedType,
+        confidence: operationalClassification.confidence,
+        classificationSource: operationalClassification.classificationSource,
         suggestedSteps
     };
 }

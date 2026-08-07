@@ -7,7 +7,7 @@ VinAgent now has a generic inbound integration event layer for operational signa
 - Receive third-party operational signals without coupling the app to one vendor.
 - Store the raw event for audit/debugging.
 - Create a normalized payload for review and downstream processing.
-- Let managers decide whether an event becomes a notice, task, ignored item, archived item, or linked task.
+- Let managers decide whether an event becomes one or many Tasks, Notices, Requests, or Notes, an ignored item, or an archived item.
 - Reuse existing notices, tasks, comments, notice-task links, and attachments.
 
 ## Data Model
@@ -21,7 +21,10 @@ VinAgent now has a generic inbound integration event layer for operational signa
 - `rawPayload`: redacted original payload.
 - `normalizedPayload`: provider-agnostic internal shape.
 - `status`: `RECEIVED`, `PENDING_REVIEW`, `PROCESSED`, `IGNORED`, `ARCHIVED`, `FAILED`, etc.
-- `relatedRecordType` / `relatedRecordId`: the VinAgent record created or linked after review.
+- `IntegrationEventItem`: one link per created or linked Task, Notice, Request, or Note, including a stable item key and `CREATED | LINKED` provenance.
+- `relatedRecordType` / `relatedRecordId`: compatibility pointer to the first linked result.
+- `suggestedAreaId`, `areaConfidence`, and `areaMappingSource`: optional provider/rule/AI placement suggestion.
+- `confirmedAreaId`: manager-confirmed placement used when creating a task or notice.
 
 Imported notices now also have source metadata:
 
@@ -97,6 +100,7 @@ Supported actions:
 - `publish_notice`: creates a VinAgent notice from `notice.imported` data and optionally links tasks via `taskIds`.
 - `create_task`: creates a draft task from a call intake or generic event.
 - `link_task`: marks the event processed and links it to an existing task via `taskId`.
+- `create_items`: atomically creates or links up to ten Tasks, Notices, Requests, and Notes. A failed item rolls back the entire batch; replay returns the existing links.
 - `ignore`: marks the event ignored.
 - `archive`: marks the event archived.
 
@@ -123,6 +127,10 @@ The webhook accepts either a wrapped payload:
 
 or a direct payload with top-level `eventType` fields. Events still land in `PENDING_REVIEW` and must be reviewed by a manager before they become notices or tasks.
 
+### `POST /api/webhooks/integration/:wineryId/:domain/:areaId`
+
+Uses the selected area's booking, POS, CRM, or delivery connection and its independent signing secret. The area must be active and belong to the winery. Accepted events receive `suggestedAreaId = areaId`, `areaConfidence = 1`, and `areaMappingSource = RULE`, but still pass through the normal manager review queue before conversion.
+
 ## Manager Review UI
 
 Managers and admins can review intake events from `/integration-events` in the dashboard. The page supports:
@@ -132,7 +140,10 @@ Managers and admins can review intake events from `/integration-events` in the d
 - inspecting raw and normalized payloads before action
 - publishing imported notices with category, priority, pinning, and task links
 - creating external phone tasks from call intake summaries
+- creating multiple typed operational items in a single atomic review
+- opening every object created or linked by an event
 - linking an event to an existing task, ignoring it, or archiving it
+- filtering by operational area and confirming primary/linked areas before conversion
 
 ## Normalized Event Types
 

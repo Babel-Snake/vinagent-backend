@@ -9,6 +9,7 @@ import {
     openAttachment,
     uploadAttachment
 } from '../lib/api';
+import ConfirmDialog from './ui/ConfirmDialog';
 
 const ACCEPTED_ATTACHMENT_TYPES = [
     'image/jpeg',
@@ -81,6 +82,7 @@ export default function AttachmentPanel({
     const [busyId, setBusyId] = useState<number | null>(null);
     const [uploading, setUploading] = useState(false);
     const [error, setError] = useState('');
+    const [attachmentPendingDeletion, setAttachmentPendingDeletion] = useState<Attachment | null>(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -137,10 +139,9 @@ export default function AttachmentPanel({
         }
     }
 
-    async function handleDeleteAttachment(attachment: Attachment) {
-        const confirmed = window.confirm(`Delete "${attachment.filename}"?`);
-        if (!confirmed) return;
-
+    async function deletePendingAttachment() {
+        const attachment = attachmentPendingDeletion;
+        if (!attachment) return;
         setBusyId(attachment.id);
         try {
             await deleteAttachment(attachment.id);
@@ -148,13 +149,16 @@ export default function AttachmentPanel({
             setError('');
             await onChanged?.();
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to delete attachment');
+            const message = err instanceof Error ? err.message : 'Failed to delete attachment';
+            setError(message);
+            throw new Error(message);
         } finally {
             setBusyId(null);
         }
     }
 
     return (
+        <>
         <div className={`${compact ? 'rounded-md border border-slate-200 bg-white p-3' : 'rounded-lg border border-slate-200 bg-slate-50 p-4'}`}>
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
@@ -243,7 +247,7 @@ export default function AttachmentPanel({
                                         {canDelete && (
                                             <button
                                                 type="button"
-                                                onClick={() => handleDeleteAttachment(attachment)}
+                                                onClick={() => setAttachmentPendingDeletion(attachment)}
                                                 disabled={busyId === attachment.id}
                                                 className="rounded border border-red-200 bg-white px-2.5 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"
                                             >
@@ -258,5 +262,15 @@ export default function AttachmentPanel({
                 )}
             </div>
         </div>
+        <ConfirmDialog
+            open={Boolean(attachmentPendingDeletion)}
+            onClose={() => setAttachmentPendingDeletion(null)}
+            onConfirm={deletePendingAttachment}
+            title="Delete attachment?"
+            description={attachmentPendingDeletion ? `"${attachmentPendingDeletion.filename}" will be permanently removed.` : ''}
+            confirmLabel="Delete attachment"
+            destructive
+        />
+        </>
     );
 }

@@ -1,15 +1,17 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { sendPasswordResetEmail, signOut, updateProfile } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
 import { auth } from '../lib/firebase';
-import { clearPinSession, updateMyProfile } from '../lib/api';
+import { clearPinSession, updateMyProfile, type AuthDisplayUser, type UserProfile } from '../lib/api';
+import { errorMessage } from '../lib/errors';
 
 interface ProfileDropdownProps {
-    user: any;
-    fullProfile: any;
-    onProfileUpdated?: (profile: any) => void;
+    user: AuthDisplayUser | null;
+    fullProfile: UserProfile | null;
+    onProfileUpdated?: (profile: UserProfile) => void;
 }
 
 export default function ProfileDropdown({ user, fullProfile, onProfileUpdated }: ProfileDropdownProps) {
@@ -61,8 +63,8 @@ export default function ProfileDropdown({ user, fullProfile, onProfileUpdated }:
             onProfileUpdated?.(updated.user);
             setDisplayName(trimmedDisplayName);
             setSettingsOpen(false);
-        } catch (err: any) {
-            setSaveError(err.message || 'Failed to update profile');
+        } catch (err: unknown) {
+            setSaveError(errorMessage(err, 'Failed to update profile'));
         } finally {
             setSaving(false);
         }
@@ -87,8 +89,8 @@ export default function ProfileDropdown({ user, fullProfile, onProfileUpdated }:
         try {
             await sendPasswordResetEmail(auth, email);
             setResetMessage(`Password reset email sent to ${email}.`);
-        } catch (err: any) {
-            setResetError(err.message || 'Failed to send password reset email.');
+        } catch (err: unknown) {
+            setResetError(errorMessage(err, 'Failed to send password reset email.'));
         } finally {
             setResetSending(false);
         }
@@ -175,9 +177,9 @@ export default function ProfileDropdown({ user, fullProfile, onProfileUpdated }:
                 )}
             </div>
 
-            {settingsOpen && (
+            {settingsOpen && createPortal(
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1c231f]/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
-                    <div className="w-full max-w-lg rounded-lg bg-[var(--surface)] shadow-2xl">
+                    <div className="max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-lg bg-[var(--surface)] shadow-2xl">
                         <div className="flex items-start justify-between border-b border-[var(--border)] px-5 py-4">
                             <div>
                                 <h2 className="text-lg font-semibold text-[#1c231f]">Profile settings</h2>
@@ -275,7 +277,8 @@ export default function ProfileDropdown({ user, fullProfile, onProfileUpdated }:
                             </div>
                         </form>
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
         </>
     );

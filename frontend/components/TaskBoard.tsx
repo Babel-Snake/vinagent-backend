@@ -9,6 +9,8 @@ interface TaskBoardProps {
     flaggedTaskIds?: number[];
     onToggleFlag?: (taskId: number) => void;
     onTaskClick?: (taskId: number) => void;
+    currentUserId?: number | null;
+    currentUserAreaIds?: number[];
 }
 
 export default function TaskBoard({
@@ -16,7 +18,9 @@ export default function TaskBoard({
     users,
     flaggedTaskIds = [],
     onToggleFlag,
-    onTaskClick
+    onTaskClick,
+    currentUserId,
+    currentUserAreaIds = []
 }: TaskBoardProps) {
     if (tasks.length === 0) {
         return (
@@ -39,6 +43,8 @@ export default function TaskBoard({
                     isFlagged={flaggedTaskIds.includes(task.id)}
                     onToggleFlag={onToggleFlag}
                     onClick={() => onTaskClick && onTaskClick(task.id)}
+                    currentUserId={currentUserId}
+                    currentUserAreaIds={currentUserAreaIds}
                 />
             ))}
         </div>

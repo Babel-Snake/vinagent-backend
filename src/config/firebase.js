@@ -9,6 +9,23 @@ const serviceAccountPath = path.join(__dirname, 'serviceAccountKey.json');
 let serviceAccount;
 let serviceAccountSource = null;
 
+function getAdminApps() {
+    if (typeof admin.getApps === 'function') return admin.getApps();
+    return Array.isArray(admin.apps) ? admin.apps : [];
+}
+
+function getAdminAuth() {
+    if (typeof admin.auth === 'function') return admin.auth();
+    const { getAuth } = require('firebase-admin/auth');
+    return getAuth();
+}
+
+function getCertificateFactory() {
+    if (typeof admin.cert === 'function') return admin.cert;
+    if (typeof admin.credential?.cert === 'function') return admin.credential.cert;
+    throw new Error('Firebase Admin certificate credentials are unavailable.');
+}
+
 function normalizePrivateKey(privateKey) {
     return String(privateKey || '').replace(/\\n/g, '\n');
 }
@@ -73,7 +90,7 @@ try {
 
 function initializeFirebase(serviceAccountToUse, source) {
     admin.initializeApp({
-        credential: admin.credential.cert(serviceAccountToUse),
+        credential: getCertificateFactory()(serviceAccountToUse),
         projectId: serviceAccountToUse.project_id
     });
     logger.info('Firebase Admin Initialized successfully.', { credentialSource: source });
@@ -81,7 +98,7 @@ function initializeFirebase(serviceAccountToUse, source) {
 
 // Initialize Firebase Admin
 try {
-    if (serviceAccount && !admin.apps.length) {
+    if (serviceAccount && getAdminApps().length === 0) {
         initializeFirebase(serviceAccount, serviceAccountSource);
     }
 } catch (error) {
@@ -94,7 +111,7 @@ try {
         });
         try {
             const localServiceAccount = loadServiceAccountFromFile();
-            if (localServiceAccount && !admin.apps.length) {
+            if (localServiceAccount && getAdminApps().length === 0) {
                 validateServiceAccount(localServiceAccount);
                 logger.warn('Retrying Firebase Admin initialization with local serviceAccountKey.json fallback.');
                 initializeFirebase(localServiceAccount, 'serviceAccountKey.json');
@@ -107,4 +124,18 @@ try {
     }
 }
 
-module.exports = admin;
+const adminFacade = {
+    ...admin,
+    auth: getAdminAuth,
+    credential: {
+        ...(admin.credential || {}),
+        cert: getCertificateFactory()
+    }
+};
+
+Object.defineProperty(adminFacade, 'apps', {
+    enumerable: true,
+    get: getAdminApps
+});
+
+module.exports = adminFacade;

@@ -70,7 +70,10 @@ class OpenAIAdapter extends AIAdapter {
         if (context.wineryId) {
             try {
                 const { getAiContext } = require('../winery.service');
-                wineryData = await getAiContext(context.wineryId);
+                const areaIds = [context.areaId, context.confirmedAreaId, context.suggestedAreaId]
+                    .map(Number)
+                    .filter(areaId => Number.isInteger(areaId) && areaId > 0);
+                wineryData = await getAiContext(context.wineryId, { areaIds });
 
                 if (wineryData) {
                     wineryContextString = JSON.stringify(wineryData, null, 2);
@@ -128,6 +131,9 @@ DO NOT offer to "check options", "verify schedules", or pass it to a staff membe
 
 **Classification Rules:**
 Return a JSON object with the following fields:
+
+- suggestedType: One of [TASK, NOTICE, REQUEST, NOTE]. TASK means assigned action; NOTICE means broadcast information; REQUEST means approval/help/decision/information/resources are needed; NOTE means recorded context without an immediate required action.
+- confidence: A number from 0 to 1 expressing confidence in suggestedType.
 
 - reasoning: A JSON object outlining your step-by-step logic BEFORE taking action. You MUST provide this:
     - 1_categorisation: Why does this request fit the selected category and subType?

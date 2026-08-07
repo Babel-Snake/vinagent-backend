@@ -16,19 +16,20 @@ module.exports = {
             await queryInterface.addColumn('Members', 'customerType', {
                 type: Sequelize.ENUM('guest', 'member', 'tour_operator'),
                 allowNull: false,
-                defaultValue: 'guest',
-                after: 'lastPurchaseAt'
+                defaultValue: 'guest'
             });
         }
 
-        await queryInterface.sequelize.query(`
-            UPDATE Members
-            SET customerType = CASE
-                WHEN isWineClubMember = true THEN 'member'
-                ELSE 'guest'
-            END
-            WHERE customerType IS NULL OR customerType = 'guest'
-        `);
+        if (await hasColumn(queryInterface, 'isWineClubMember')) {
+            await queryInterface.sequelize.query(`
+                UPDATE Members
+                SET customerType = CASE
+                    WHEN isWineClubMember = true THEN 'member'
+                    ELSE 'guest'
+                END
+                WHERE customerType IS NULL OR customerType = 'guest'
+            `);
+        }
 
         if (!(await hasIndex(queryInterface, 'idx_members_winery_customer_type_v2'))) {
             await queryInterface.addIndex('Members', ['wineryId', 'customerType'], {

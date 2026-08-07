@@ -15,6 +15,7 @@ async function listEvents(req, res, next) {
         status: query.status,
         eventType: query.eventType,
         provider: query.provider,
+        areaId: query.areaId,
         search: query.search
       },
       pagination: {

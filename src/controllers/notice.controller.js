@@ -15,6 +15,7 @@ async function listNotices(req, res, next) {
       category,
       priority,
       authorId,
+      areaId,
       pinned,
       status,
       dateFrom,
@@ -35,6 +36,7 @@ async function listNotices(req, res, next) {
         category,
         priority,
         authorId,
+        areaId,
         pinned,
         status,
         dateFrom,
@@ -138,6 +140,7 @@ async function unlinkTask(req, res, next) {
       noticeId: req.params.id,
       taskId: req.params.taskId,
       wineryId: req.user.wineryId,
+      userId: req.user.id,
       userRole: req.user.role
     });
 
@@ -185,10 +188,39 @@ async function deleteComment(req, res, next) {
       noticeId: req.params.id,
       commentId: req.params.commentId,
       wineryId: req.user.wineryId,
+      userId: req.user.id,
       userRole: req.user.role
     });
 
     res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function acknowledgeNotice(req, res, next) {
+  try {
+    const notice = await noticeService.acknowledgeNotice({
+      noticeId: req.params.id,
+      wineryId: req.user.wineryId,
+      userId: req.user.id,
+      userRole: req.user.role
+    });
+    res.json({ notice });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function listAcknowledgements(req, res, next) {
+  try {
+    const acknowledgement = await noticeService.getNoticeAcknowledgements({
+      noticeId: req.params.id,
+      wineryId: req.user.wineryId,
+      userId: req.user.id,
+      userRole: req.user.role
+    });
+    res.json({ acknowledgement });
   } catch (err) {
     next(err);
   }
@@ -204,5 +236,7 @@ module.exports = {
   unlinkTask,
   listComments,
   createComment,
-  deleteComment
+  deleteComment,
+  acknowledgeNotice,
+  listAcknowledgements
 };

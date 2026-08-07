@@ -236,11 +236,29 @@ Execution gating is now feature-specific:
 * booking execution depends on `enableBookingModule`
 * order writeback depends on `enableOrdersModule`
 
-## 7. AI Architecture
+## 7. Project Coordination Layer
+
+Projects are an optional container above Tasks, Requests, Notices, Notes, and Calendar Events. They do not replace those source domains or create a second workflow engine.
+
+Project authority has two tiers. Governance belongs to global managers and area managers who manage every participating area; governance controls accountability, leadership, scope, and terminal lifecycle changes. An explicitly appointed Project Lead receives delivery-management authority only for that open Project. Cross-area Task delegation uses one transaction to validate the Project area and assignee membership, create the authoritative Task, mark its Project link as `DELEGATED_WORK`, write Task and Project audits, and enqueue assignee/manager notifications. Existing `REFERENCE` links remain permission-neutral.
+
+The Project implementation is split across:
+
+* `projectVisibility.service.js` for tenant, organisation, area, owner/creator, and participant visibility plus manage authority
+* `projectItemResolver.service.js` for permission-safe typed source resolution and compact link serialization
+* `projectSummary.service.js` for pure progress, health, attention, milestone, dependency, and next-action derivation
+* `project.service.js` for lifecycle transactions, memberships, dependencies, audit, attachments, and notifications
+* `project.controller.js` and `project.routes.js` for the HTTP boundary under `/api/projects`
+
+Project membership is polymorphic through `ProjectItem(itemType, itemId)`. Because this edge cannot use one conventional foreign key, the service validates that the target exists in the same winery and that the actor can see it before linking. Project participation never grants access to a restricted child item; detail responses omit hidden child metadata and expose only a restricted count.
+
+Progress is `completed required Tasks / required Tasks` and is null when no required Task exists. Health is derived separately from lifecycle status so an Active Project can be On Track, At Risk, Blocked, or Overdue. Project completion is guarded while required Tasks remain incomplete unless an authorised human records an explicit reasoned override.
+
+## 8. AI Architecture
 
 There are two AI-related paths in the current build:
 
-### 7.1 Triage
+### 8.1 Triage
 
 `triage.service` prefers AI classification unless `AI_SKIP=true`. If AI is unavailable, it falls back to deterministic heuristics. Initial step plans are normalized through the centralized workflow-template registry in `taskWorkflowTemplates.js`, so subtype/category defaults stay consistent even when AI output varies.
 
@@ -261,11 +279,11 @@ In `NODE_ENV=test`, the AI service now forces the deterministic mock adapter unl
 
 Webhook intake now also shares the same customer identity-resolution engine used by manual external task creation. That keeps auto-link, review-required, and conservative auto-create behavior materially consistent across inbound channels.
 
-### 7.2 Reply/Action Suggestions
+### 8.2 Reply/Action Suggestions
 
 `aiSuggestion.service` can regenerate suggested replies/actions using task context, winery context, task history, member context, the current ordered step plan, the task communication timeline, and any already-recorded structured task outcome.
 
-## 8. Analytics Model
+## 9. Analytics Model
 
 `analytics.controller.js` now reports both classic counts and operational flow metrics.
 
@@ -288,7 +306,7 @@ The richer operational layer is returned under `operations` and is derived from:
 
 This makes analytics a management surface for where work is slowing, not just a volume dashboard.
 
-## 9. Winery Context
+## 10. Winery Context
 
 The current backend models winery context as a core winery record plus modular profiles:
 
@@ -303,7 +321,7 @@ The current backend models winery context as a core winery record plus modular p
 
 This data is used both by the dashboard and by the AI layer.
 
-## 10. Security Model
+## 11. Security Model
 
 Current security controls include:
 
@@ -314,7 +332,7 @@ Current security controls include:
 * request correlation IDs and centralized error responses
 * redaction/scrubbing in parts of the ingestion path
 
-## 11. Observed Constraints
+## 12. Observed Constraints
 
 A few design realities matter when changing the system:
 
@@ -324,7 +342,9 @@ A few design realities matter when changing the system:
 * analytics currently approximates waiting/blocked age from the current task update timestamp; if exact state-duration reporting becomes critical, add explicit state-transition timestamps.
 * The audit trail is richer than the status model; do not try to reintroduce old fine-grained statuses without checking current services first.
 * Several user-facing behaviours depend on feature flags in `WinerySettings`.
+* Project status is persisted, but Project health/progress/attention are derived from current authoritative child state and are not independently editable.
+* A Project link never widens the visibility of its source Task, Request, Notice, Note, or Calendar Event.
 
-## 12. Summary
+## 13. Summary
 
 The current VinAgent architecture is best understood as a task-centric workflow engine for winery operations. The simplified status model is intentional, and structured workflow progression now lives in `TaskStep`. If you need exact behaviour, read `taskService`, `execution.service`, and `addressUpdateService` together; that is the live contract the docs and tests should follow.

@@ -8,6 +8,7 @@ const {
 } = require('../models');
 const { Op } = require('sequelize');
 const logger = require('../config/logger');
+const recordVisibility = require('../services/recordVisibility.service');
 
 const LINKED_TASK_ATTRIBUTES = [
     'id',
@@ -16,6 +17,9 @@ const LINKED_TASK_ATTRIBUTES = [
     'subType',
     'priority',
     'payload',
+    'wineryId',
+    'areaScope',
+    'createdBy',
     'assigneeId',
     'dueAt'
 ];
@@ -27,7 +31,12 @@ const LINKED_NOTICE_ATTRIBUTES = [
     'isPinned',
     'effectiveFrom',
     'expiresAt',
-    'archivedAt'
+    'archivedAt',
+    'wineryId',
+    'areaScope',
+    'audienceType',
+    'audienceRoles',
+    'audienceUserIds'
 ];
 
 function normalizeIdList(values, legacyValue) {
@@ -137,13 +146,21 @@ async function getCalendarEventById(id, wineryId) {
 
 exports.listEvents = async (req, res) => {
     try {
-        const { start, end, search, pageSize } = req.query;
+        const { start, end, search, pageSize, eventId } = req.query;
         if (!req.user) {
             return res.status(401).json({ error: 'Unauthorized' });
         }
 
         const wineryId = req.user.wineryId;
         const where = { wineryId };
+
+        if (eventId !== undefined) {
+            const parsedEventId = Number(eventId);
+            if (!Number.isInteger(parsedEventId) || parsedEventId <= 0) {
+                return res.status(400).json({ error: 'Invalid calendar event ID' });
+            }
+            where.id = parsedEventId;
+        }
 
         if (start && end) {
             where[Op.and] = [
@@ -169,11 +186,48 @@ exports.listEvents = async (req, res) => {
         const events = await CalendarEvent.findAll({
             where,
             include: buildEventInclude(),
-            order: [['start', 'ASC']],
-            ...(limit ? { limit } : {})
+            order: [['start', 'ASC']]
         });
 
-        res.json(events);
+        const visibleEvents = [];
+        for (const event of events) {
+            const value = event.toJSON();
+            const linkedTasks = [
+                ...(value.LinkedTasks || []),
+                ...(value.LinkedTask ? [value.LinkedTask] : [])
+            ];
+            const linkedNotices = [
+                ...(value.LinkedNotices || []),
+                ...(value.LinkedNotice ? [value.LinkedNotice] : [])
+            ];
+            const visibleTasks = [];
+            for (const task of linkedTasks) {
+                if (await recordVisibility.canViewTask(task, {
+                    wineryId,
+                    userId: req.user.id,
+                    userRole: req.user.role
+                })) visibleTasks.push(task);
+            }
+            const visibleNotices = [];
+            for (const notice of linkedNotices) {
+                if (await recordVisibility.canViewNotice(notice, {
+                    wineryId,
+                    userId: req.user.id,
+                    userRole: req.user.role
+                })) visibleNotices.push(notice);
+            }
+            const hasRestrictedLinks = linkedTasks.length > 0 || linkedNotices.length > 0;
+            if (hasRestrictedLinks && visibleTasks.length === 0 && visibleNotices.length === 0) continue;
+            value.LinkedTasks = visibleTasks;
+            value.LinkedTask = visibleTasks[0] || null;
+            value.taskId = visibleTasks[0]?.id || null;
+            value.LinkedNotices = visibleNotices;
+            value.LinkedNotice = visibleNotices[0] || null;
+            value.noticeId = visibleNotices[0]?.id || null;
+            visibleEvents.push(value);
+        }
+
+        res.json(limit ? visibleEvents.slice(0, limit) : visibleEvents);
     } catch (error) {
         logger.error('Error fetching calendar events:', error);
         res.status(500).json({ error: 'Failed to fetch events' });

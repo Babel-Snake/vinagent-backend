@@ -10,6 +10,11 @@ module.exports = (sequelize, DataTypes) => {
       if (models.Notice) {
         IntegrationEvent.hasMany(models.Notice, { foreignKey: 'sourceEventId', as: 'Notices' });
       }
+      IntegrationEvent.hasMany(models.IntegrationEventItem, { foreignKey: 'eventId', as: 'LinkedItems' });
+      IntegrationEvent.hasMany(models.OperationalRequest, { foreignKey: 'sourceEventId', as: 'OperationalRequests' });
+      IntegrationEvent.hasMany(models.OperationalRecord, { foreignKey: 'sourceEventId', as: 'OperationalRecords' });
+      IntegrationEvent.belongsTo(models.OperationalArea, { foreignKey: 'suggestedAreaId', as: 'SuggestedArea' });
+      IntegrationEvent.belongsTo(models.OperationalArea, { foreignKey: 'confirmedAreaId', as: 'ConfirmedArea' });
     }
   }
 
@@ -81,6 +86,24 @@ module.exports = (sequelize, DataTypes) => {
       },
       metadata: {
         type: DataTypes.JSON,
+        allowNull: true
+      },
+      suggestedAreaId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: 'OperationalAreas', key: 'id' }
+      },
+      confirmedAreaId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: 'OperationalAreas', key: 'id' }
+      },
+      areaConfidence: {
+        type: DataTypes.DECIMAL(5, 4),
+        allowNull: true
+      },
+      areaMappingSource: {
+        type: DataTypes.ENUM('RULE', 'MANUAL', 'ADAPTER', 'AI', 'DEFAULT'),
         allowNull: true
       },
       wineryId: {
