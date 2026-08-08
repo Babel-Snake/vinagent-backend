@@ -1,10 +1,12 @@
 const crypto = require('crypto');
 const fs = require('fs/promises');
-const os = require('os');
 const path = require('path');
 const { Attachment, Notice, Task, TaskAction, TaskStep, User } = require('../models');
 const { ForbiddenError, NotFoundError, ValidationError } = require('../utils/errors');
 const recordVisibility = require('./recordVisibility.service');
+const { getAttachmentStorageRoot } = require('./attachmentStorage.service');
+const { safeRecordUsageEvent } = require('./usageTracking.service');
+const { METRICS } = require('./usageMetricCatalog');
 
 const MANAGER_ROLES = new Set(['manager', 'admin']);
 const ENTITY_TYPES = new Set(['TASK', 'TASK_STEP', 'TASK_OUTCOME', 'TASK_FOLLOW_UP', 'NOTICE', 'REQUEST', 'NOTE', 'PROJECT']);
@@ -41,15 +43,7 @@ function isPrivileged(userRole) {
 }
 
 function getStorageRoot() {
-  if (process.env.ATTACHMENT_STORAGE_ROOT) {
-    return path.resolve(process.env.ATTACHMENT_STORAGE_ROOT);
-  }
-
-  if (process.env.NODE_ENV === 'test') {
-    return path.join(os.tmpdir(), 'vinagent-test-attachments');
-  }
-
-  return path.resolve(process.cwd(), 'uploads', 'attachments');
+  return getAttachmentStorageRoot();
 }
 
 function sanitizeFilename(filename) {
@@ -62,13 +56,35 @@ function extensionFor(filename) {
   return ext.length <= 12 ? ext : '';
 }
 
-function storagePathFor(storageKey) {
+function mimeGroup(mimeType) {
+  return String(mimeType || '').split('/')[0] || 'other';
+}
+
+function storagePathFor(storageKey, wineryId = null) {
   const root = getStorageRoot();
-  const resolved = path.resolve(root, storageKey);
-  if (!resolved.startsWith(root)) {
+  const resolved = path.resolve(root, String(storageKey || ''));
+  const relativeToRoot = path.relative(root, resolved);
+  if (!relativeToRoot || relativeToRoot.startsWith(`..${path.sep}`) || path.isAbsolute(relativeToRoot)) {
     throw new ValidationError('Invalid attachment storage path.');
   }
+  if (wineryId !== null) {
+    const wineryRoot = path.resolve(root, String(wineryId));
+    const relativeToWinery = path.relative(wineryRoot, resolved);
+    if (!relativeToWinery || relativeToWinery.startsWith(`..${path.sep}`) || path.isAbsolute(relativeToWinery)) {
+      throw new ValidationError('Attachment storage path does not belong to this winery.');
+    }
+  }
   return resolved;
+}
+
+function uploaderInclude(wineryId) {
+  return {
+    model: User,
+    as: 'Uploader',
+    where: { wineryId },
+    attributes: ['id', 'displayName', 'email', 'role'],
+    required: false
+  };
 }
 
 function decodeBase64Content(contentBase64) {
@@ -203,7 +219,7 @@ function serializeAttachment(attachment) {
     originalFilename: plain.originalFilename,
     mimeType: plain.mimeType,
     sizeBytes: plain.sizeBytes,
-    uploadedBy: plain.uploadedBy,
+    uploadedBy: plain.Uploader ? plain.uploadedBy : null,
     createdAt: plain.createdAt,
     updatedAt: plain.updatedAt,
     Uploader: plain.Uploader || null,
@@ -218,7 +234,7 @@ async function listAttachments({ entityType, entityId, wineryId, userId, userRol
   try {
     attachments = await Attachment.findAll({
       where: { entityType, entityId, wineryId, deletedAt: null },
-      include: [{ model: User, as: 'Uploader', attributes: ['id', 'displayName', 'email', 'role'] }],
+      include: [uploaderInclude(wineryId)],
       order: [['createdAt', 'ASC'], ['id', 'ASC']]
     });
   } catch (err) {
@@ -270,7 +286,7 @@ async function createAttachment({ wineryId, userId, userRole, data }) {
 
   const filename = sanitizeFilename(data.filename);
   const storageKey = path.join(String(wineryId), `${crypto.randomUUID()}${extensionFor(filename)}`);
-  const absolutePath = storagePathFor(storageKey);
+  const absolutePath = storagePathFor(storageKey, wineryId);
 
   await fs.mkdir(path.dirname(absolutePath), { recursive: true });
   await fs.writeFile(absolutePath, buffer, { flag: 'wx' });
@@ -316,6 +332,17 @@ async function createAttachment({ wineryId, userId, userRole, data }) {
         metadata: { attachmentId: attachment.id, filename: attachment.filename, mimeType: attachment.mimeType }
       });
     }
+    await safeRecordUsageEvent({
+      wineryId,
+      actorUserId: userId,
+      metricKey: METRICS.ATTACHMENT_UPLOADED_BYTES,
+      quantity: attachment.sizeBytes,
+      occurredAt: attachment.createdAt || new Date(),
+      sourceType: 'attachment',
+      sourceId: attachment.id,
+      idempotencyKey: `attachment:${attachment.id}:uploaded`,
+      dimensions: { entityType: attachment.entityType, mimeGroup: mimeGroup(attachment.mimeType) }
+    });
   } catch (err) {
     await fs.rm(absolutePath, { force: true }).catch(() => {});
     throw err;
@@ -323,14 +350,14 @@ async function createAttachment({ wineryId, userId, userRole, data }) {
 
   return Attachment.findOne({
     where: { id: attachment.id, wineryId },
-    include: [{ model: User, as: 'Uploader', attributes: ['id', 'displayName', 'email', 'role'] }]
+    include: [uploaderInclude(wineryId)]
   }).then(serializeAttachment);
 }
 
 async function getAttachmentForDownload({ attachmentId, wineryId, userId, userRole }) {
   const attachment = await Attachment.findOne({
     where: { id: attachmentId, wineryId, deletedAt: null },
-    include: [{ model: User, as: 'Uploader', attributes: ['id', 'displayName', 'email', 'role'] }]
+    include: [uploaderInclude(wineryId)]
   });
   if (!attachment) throw new NotFoundError('Attachment not found');
 
@@ -343,7 +370,7 @@ async function getAttachmentForDownload({ attachmentId, wineryId, userId, userRo
     mode: 'view'
   });
 
-  const absolutePath = storagePathFor(attachment.storageKey);
+  const absolutePath = storagePathFor(attachment.storageKey, wineryId);
   try {
     await fs.access(absolutePath);
   } catch (err) {
@@ -405,7 +432,7 @@ async function deleteAttachment({ attachmentId, wineryId, userId, userRole }) {
     });
   }
 
-  const absolutePath = storagePathFor(attachment.storageKey);
+  const absolutePath = storagePathFor(attachment.storageKey, wineryId);
   attachment.deletedAt = new Date();
   attachment.deletedBy = userId;
   await attachment.save();
@@ -438,6 +465,18 @@ async function deleteAttachment({ attachmentId, wineryId, userId, userRole }) {
       metadata: { attachmentId: attachment.id, filename: attachment.filename }
     });
   }
+
+  await safeRecordUsageEvent({
+    wineryId,
+    actorUserId: userId,
+    metricKey: METRICS.ATTACHMENT_DELETED_BYTES,
+    quantity: attachment.sizeBytes,
+    occurredAt: attachment.deletedAt,
+    sourceType: 'attachment',
+    sourceId: attachment.id,
+    idempotencyKey: `attachment:${attachment.id}:deleted`,
+    dimensions: { entityType: attachment.entityType, mimeGroup: mimeGroup(attachment.mimeType) }
+  });
 
   return { deleted: true };
 }

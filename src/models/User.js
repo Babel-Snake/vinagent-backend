@@ -25,6 +25,8 @@ module.exports = (sequelize, DataTypes) => {
             User.hasMany(models.Project, { foreignKey: 'updatedBy', as: 'UpdatedProjects' });
             User.hasMany(models.ProjectParticipant, { foreignKey: 'userId', as: 'ProjectParticipations' });
             User.hasMany(models.ProjectAuditEvent, { foreignKey: 'actorUserId', as: 'ProjectAuditEvents' });
+            User.hasMany(models.UsageEvent, { foreignKey: 'actorUserId', as: 'UsageEvents' });
+            User.hasMany(models.UserActivityDaily, { foreignKey: 'userId', as: 'ActivityDays' });
             User.belongsToMany(models.OperationalArea, {
                 through: models.UserAreaMembership,
                 foreignKey: 'userId',
@@ -51,6 +53,13 @@ module.exports = (sequelize, DataTypes) => {
             displayName: {
                 type: DataTypes.STRING,
                 allowNull: true
+            },
+            username: {
+                type: DataTypes.STRING(64),
+                allowNull: true,
+                validate: {
+                    is: /^[a-z0-9]{3,64}$/
+                }
             },
             isActive: {
                 type: DataTypes.BOOLEAN,
@@ -102,7 +111,12 @@ module.exports = (sequelize, DataTypes) => {
             sequelize,
             modelName: 'User',
             tableName: 'Users',
-            timestamps: true
+            timestamps: true,
+            indexes: [{
+                name: 'users_winery_username_unique',
+                unique: true,
+                fields: ['wineryId', 'username']
+            }]
         }
     );
     return User;

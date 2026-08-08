@@ -1,4 +1,5 @@
 process.env.ALLOW_TEST_AUTH_BYPASS = 'true';
+process.env.NODE_ENV = 'test';
 
 const request = require('supertest');
 const app = require('../../app');
@@ -25,6 +26,12 @@ describe('Member Routes', () => {
             contactEmail: 'members@example.com'
         });
 
+        await Winery.create({
+            id: 2,
+            name: 'Other Member Route Test',
+            timeZone: 'Australia/Adelaide'
+        });
+
         await User.create({
             id: 7,
             firebaseUid: 'stub-uid',
@@ -37,6 +44,38 @@ describe('Member Routes', () => {
 
     afterAll(async () => {
         await sequelize.close();
+    });
+
+    it('always assigns new customers to the authenticated winery and rejects reassignment', async () => {
+        const rejectedCreate = await request(app)
+            .post('/api/members')
+            .set('Authorization', authToken)
+            .send({
+                firstName: 'Wrong',
+                lastName: 'Winery',
+                wineryId: 2
+            })
+            .expect(400);
+
+        expect(rejectedCreate.body.error.code).toBe('IMMUTABLE_WINERY');
+        expect(await Member.count({ where: { firstName: 'Wrong' } })).toBe(0);
+
+        const created = await request(app)
+            .post('/api/members')
+            .set('Authorization', authToken)
+            .send({ firstName: 'Locked', lastName: 'Customer' })
+            .expect(201);
+
+        expect(created.body.member.wineryId).toBe(1);
+
+        const rejectedUpdate = await request(app)
+            .put(`/api/members/${created.body.member.id}`)
+            .set('Authorization', authToken)
+            .send({ wineryId: 2 })
+            .expect(400);
+
+        expect(rejectedUpdate.body.error.code).toBe('IMMUTABLE_WINERY');
+        expect((await Member.findByPk(created.body.member.id)).wineryId).toBe(1);
     });
 
     it('should merge a source customer into the target and reassign linked records', async () => {
@@ -84,6 +123,7 @@ describe('Member Routes', () => {
             type: 'ADDRESS_CHANGE',
             channel: 'sms',
             token: 'merge-test-token',
+            tokenHash: 'a'.repeat(64),
             expiresAt: new Date(Date.now() + 3600_000)
         });
 
@@ -117,5 +157,43 @@ describe('Member Routes', () => {
         expect(deletedSource).toBeNull();
         expect(updatedTarget.tags).toEqual(expect.arrayContaining(['vip', 'order_customer']));
         expect(updatedTarget.notes).toMatch(/Merged customer Jane Smith/);
+    });
+
+    it('does not count or return tasks from another winery through a legacy member link', async () => {
+        const member = await Member.create({
+            firstName: 'Tenant',
+            lastName: 'Boundary',
+            email: 'tenant.boundary@example.com',
+            wineryId: 1
+        });
+        const localTask = await Task.create({
+            wineryId: 1,
+            category: 'GENERAL',
+            subType: 'LOCAL_TASK',
+            status: 'PENDING',
+            memberId: member.id
+        });
+        const foreignTask = await Task.create({
+            wineryId: 2,
+            category: 'GENERAL',
+            subType: 'FOREIGN_TASK',
+            status: 'PENDING',
+            memberId: member.id
+        });
+
+        const list = await request(app)
+            .get('/api/members')
+            .query({ q: 'Tenant' })
+            .set('Authorization', authToken)
+            .expect(200);
+        const listedMember = list.body.members.find(item => item.id === member.id);
+        expect(Number(listedMember.taskCount)).toBe(1);
+
+        const detail = await request(app)
+            .get(`/api/members/${member.id}`)
+            .set('Authorization', authToken)
+            .expect(200);
+        expect(detail.body.member.Tasks.map(task => task.id)).toEqual([localTask.id]);
+        expect(detail.body.member.Tasks.map(task => task.id)).not.toContain(foreignTask.id);
     });
 });

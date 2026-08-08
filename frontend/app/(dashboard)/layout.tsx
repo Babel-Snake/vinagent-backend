@@ -6,6 +6,7 @@ import { auth } from '../../lib/firebase';
 import { clearPinSession, getMyProfile, getPinSession, saveDefaultWineryContext, type AuthDisplayUser, type UserProfile } from '../../lib/api';
 import Navbar from '../../components/Navbar';
 import { clientLogger } from '../../lib/clientLogger';
+import UsageActivityTracker from '../../components/UsageActivityTracker';
 
 export default function DashboardLayout({
     children,
@@ -107,6 +108,7 @@ export default function DashboardLayout({
 
     return (
         <div className="min-h-screen bg-[var(--background)] text-[#1c231f]">
+            <UsageActivityTracker />
             <Navbar
                 user={user}
                 fullProfile={fullProfile}

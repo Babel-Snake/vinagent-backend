@@ -15,6 +15,7 @@ const {
   Project,
   ProjectAuditEvent,
   ProjectItem,
+  ProjectParticipant,
   ProjectTaskDependency,
   Task,
   TaskArea,
@@ -446,6 +447,123 @@ describe('Project routes', () => {
       isRequired: true
     });
     expect(response.status).toBe(404);
+  });
+
+  test('does not expose foreign users through legacy Project and linked-item associations', async () => {
+    const project = await Project.create({
+      wineryId: 1,
+      title: 'Legacy association boundary',
+      intendedOutcome: 'Keep all related identities inside the owning winery.',
+      status: 'ACTIVE',
+      areaScope: 'ORGANISATION',
+      ownerUserId: 9,
+      createdBy: 9,
+      updatedBy: 9
+    });
+    const task = await Task.create({
+      wineryId: 1,
+      category: 'OPERATIONS',
+      subType: 'LEGACY_ASSOCIATION',
+      status: 'PENDING',
+      workflowState: 'NOT_STARTED',
+      priority: 'normal',
+      areaScope: 'ORGANISATION',
+      assigneeId: 9,
+      createdBy: 9,
+      updatedBy: 9
+    });
+    const requestItem = await OperationalRequest.create({
+      wineryId: 1,
+      title: 'Legacy requested person',
+      body: 'This local request has an invalid foreign requested-person link.',
+      status: 'PENDING',
+      priority: 'normal',
+      sourceType: 'MANUAL',
+      areaScope: 'ORGANISATION',
+      requestedFromUserId: 9,
+      humanConfirmedType: 'REQUEST',
+      confirmedBy: 9,
+      confirmedAt: new Date(),
+      createdBy: 9,
+      updatedBy: 9
+    });
+    const event = await CalendarEvent.create({
+      wineryId: 1,
+      title: 'Legacy creator mismatch',
+      start: future(3),
+      end: future(3),
+      allDay: true,
+      type: 'event',
+      createdBy: 9
+    });
+    await ProjectItem.bulkCreate([
+      { wineryId: 1, projectId: project.id, itemType: 'TASK', itemId: task.id, sortOrder: 0, addedBy: 9 },
+      { wineryId: 1, projectId: project.id, itemType: 'REQUEST', itemId: requestItem.id, sortOrder: 1, addedBy: 9 },
+      { wineryId: 1, projectId: project.id, itemType: 'CALENDAR_EVENT', itemId: event.id, sortOrder: 2, addedBy: 9 }
+    ]);
+
+    const detail = await request(app)
+      .get(`/api/projects/${project.id}`)
+      .set('Authorization', auth)
+      .expect(200);
+    expect(detail.body.project.Owner).toBeNull();
+    expect(detail.body.project.Creator).toBeNull();
+    for (const item of detail.body.project.items) {
+      expect(item.AddedBy).toBeNull();
+      expect(item.addedBy).toBeNull();
+      expect(item.source.owner).toBeNull();
+    }
+    expect(detail.body.project.ownerUserId).toBeNull();
+    expect(detail.body.project.createdBy).toBeNull();
+    expect(JSON.stringify(detail.body)).not.toContain('other.manager@example.com');
+
+    const notificationProject = await Project.create({
+      wineryId: 1,
+      title: 'Tenant-safe notification recipients',
+      intendedOutcome: 'Do not notify users outside this winery.',
+      status: 'ACTIVE',
+      areaScope: 'ORGANISATION',
+      ownerUserId: 7,
+      targetEndAt: future(30),
+      createdBy: 7,
+      updatedBy: 7
+    });
+    await ProjectParticipant.create({
+      wineryId: 1,
+      projectId: notificationProject.id,
+      userId: 9,
+      participationRole: 'PARTICIPANT',
+      notificationsEnabled: true,
+      addedBy: 7
+    });
+    await request(app)
+      .patch(`/api/projects/${notificationProject.id}`)
+      .set('Authorization', auth)
+      .send({ businessContext: 'A tenant-safe update.', notifyParticipants: true })
+      .expect(200);
+    expect(await Notification.count({ where: { userId: 9 } })).toBe(0);
+
+    const calendar = await request(app)
+      .get(`/api/calendar?eventId=${event.id}`)
+      .set('Authorization', auth)
+      .expect(200);
+    expect(calendar.body[0].Creator).toBeNull();
+    expect(JSON.stringify(calendar.body)).not.toContain('other.manager@example.com');
+  });
+
+  test('does not expose unexpected calendar errors to clients', async () => {
+    const sensitiveMessage = 'database password appeared in a provider diagnostic';
+    const findAll = jest.spyOn(CalendarEvent, 'findAll').mockRejectedValueOnce(new Error(sensitiveMessage));
+    try {
+      const response = await request(app)
+        .get('/api/calendar')
+        .set('Authorization', auth)
+        .expect(500);
+      expect(response.body.error.message).toBe('An unexpected error occurred');
+      expect(JSON.stringify(response.body)).not.toContain(sensitiveMessage);
+    } finally {
+      findAll.mockRestore();
+    }
   });
 
   test('guards completion with unresolved required work and records a human override', async () => {

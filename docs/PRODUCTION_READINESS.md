@@ -17,11 +17,11 @@ npm run build
 npm audit --omit=dev
 ```
 
-As of 13 July 2026:
+As of 8 August 2026:
 
-- backend: 47 suites and 252 tests pass; lint passes; full and production dependency audits report zero vulnerabilities
-- frontend: lint passes with zero errors and zero warnings, including no remaining explicit-`any` findings; the production build passes; the production dependency audit reports zero vulnerabilities
-- MySQL: fresh migrate, complete rollback, remigrate, existing-data clone migration, and configured local-development migration all pass
+- backend: 75 suites and 426 tests pass; lint passes; the production dependency audit reports zero vulnerabilities
+- frontend: lint passes with zero errors and zero warnings; six public-flow helper tests and the real headless-browser smoke pass; the 20-page production build, including the aggregate Usage dashboard, passes; the production dependency audit reports zero vulnerabilities
+- MySQL: the complete migration chain is current; the usage-metering migration was applied successfully against local MySQL, while migration up/down and existing-winery billing-profile backfill are also covered by a real SQLite migration test
 - Sidewood: database permissions, area scoping, Firebase identity existence/enabled state, secret serialization, and unsupported integration fallback pass
 
 To repeat the Sidewood checks:
@@ -41,13 +41,17 @@ Before deployment, verify:
 
 - `FIREBASE_PRIVATE_KEY` is the full PEM value with newlines preserved, and the backend and frontend Firebase project IDs match
 - `PIN_SESSION_SECRET` or `SESSION_SECRET` is high entropy and at least 32 characters
-- `PUBLIC_URL` and allowed frontend origins use the final HTTPS domains
+- `DEPLOYMENT_WINERY_ID` identifies the one winery this deployment serves; changing it is an operator-only action
+- the deployment winery has a non-charging `WineryBillingProfile`; bootstrap creates it and deployment preflight verifies it
+- `PUBLIC_URL` uses the final HTTPS backend domain, while `PUBLIC_APP_URL` and allowed frontend origins use the final HTTPS frontend domain
 - database credentials point at the intended production database
-- Twilio credentials/number and email/Retell webhook secrets are present
+- Twilio credentials/number, the email webhook secret, and the Retell webhook-authentication API key are present
 - the selected outbound email provider has its required SendGrid or Outlook credentials and sender/mailbox configuration
 - `ALLOW_TEST_AUTH_BYPASS` is absent or `false`, and database-only Sidewood seeding is not enabled
 
-Twilio and SendGrid now fail closed in production when credentials are missing. Unsupported booking, CRM, POS, and delivery adapters remain configuration-only and resolve to mock execution; the frontend labels those surfaces as unavailable for live actions.
+Twilio and SendGrid fail closed in production when credentials are missing. Mock booking/CRM execution is limited to explicit local development and tests; unsupported live providers fail without marking the task as actioned. POS and delivery adapters remain configuration-only, and the frontend labels unavailable live actions.
+
+Member action links store only a SHA-256 digest of the bearer token. Deploy the `20260807002000-hash-member-action-tokens-at-rest` migration and the matching application build together. Rolling that migration back cannot reconstruct the original bearer values, so previously issued links must be treated as invalid after a rollback.
 
 ## Human staging gates
 
@@ -56,9 +60,11 @@ These checks intentionally require the real staging/deployment environment and s
 1. Sign in as Owen, Serena, and representative area staff.
 2. Confirm Owen has winery-wide management, Serena manages Cellar Door but not Restaurant, and ordinary staff cannot manage either area.
 3. Send one approved SMS and one approved email to controlled test recipients, then verify provider delivery and the outbound audit trail.
-4. Submit correctly and incorrectly signed Twilio, email, Retell, and generic integration webhooks.
+4. Submit correctly and incorrectly signed Twilio, email, Retell, and generic integration webhooks; also confirm stale Retell signatures and unmapped/ambiguous Retell agents fail closed.
 5. Upload/download/delete an attachment using the production storage mount and size limits.
 6. Exercise backup restoration and the application rollback procedure.
+7. Complete the authenticated browser matrix in `FRONTEND_QA_RUNBOOK.md`, including manager, area-manager, staff/PIN, and public member-confirmation paths.
+8. Capture the initial usage gauges and run admin reconciliation as described in `USAGE_METERING.md`; review discrepancies before relying on a pilot report.
 
 Do not call the release fully deployed until these environment-specific gates and the production database migration have passed.
 

@@ -19,6 +19,7 @@ describe('Webhook Security Integration', () => {
             ...OLD_ENV,
             TWILIO_AUTH_TOKEN: 'mock-auth-token',
             EMAIL_WEBHOOK_SECRET: 'mock-email-secret',
+            RETELL_API_KEY: '',
             RETELL_WEBHOOK_SECRET: 'mock-retell-secret'
         };
         // Re-require to pick up env
@@ -38,9 +39,19 @@ describe('Webhook Security Integration', () => {
         jest.resetModules();
         process.env.TWILIO_AUTH_TOKEN = 'mock-auth-token';
         process.env.EMAIL_WEBHOOK_SECRET = 'mock-email-secret';
+        process.env.RETELL_API_KEY = '';
         process.env.RETELL_WEBHOOK_SECRET = 'mock-retell-secret';
         process.env.NODE_ENV = 'test';
         return require('../../app');
+    }
+
+    function signRetellPayload(payload, timestamp = Date.now()) {
+        const digest = crypto
+            .createHmac('sha256', 'mock-retell-secret')
+            .update(payload)
+            .update(String(timestamp))
+            .digest('hex');
+        return `v=${timestamp},d=${digest}`;
     }
 
     // We expect these checks to be enabled in app.
@@ -102,13 +113,27 @@ describe('Webhook Security Integration', () => {
         expect(res.body.error).toBe('Missing signature');
     });
 
+    it('should fail closed when the Retell verification key is not configured', async () => {
+        const app = await getApp();
+        process.env.RETELL_API_KEY = '';
+        process.env.RETELL_WEBHOOK_SECRET = '';
+
+        try {
+            const res = await request(app)
+                .post('/api/webhooks/retell')
+                .send({ event_type: 'call_analyzed' });
+
+            expect(res.status).toBe(500);
+            expect(res.body.error).toBe('Server configuration error');
+        } finally {
+            process.env.RETELL_WEBHOOK_SECRET = 'mock-retell-secret';
+        }
+    });
+
     it('should accept Retell webhook with valid signature', async () => {
         const app = await getApp();
         const payload = { event_type: 'call_analyzed' };
-        const signature = crypto
-            .createHmac('sha256', 'mock-retell-secret')
-            .update(JSON.stringify(payload))
-            .digest('hex');
+        const signature = signRetellPayload(JSON.stringify(payload));
 
         const res = await request(app)
             .post('/api/webhooks/retell')
@@ -122,10 +147,7 @@ describe('Webhook Security Integration', () => {
     it('should validate Retell signatures against the exact raw request body', async () => {
         const app = await getApp();
         const rawPayload = '{ "event_type": "call_analyzed", "call": { "id": "abc" } }';
-        const signature = crypto
-            .createHmac('sha256', 'mock-retell-secret')
-            .update(rawPayload)
-            .digest('hex');
+        const signature = signRetellPayload(rawPayload);
 
         const res = await request(app)
             .post('/api/webhooks/retell')
@@ -135,6 +157,39 @@ describe('Webhook Security Integration', () => {
 
         expect(res.status).toBe(200);
         expect(res.body.success).toBe(true);
+    });
+
+    it('should reject the legacy digest-only Retell signature format', async () => {
+        const app = await getApp();
+        const payload = JSON.stringify({ event_type: 'call_analyzed' });
+        const legacySignature = crypto
+            .createHmac('sha256', 'mock-retell-secret')
+            .update(payload)
+            .digest('hex');
+
+        const res = await request(app)
+            .post('/api/webhooks/retell')
+            .set('content-type', 'application/json')
+            .set('x-retell-signature', legacySignature)
+            .send(payload);
+
+        expect(res.status).toBe(403);
+        expect(res.body.error).toBe('Invalid signature');
+    });
+
+    it('should reject Retell signatures older than the five-minute replay window', async () => {
+        const app = await getApp();
+        const payload = JSON.stringify({ event_type: 'call_analyzed' });
+        const staleTimestamp = Date.now() - (5 * 60 * 1000) - 1;
+
+        const res = await request(app)
+            .post('/api/webhooks/retell')
+            .set('content-type', 'application/json')
+            .set('x-retell-signature', signRetellPayload(payload, staleTimestamp))
+            .send(payload);
+
+        expect(res.status).toBe(403);
+        expect(res.body.error).toBe('Invalid or expired signature');
     });
 
 });

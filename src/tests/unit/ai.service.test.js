@@ -3,7 +3,9 @@ describe('AI service hardening', () => {
         NODE_ENV: process.env.NODE_ENV,
         OPENAI_API_KEY: process.env.OPENAI_API_KEY,
         AI_ALLOW_LIVE_TESTS: process.env.AI_ALLOW_LIVE_TESTS,
-        AI_SKIP: process.env.AI_SKIP
+        AI_HTTP_TIMEOUT_MS: process.env.AI_HTTP_TIMEOUT_MS,
+        AI_SKIP: process.env.AI_SKIP,
+        AI_PROVIDER: process.env.AI_PROVIDER
     };
 
     afterEach(() => {
@@ -18,8 +20,14 @@ describe('AI service hardening', () => {
         if (originalEnv.AI_ALLOW_LIVE_TESTS === undefined) delete process.env.AI_ALLOW_LIVE_TESTS;
         else process.env.AI_ALLOW_LIVE_TESTS = originalEnv.AI_ALLOW_LIVE_TESTS;
 
+        if (originalEnv.AI_HTTP_TIMEOUT_MS === undefined) delete process.env.AI_HTTP_TIMEOUT_MS;
+        else process.env.AI_HTTP_TIMEOUT_MS = originalEnv.AI_HTTP_TIMEOUT_MS;
+
         if (originalEnv.AI_SKIP === undefined) delete process.env.AI_SKIP;
         else process.env.AI_SKIP = originalEnv.AI_SKIP;
+
+        if (originalEnv.AI_PROVIDER === undefined) delete process.env.AI_PROVIDER;
+        else process.env.AI_PROVIDER = originalEnv.AI_PROVIDER;
     });
 
     test('uses the deterministic mock adapter in test mode even when an API key exists', async () => {
@@ -42,10 +50,39 @@ describe('AI service hardening', () => {
         process.env.NODE_ENV = 'test';
         process.env.OPENAI_API_KEY = 'test-key';
         process.env.AI_ALLOW_LIVE_TESTS = 'true';
+        delete process.env.AI_HTTP_TIMEOUT_MS;
         delete process.env.AI_SKIP;
 
         const aiService = require('../../services/ai');
 
         expect(aiService.constructor.name).toBe('OpenAIAdapter');
+        expect(aiService.client.timeout).toBe(30000);
+        expect(aiService.client.maxRetries).toBe(1);
+    });
+
+    test('fails closed when a production API key is missing', () => {
+        process.env.NODE_ENV = 'production';
+        delete process.env.OPENAI_API_KEY;
+        delete process.env.AI_SKIP;
+
+        expect(() => require('../../services/ai')).toThrow(/OPENAI_API_KEY is required/i);
+    });
+
+    test('allows an explicit production heuristic-only mode', () => {
+        process.env.NODE_ENV = 'production';
+        delete process.env.OPENAI_API_KEY;
+        process.env.AI_SKIP = 'true';
+
+        const aiService = require('../../services/ai');
+        expect(aiService.constructor.name).toBe('MockAdapter');
+    });
+
+    test('rejects an unknown provider instead of silently using OpenAI', () => {
+        process.env.NODE_ENV = 'production';
+        process.env.OPENAI_API_KEY = 'test-key';
+        process.env.AI_PROVIDER = 'typo-provider';
+        delete process.env.AI_SKIP;
+
+        expect(() => require('../../services/ai')).toThrow(/Unknown AI provider/i);
     });
 });

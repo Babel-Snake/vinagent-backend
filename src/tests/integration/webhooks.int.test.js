@@ -99,6 +99,59 @@ describe('Webhook routes', () => {
             }));
         });
 
+        it('treats a database uniqueness race as a normal tenant-scoped duplicate', async () => {
+            const uniquenessError = new Error('duplicate message');
+            uniquenessError.name = 'SequelizeUniqueConstraintError';
+
+            Winery.findOne.mockResolvedValue({ id: 7 });
+            WinerySettings.findOne.mockResolvedValue(null);
+            customerIdentityService.resolveExternalIdentity.mockResolvedValue({
+                memberId: null,
+                matchedMember: null,
+                suggestedCandidates: []
+            });
+            Message.findOne
+                .mockResolvedValueOnce(null)
+                .mockResolvedValueOnce({ id: 99, wineryId: 7 });
+            Message.create.mockRejectedValueOnce(uniquenessError);
+
+            const res = await request(app)
+                .post('/api/webhooks/email')
+                .set('x-email-webhook-signature', 'secret')
+                .send({
+                    from: 'guest@example.com',
+                    to: 'team@winery.com',
+                    subject: 'Retry race',
+                    text: 'Concurrent delivery',
+                    messageId: 'email-race-123'
+                });
+
+            expect(res.status).toBe(200);
+            expect(res.body).toMatchObject({
+                success: true,
+                taskId: null,
+                duplicate: true
+            });
+            expect(Winery.findOne.mock.invocationCallOrder[0])
+                .toBeLessThan(Message.findOne.mock.invocationCallOrder[0]);
+            expect(Message.findOne).toHaveBeenNthCalledWith(1, {
+                where: {
+                    wineryId: 7,
+                    source: 'email',
+                    externalId: 'email-race-123'
+                },
+                transaction: expect.any(Object)
+            });
+            expect(Message.findOne).toHaveBeenNthCalledWith(2, {
+                where: {
+                    wineryId: 7,
+                    source: 'email',
+                    externalId: 'email-race-123'
+                }
+            });
+            expect(taskService.createTask).not.toHaveBeenCalled();
+        });
+
         it('rejects requests missing the email signature', async () => {
             Winery.findOne.mockResolvedValue({ id: 1 });
 

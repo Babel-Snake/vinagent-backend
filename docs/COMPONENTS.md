@@ -39,11 +39,14 @@ Files:
 * `src/routes/webhook.routes.js`
 * `src/controllers/webhook.controller.js`
 * `src/middleware/webhookValidation.js`
+* `src/services/retellWebhookContext.service.js`
 
 Responsibilities:
 
 * validate webhook signatures and payloads
 * normalize SMS, email, and voice events into `Message`
+* resolve signed Retell agent/account identities through operations-managed winery or area integration config, failing closed on missing or cross-winery mappings
+* normalize actionable Retell calls into reviewable `IntegrationEvent` records
 * create initial tasks from inbound traffic
 
 ## 4. Triage Layer
@@ -247,3 +250,11 @@ The visual contract is deliberately separate from workflow status:
 * red, amber, and green remain reserved for urgency and workflow state
 
 `InvolvementBadge` and the `involvement-surface-*` classes must be used together so personal relevance is not communicated by colour alone. Direct items may be sorted ahead of contextual items within a Project section, but relevance must not hide other visible Project records.
+
+## Usage metering
+
+`src/services/usageTracking.service.js` owns usage validation, dimension allowlisting, idempotent event writes, hourly counters, activity aggregation, gauge capture, summaries, and reconciliation. `usageMetricCatalog.js` is the only metric/unit/dimension catalogue. Business services emit facts without storing prices or customer content.
+
+`src/middleware/usageRequestMeter.js` observes authenticated responses and records only route-group aggregates. `src/controllers/usage.controller.js` and `src/routes/usage.routes.js` expose aggregate reporting and bounded activity/snapshot/reconciliation operations.
+
+`frontend/components/UsageActivityTracker.tsx` owns the privacy-limited heartbeat. `frontend/app/(dashboard)/usage/page.tsx` is the manager/admin aggregate reporting surface. See `USAGE_METERING.md` before adding metrics or a payment-provider exporter.

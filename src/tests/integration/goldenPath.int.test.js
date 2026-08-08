@@ -3,6 +3,7 @@ process.env.ALLOW_TEST_AUTH_BYPASS = 'true';
 process.env.NODE_ENV = 'test';
 
 const request = require('supertest');
+const crypto = require('crypto');
 
 // Mock Triage to ensure deterministic classification
 jest.mock('../../services/triage.service', () => ({
@@ -152,16 +153,38 @@ describe('Golden Path E2E: Address Change Flow', () => {
             order: [['createdAt', 'DESC']]
         });
         expect(tokenRecord).not.toBeNull();
-        const tokenString = tokenRecord.token;
+        expect(tokenRecord.token).toBeNull();
+        expect(tokenRecord.tokenHash).toMatch(/^[a-f0-9]{64}$/);
+        const taskWithLink = await Task.findByPk(taskId);
+        const linkMatch = taskWithLink.suggestedReplyBody.match(/https?:\/\/\S+/);
+        expect(linkMatch).not.toBeNull();
+        const generatedLink = new URL(linkMatch[0]);
+        const tokenString = new URLSearchParams(generatedLink.hash.slice(1)).get('token');
+        expect(tokenString).toMatch(/^[a-f0-9]{64}$/);
+        expect(tokenRecord.tokenHash).toBe(
+            crypto.createHash('sha256').update(tokenString, 'utf8').digest('hex')
+        );
+        expect(tokenRecord.tokenHash).not.toBe(tokenString);
 
         // 5. Member Validates Token (User clicks link)
         console.log('Step 5: Validating Token via Public API');
         const validateRes = await request(app)
-            .get(`/api/public/address-update/validate?token=${tokenString}`);
+            .post('/api/public/address-update/validate')
+            .send({ token: tokenString });
 
         expect(validateRes.status).toBe(200);
+        expect(validateRes.headers['cache-control']).toBe('no-store, private');
         expect(validateRes.body.member.firstName).toBe('Emma');
+        expect(validateRes.body.member.id).toBeUndefined();
+        expect(validateRes.body.member.lastName).toBeUndefined();
         expect(validateRes.body.proposedAddress.addressLine1).toBe('12 Oak Street');
+
+        // Previously issued clients can still validate via the legacy GET
+        // contract during the fragment/body rollout.
+        const legacyValidateRes = await request(app)
+            .get(`/api/public/address-update/validate?token=${tokenString}`);
+        expect(legacyValidateRes.status).toBe(200);
+        expect(legacyValidateRes.headers['cache-control']).toBe('no-store, private');
 
         // 6. Member Confirms Address
         console.log('Step 6: Member Confirms Address');
@@ -179,8 +202,10 @@ describe('Golden Path E2E: Address Change Flow', () => {
             });
 
         expect(confirmRes.status).toBe(200);
+        expect(confirmRes.headers['cache-control']).toBe('no-store, private');
         expect(confirmRes.body.status).toBe('ok');
-        expect(confirmRes.body.member.id).toBe(42);
+        expect(confirmRes.body.member).toBeUndefined();
+        expect(confirmRes.body.newAddress).toBeUndefined();
 
         // 7. Verify Final State (Member Address Updated)
         console.log('Step 7: Verify DB State');

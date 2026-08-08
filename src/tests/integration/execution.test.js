@@ -7,7 +7,7 @@ process.env.NODE_ENV = 'test';
 const { sequelize, Task, Winery, User, TaskAction, WinerySettings, Member, MemberActionToken, Message } = require('../../models');
 
 describe('Task Execution Integration', () => {
-    let wineryId, userId;
+    let wineryId, userId, foreignMember;
 
     beforeAll(async () => {
         // Setup Winery, User, and Settings
@@ -44,6 +44,19 @@ describe('Task Execution Integration', () => {
             email: 'member@test.com',
             phone: '+61411111111',
             wineryId
+        });
+
+        const foreignWinery = await Winery.create({
+            name: 'Foreign Exec Winery',
+            timeZone: 'Australia/Adelaide',
+            contactEmail: 'foreign-exec@test.com'
+        });
+        foreignMember = await Member.create({
+            firstName: 'Foreign',
+            lastName: 'Customer',
+            email: 'foreign-member@test.com',
+            phone: '+61499999999',
+            wineryId: foreignWinery.id
         });
 
         // Also create stub user for auth bypass
@@ -107,7 +120,7 @@ describe('Task Execution Integration', () => {
         expect(Array.isArray(refreshedTask.payload.executionResults)).toBe(true);
     });
 
-    it('should keep the task actioned if address automation validation fails', async () => {
+    it('should roll back actioning if address automation validation fails', async () => {
         const taskService = require('../../services/taskService');
 
         const task = await Task.create({
@@ -119,18 +132,21 @@ describe('Task Execution Integration', () => {
             memberId: null
         });
 
-        await taskService.updateTask({
+        await expect(taskService.updateTask({
             taskId: task.id,
             wineryId,
             userId,
             userRole: 'manager',
             updates: { status: 'ACTIONED' }
+        })).rejects.toMatchObject({
+            statusCode: 400,
+            code: 'EXECUTION_VALIDATION_FAILED'
         });
 
         const updatedTask = await Task.findByPk(task.id);
         const token = await MemberActionToken.findOne({ where: { taskId: task.id } });
 
-        expect(updatedTask.status).toBe('ACTIONED');
+        expect(updatedTask.status).toBe('PENDING');
         expect(token).toBeNull();
     });
 
@@ -177,6 +193,41 @@ describe('Task Execution Integration', () => {
         expect(executionAction.details.status).toBe('SKIPPED');
 
         await WinerySettings.update({ enableSecureLinks: true }, { where: { wineryId } });
+    });
+
+    it('does not execute against a member owned by another winery even if legacy data links it', async () => {
+        const taskService = require('../../services/taskService');
+        const task = await Task.create({
+            wineryId,
+            type: 'ADDRESS_CHANGE',
+            category: 'ACCOUNT',
+            subType: 'ACCOUNT_ADDRESS_CHANGE',
+            status: 'PENDING',
+            memberId: foreignMember.id,
+            payload: {
+                addressLine1: '22 New Street',
+                suburb: 'Adelaide',
+                state: 'SA',
+                postcode: '5000'
+            },
+            createdBy: userId
+        });
+
+        await expect(taskService.updateTask({
+            taskId: task.id,
+            wineryId,
+            userId,
+            userRole: 'manager',
+            updates: { status: 'ACTIONED' }
+        })).rejects.toMatchObject({
+            statusCode: 502,
+            code: 'EXECUTION_FAILED'
+        });
+
+        expect(await MemberActionToken.count({ where: { taskId: task.id } })).toBe(0);
+        expect(await Message.count({ where: { taskId: task.id, direction: 'outbound' } })).toBe(0);
+        expect((await task.reload()).status).toBe('PENDING');
+        expect((await foreignMember.reload()).addressLine1).toBeNull();
     });
 
     it('should log outbound notifications onto the task communication timeline', async () => {

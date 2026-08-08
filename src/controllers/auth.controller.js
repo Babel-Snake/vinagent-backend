@@ -6,6 +6,8 @@ const {
     createPinSessionToken,
     verifyPin
 } = require('../utils/pinAuth');
+const { buildManagedStaffEmail, normalizeStaffUsername } = require('../utils/staffIdentity');
+const { resolveDeploymentWinery } = require('../services/deploymentWinery.service');
 
 const DEFAULT_AUTH_CONFIG = {
     pinLoginEnabled: false,
@@ -57,10 +59,6 @@ function clearFailedAttempts(req, wineryId) {
 }
 
 /**
- * Resolve staff email from username.
- * GET /api/public/resolve-staff?username=sarah
- */
-/**
  * Get current user context.
  * GET /api/auth/me
  */
@@ -86,18 +84,9 @@ exports.getMe = async (req, res, next) => {
 
 exports.getPinConfig = async (req, res, next) => {
     try {
-        const wineryId = Number(req.query.wineryId);
-        if (!Number.isInteger(wineryId) || wineryId < 1) {
-            throw new AppError('Winery ID is required.', 400, 'WINERY_REQUIRED');
-        }
-
-        const [winery, settings] = await Promise.all([
-            Winery.findByPk(wineryId),
-            WinerySettings.findOne({ where: { wineryId } })
-        ]);
-        if (!winery) {
-            throw new AppError('Winery not found.', 404, 'NOT_FOUND');
-        }
+        const winery = await resolveDeploymentWinery();
+        const wineryId = winery.id;
+        const settings = await WinerySettings.findOne({ where: { wineryId } });
         const authConfig = getAuthConfig(settings);
 
         res.json({
@@ -114,12 +103,9 @@ exports.getPinConfig = async (req, res, next) => {
 
 exports.pinLogin = async (req, res, next) => {
     try {
-        const wineryId = Number(req.body.wineryId);
+        const winery = await resolveDeploymentWinery();
+        const wineryId = winery.id;
         const pin = String(req.body.pin || '').trim();
-
-        if (!Number.isInteger(wineryId) || wineryId < 1) {
-            throw new AppError('Winery ID is required for PIN login.', 400, 'WINERY_REQUIRED');
-        }
 
         const settings = await WinerySettings.findOne({ where: { wineryId } });
         const authConfig = getAuthConfig(settings);
@@ -192,6 +178,10 @@ exports.updateMe = async (req, res, next) => {
     try {
         const { displayName } = req.body;
 
+        if (Object.prototype.hasOwnProperty.call(req.body, 'wineryId')) {
+            throw new AppError('Winery assignment cannot be changed through this endpoint.', 400, 'IMMUTABLE_WINERY');
+        }
+
         if (displayName !== undefined && (typeof displayName !== 'string' || displayName.trim().length < 2)) {
             throw new AppError('Display name must be at least 2 characters.', 400, 'INVALID_DISPLAY_NAME');
         }
@@ -225,6 +215,10 @@ exports.updateMe = async (req, res, next) => {
     }
 };
 
+/**
+ * Resolve a managed Firebase login identity by immutable staff username.
+ * GET /api/public/resolve-staff?username=sarah
+ */
 exports.resolveStaff = async (req, res, next) => {
     try {
         const { username } = req.query;
@@ -233,24 +227,29 @@ exports.resolveStaff = async (req, res, next) => {
             throw new AppError('Username is required', 400, 'MISSING_PARAM');
         }
 
-        // Search for 'staff' users with this username (displayName)
-        const matches = await User.findAll({
-            where: {
-                displayName: username,
-                role: 'staff'
-            },
-            attributes: ['id', 'email', 'wineryId']
-        });
-
-        if (matches.length === 0) {
+        const cleanUsername = normalizeStaffUsername(username);
+        if (cleanUsername.length < 3 || cleanUsername.length > 64) {
             throw new AppError('Staff member not found.', 404, 'NOT_FOUND');
         }
 
-        if (matches.length > 1) {
-            throw new AppError('Multiple staff found with this username. Please use your Winery ID.', 409, 'AMBIGUOUS_USERNAME', { ambiguous: true });
-        }
+        const winery = await resolveDeploymentWinery();
+        const legacyEmail = buildManagedStaffEmail(cleanUsername, winery.id);
+        const user = await User.findOne({
+            where: {
+                wineryId: winery.id,
+                role: 'staff',
+                isActive: true,
+                [Op.or]: [
+                    { username: cleanUsername },
+                    { username: null, email: legacyEmail }
+                ]
+            },
+            attributes: ['email', 'wineryId']
+        });
 
-        const user = matches[0];
+        if (!user) {
+            throw new AppError('Staff member not found.', 404, 'NOT_FOUND');
+        }
         res.json({
             email: user.email,
             wineryId: user.wineryId

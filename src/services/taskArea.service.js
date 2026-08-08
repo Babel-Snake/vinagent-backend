@@ -1,11 +1,12 @@
 const { OperationalArea, TaskArea } = require('../models');
 
-function getTaskAreaInclude() {
+function getTaskAreaInclude(wineryId) {
   return {
     model: OperationalArea,
     as: 'OperationalAreas',
+    where: { wineryId },
     attributes: ['id', 'name', 'description', 'isActive', 'sortOrder'],
-    through: { attributes: ['relationshipType'] },
+    through: { attributes: ['relationshipType'], where: { wineryId } },
     required: false
   };
 }

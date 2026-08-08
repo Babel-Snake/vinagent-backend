@@ -310,10 +310,27 @@ async function getTasksForWinery({ wineryId, userId, userRole, filters = {}, pag
   const { count, rows } = await Task.findAndCountAll({
     where: whereClause,
     include: [
-      { model: Member, attributes: ['id', 'firstName', 'lastName', 'email', 'phone'] },
-      { model: User, as: 'Creator', attributes: ['id', 'displayName', 'role'] },
-      { model: User, as: 'Assignee', attributes: ['id', 'displayName', 'email', 'role'] },
-      getTaskAreaInclude()
+      {
+        model: Member,
+        where: { wineryId },
+        attributes: ['id', 'firstName', 'lastName', 'email', 'phone'],
+        required: false
+      },
+      {
+        model: User,
+        as: 'Creator',
+        where: { wineryId },
+        attributes: ['id', 'displayName', 'role'],
+        required: false
+      },
+      {
+        model: User,
+        as: 'Assignee',
+        where: { wineryId },
+        attributes: ['id', 'displayName', 'email', 'role'],
+        required: false
+      },
+      getTaskAreaInclude(wineryId)
     ],
     order,
     limit,

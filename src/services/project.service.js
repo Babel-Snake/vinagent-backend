@@ -21,23 +21,31 @@ const { ForbiddenError, NotFoundError, ValidationError } = require('../utils/err
 
 const USER_ATTRIBUTES = ['id', 'displayName', 'email', 'role', 'isActive'];
 
-function projectIncludes() {
+function projectIncludes(wineryId) {
   return [
-    { model: User, as: 'Owner', attributes: USER_ATTRIBUTES, required: false },
-    { model: User, as: 'Lead', attributes: USER_ATTRIBUTES, required: false },
-    { model: User, as: 'LeadGrantor', attributes: USER_ATTRIBUTES, required: false },
-    { model: User, as: 'Creator', attributes: USER_ATTRIBUTES, required: false },
-    { model: User, as: 'Updater', attributes: USER_ATTRIBUTES, required: false },
+    { model: User, as: 'Owner', where: { wineryId }, attributes: USER_ATTRIBUTES, required: false },
+    { model: User, as: 'Lead', where: { wineryId }, attributes: USER_ATTRIBUTES, required: false },
+    { model: User, as: 'LeadGrantor', where: { wineryId }, attributes: USER_ATTRIBUTES, required: false },
+    { model: User, as: 'Creator', where: { wineryId }, attributes: USER_ATTRIBUTES, required: false },
+    { model: User, as: 'Updater', where: { wineryId }, attributes: USER_ATTRIBUTES, required: false },
     {
       model: ProjectArea,
       as: 'AreaLinks',
-      include: [{ model: OperationalArea, as: 'Area', attributes: ['id', 'name', 'isActive', 'sortOrder'] }],
+      where: { wineryId },
+      include: [{
+        model: OperationalArea,
+        as: 'Area',
+        where: { wineryId },
+        attributes: ['id', 'name', 'isActive', 'sortOrder'],
+        required: false
+      }],
       required: false
     },
     {
       model: ProjectParticipant,
       as: 'Participants',
-      include: [{ model: User, as: 'User', attributes: USER_ATTRIBUTES }],
+      where: { wineryId },
+      include: [{ model: User, as: 'User', where: { wineryId }, attributes: USER_ATTRIBUTES, required: false }],
       required: false
     }
   ];
@@ -97,7 +105,7 @@ async function logProjectAudit({
 async function loadProject(projectId, wineryId, transaction = null) {
   return Project.findOne({
     where: { id: projectId, wineryId },
-    include: projectIncludes(),
+    include: projectIncludes(wineryId),
     transaction
   });
 }
@@ -174,8 +182,14 @@ async function assertCanCoordinateProject(project, context) {
 
 async function notifyUser({ userId, actorUserId, project, message, transaction }) {
   if (!userId || Number(userId) === Number(actorUserId)) return null;
+  const recipient = await User.findOne({
+    where: { id: userId, wineryId: project.wineryId, isActive: true },
+    attributes: ['id'],
+    transaction
+  });
+  if (!recipient) return null;
   return Notification.create({
-    userId,
+    userId: recipient.id,
     type: 'SYSTEM',
     message,
     data: {
@@ -188,7 +202,10 @@ async function notifyUser({ userId, actorUserId, project, message, transaction }
 
 async function replaceParticipants({ project, userIds, actorUserId, transaction }) {
   const users = await validateSameWineryUsers(userIds, project.wineryId, transaction);
-  await ProjectParticipant.destroy({ where: { projectId: project.id }, transaction });
+  await ProjectParticipant.destroy({
+    where: { projectId: project.id, wineryId: project.wineryId },
+    transaction
+  });
   if (users.length === 0) return;
   await ProjectParticipant.bulkCreate(users.map(user => ({
     wineryId: project.wineryId,
@@ -211,10 +228,18 @@ async function replaceParticipants({ project, userIds, actorUserId, transaction 
 
 function serializeBaseProject(project) {
   const value = plain(project);
-  const areaLinks = value.AreaLinks || [];
+  const areaLinks = (value.AreaLinks || []).filter(link => link.Area);
+  const participants = (value.Participants || []).filter(participant => participant.User);
   const primary = areaLinks.find(link => link.relationshipType === 'PRIMARY');
   return {
     ...value,
+    ownerUserId: value.Owner ? value.ownerUserId : null,
+    leadUserId: value.Lead ? value.leadUserId : null,
+    leadGrantedByUserId: value.LeadGrantor ? value.leadGrantedByUserId : null,
+    createdBy: value.Creator ? value.createdBy : null,
+    updatedBy: value.Updater ? value.updatedBy : null,
+    AreaLinks: areaLinks,
+    Participants: participants,
     primaryAreaId: primary?.areaId || null,
     areas: areaLinks.map(link => ({
       id: link.areaId,
@@ -228,9 +253,9 @@ async function loadDependencies(projectId, wineryId, transaction = null) {
   return ProjectTaskDependency.findAll({
     where: { projectId, wineryId },
     include: [
-      { model: Task, as: 'BlockingTask', attributes: ['id', 'workflowState', 'dueAt', 'payload', 'category', 'subType'] },
-      { model: Task, as: 'BlockedTask', attributes: ['id', 'workflowState', 'dueAt', 'payload', 'category', 'subType'] },
-      { model: User, as: 'Creator', attributes: USER_ATTRIBUTES, required: false }
+      { model: Task, as: 'BlockingTask', where: { wineryId }, attributes: ['id', 'workflowState', 'dueAt', 'payload', 'category', 'subType'], required: true },
+      { model: Task, as: 'BlockedTask', where: { wineryId }, attributes: ['id', 'workflowState', 'dueAt', 'payload', 'category', 'subType'], required: true },
+      { model: User, as: 'Creator', where: { wineryId }, attributes: USER_ATTRIBUTES, required: false }
     ],
     order: [['createdAt', 'ASC'], ['id', 'ASC']],
     transaction
@@ -242,7 +267,7 @@ async function loadItemEntries({ project, wineryId, userId, userRole, transactio
   const involvementContext = { userId, userRole, areaIds };
   const links = await ProjectItem.findAll({
     where: { projectId: project.id, wineryId },
-    include: [{ model: User, as: 'AddedBy', attributes: USER_ATTRIBUTES, required: false }],
+    include: [{ model: User, as: 'AddedBy', where: { wineryId }, attributes: USER_ATTRIBUTES, required: false }],
     order: [['sortOrder', 'ASC'], ['createdAt', 'ASC'], ['id', 'ASC']],
     transaction
   });
@@ -348,6 +373,7 @@ async function enrichProject(project, context, { includeActivity = false } = {})
     summary,
     items: visibleEntries.map(entry => ({
       ...entry.link,
+      addedBy: entry.link.AddedBy ? entry.link.addedBy : null,
       source: entry.source
     })),
     dependencies: dependencies.map(serializeDependency),
@@ -504,7 +530,7 @@ function sortProjects(projects, sortBy) {
 }
 
 async function listProjects({ wineryId, userId, userRole, filters }) {
-  const rows = await Project.findAll({ where: { wineryId }, include: projectIncludes() });
+  const rows = await Project.findAll({ where: { wineryId }, include: projectIncludes(wineryId) });
   const visible = [];
   for (const project of rows) {
     if (!(await projectVisibility.canViewProject(project, { wineryId, userId, userRole }))) continue;
@@ -675,7 +701,7 @@ async function updateProject({ projectId, wineryId, userId, userRole, data }) {
     }
     if (data.notifyParticipants) {
       const participants = await ProjectParticipant.findAll({
-        where: { projectId, notificationsEnabled: true },
+        where: { projectId, wineryId, notificationsEnabled: true },
         transaction
       });
       for (const participant of participants) {
@@ -705,7 +731,7 @@ async function addParticipant({ projectId, wineryId, userId, userRole, data }) {
     await assertCanCoordinateProject(project, { wineryId, userId, userRole, transaction });
     await validateSameWineryUsers([data.userId], wineryId, transaction);
     const [participant, created] = await ProjectParticipant.findOrCreate({
-      where: { projectId, userId: data.userId },
+      where: { projectId, wineryId, userId: data.userId },
       defaults: {
         wineryId,
         participationRole: data.participationRole,
@@ -840,7 +866,7 @@ async function addProjectItem({ projectId, wineryId, userId, userRole, data }) {
       transaction
     });
     const [item, created] = await ProjectItem.findOrCreate({
-      where: { projectId, itemType: data.itemType, itemId: data.itemId },
+      where: { projectId, wineryId, itemType: data.itemType, itemId: data.itemId },
       defaults: {
         wineryId,
         isRequired: data.isRequired,
@@ -916,12 +942,13 @@ async function removeProjectItem({ projectId, projectItemId, wineryId, userId, u
       const removedDependencies = await ProjectTaskDependency.findAll({
         where: {
           projectId,
+          wineryId,
           [Op.or]: [{ blockingTaskId: item.itemId }, { blockedTaskId: item.itemId }]
         },
         transaction
       });
       await ProjectTaskDependency.destroy({
-        where: { id: { [Op.in]: removedDependencies.map(dependency => dependency.id) } },
+        where: { id: { [Op.in]: removedDependencies.map(dependency => dependency.id) }, wineryId },
         transaction
       });
       for (const dependency of removedDependencies) {
@@ -1029,6 +1056,7 @@ async function addDependency({ projectId, wineryId, userId, userRole, data }) {
     const [dependency, created] = await ProjectTaskDependency.findOrCreate({
       where: {
         projectId,
+        wineryId,
         blockingTaskId: data.blockingTaskId,
         blockedTaskId: data.blockedTaskId
       },
@@ -1351,7 +1379,7 @@ async function listProjectActivity({ projectId, wineryId, userId, userRole, skip
   }
   return ProjectAuditEvent.findAll({
     where: { projectId, wineryId },
-    include: [{ model: User, as: 'Actor', attributes: USER_ATTRIBUTES, required: false }],
+    include: [{ model: User, as: 'Actor', where: { wineryId }, attributes: USER_ATTRIBUTES, required: false }],
     order: [['createdAt', 'DESC'], ['id', 'DESC']]
   }).then(rows => rows.map(plain));
 }

@@ -48,12 +48,23 @@ const LINKED_CALENDAR_EVENT_ATTRIBUTES = [
   'type'
 ];
 
-function getNoticeAreaInclude() {
+function getNoticeAreaInclude(wineryId) {
   return {
     model: OperationalArea,
     as: 'OperationalAreas',
+    where: { wineryId },
     attributes: ['id', 'name', 'description', 'isActive', 'sortOrder'],
-    through: { attributes: [] },
+    through: { attributes: [], where: { wineryId } },
+    required: false
+  };
+}
+
+function sameWineryUserInclude(as, wineryId) {
+  return {
+    model: User,
+    as,
+    where: { wineryId },
+    attributes: ['id', 'displayName', 'email', 'role'],
     required: false
   };
 }
@@ -148,6 +159,19 @@ function normalizeNoticeAudiencePayload(data = {}, options = {}) {
     audienceRoles: null,
     audienceUserIds
   };
+}
+
+async function validateNoticeAudienceUsers(audience, wineryId, transaction = null) {
+  if (audience.audienceType !== 'users') return;
+  const userIds = parseJsonArray(audience.audienceUserIds).map(Number);
+  const users = await User.findAll({
+    where: { id: { [Op.in]: userIds }, wineryId, isActive: true },
+    attributes: ['id'],
+    transaction
+  });
+  if (users.length !== userIds.length) {
+    throw new ValidationError('One or more notice audience members are invalid or inactive.');
+  }
 }
 
 function noticeVisibleToUser(notice, { userId, userRole, areaIds = [] }) {
@@ -304,7 +328,13 @@ async function loadAcknowledgementUsers(wineryId, transaction = null) {
   return User.findAll({
     where: { wineryId, isActive: true },
     attributes: ['id', 'displayName', 'email', 'role'],
-    include: [{ model: UserAreaMembership, as: 'AreaMemberships', attributes: ['areaId'], required: false }],
+    include: [{
+      model: UserAreaMembership,
+      as: 'AreaMemberships',
+      where: { wineryId },
+      attributes: ['areaId'],
+      required: false
+    }],
     transaction
   });
 }
@@ -401,18 +431,19 @@ async function listNotices({ wineryId, userId, userRole, filters = {}, paginatio
   const rows = await Notice.findAll({
     where,
     include: [
-      { model: User, as: 'Author', attributes: ['id', 'displayName', 'email', 'role'] },
-      { model: User, as: 'Updater', attributes: ['id', 'displayName', 'email', 'role'] },
-      { model: User, as: 'Archiver', attributes: ['id', 'displayName', 'email', 'role'] },
+      sameWineryUserInclude('Author', wineryId),
+      sameWineryUserInclude('Updater', wineryId),
+      sameWineryUserInclude('Archiver', wineryId),
       {
         model: Task,
         as: 'LinkedTasks',
+        where: { wineryId },
         attributes: LINKED_TASK_ATTRIBUTES,
-        through: { attributes: ['createdAt', 'createdBy'] },
+        through: { attributes: ['createdAt', 'createdBy'], where: { wineryId } },
         required: false
       },
-      getLinkedCalendarEventInclude(),
-      getNoticeAreaInclude()
+      getLinkedCalendarEventInclude(wineryId),
+      getNoticeAreaInclude(wineryId)
     ],
     order: buildOrder(filters.sortBy)
   });
@@ -448,7 +479,7 @@ async function listNotices({ wineryId, userId, userRole, filters = {}, paginatio
 async function ensureNotice({ noticeId, wineryId, userId, userRole, transaction }) {
   const notice = await Notice.findOne({
     where: { id: noticeId, wineryId },
-    include: [getNoticeAreaInclude()],
+    include: [getNoticeAreaInclude(wineryId)],
     transaction
   });
   if (!notice || (userId && userRole && !(await recordVisibility.canViewNotice(notice, { wineryId, userId, userRole, transaction })))) {
@@ -461,18 +492,19 @@ async function getNoticeById({ noticeId, wineryId, userId, userRole }) {
   const notice = await Notice.findOne({
     where: { id: noticeId, wineryId },
     include: [
-      { model: User, as: 'Author', attributes: ['id', 'displayName', 'email', 'role'] },
-      { model: User, as: 'Updater', attributes: ['id', 'displayName', 'email', 'role'] },
-      { model: User, as: 'Archiver', attributes: ['id', 'displayName', 'email', 'role'] },
+      sameWineryUserInclude('Author', wineryId),
+      sameWineryUserInclude('Updater', wineryId),
+      sameWineryUserInclude('Archiver', wineryId),
       {
         model: Task,
         as: 'LinkedTasks',
+        where: { wineryId },
         attributes: LINKED_TASK_ATTRIBUTES,
-        through: { attributes: ['createdAt', 'createdBy'] },
+        through: { attributes: ['createdAt', 'createdBy'], where: { wineryId } },
         required: false
       },
-      getLinkedCalendarEventInclude(),
-      getNoticeAreaInclude()
+      getLinkedCalendarEventInclude(wineryId),
+      getNoticeAreaInclude(wineryId)
     ]
   });
 
@@ -502,14 +534,14 @@ async function acknowledgeNotice({ noticeId, wineryId, userId, userRole }) {
     throw new ForbiddenError('You are not in the acknowledgement audience for this notice.');
   }
   await NoticeAcknowledgement.findOrCreate({
-    where: { noticeId: notice.id, userId },
+    where: { noticeId: notice.id, wineryId, userId },
     defaults: { noticeId: notice.id, wineryId, userId, acknowledgedAt: new Date() }
   });
   return getNoticeById({ noticeId, wineryId, userId, userRole });
 }
 
 async function getNoticeAcknowledgements({ noticeId, wineryId, userId, userRole }) {
-  const notice = await Notice.findOne({ where: { id: noticeId, wineryId }, include: [getNoticeAreaInclude()] });
+  const notice = await Notice.findOne({ where: { id: noticeId, wineryId }, include: [getNoticeAreaInclude(wineryId)] });
   if (!notice) throw new NotFoundError('Notice not found');
   if (!(await recordVisibility.canManageNotice(notice, { wineryId, userId, userRole }))) {
     throw new ForbiddenError('You can only view acknowledgement details for notices you manage.');
@@ -539,22 +571,27 @@ async function getNoticeAcknowledgements({ noticeId, wineryId, userId, userRole 
   };
 }
 
-function getLinkedNoticeInclude() {
+function getLinkedNoticeInclude(wineryId = null) {
   return {
     model: Notice,
     as: 'LinkedNotices',
+    ...(wineryId ? { where: { wineryId } } : {}),
     attributes: LINKED_NOTICE_ATTRIBUTES,
-    through: { attributes: ['createdAt', 'createdBy'] },
+    through: {
+      attributes: ['createdAt', 'createdBy'],
+      ...(wineryId ? { where: { wineryId } } : {})
+    },
     required: false
   };
 }
 
-function getLinkedCalendarEventInclude() {
+function getLinkedCalendarEventInclude(wineryId) {
   return {
     model: CalendarEvent,
     as: 'CalendarEvents',
+    where: { wineryId },
     attributes: LINKED_CALENDAR_EVENT_ATTRIBUTES,
-    through: { attributes: ['createdAt', 'createdBy'] },
+    through: { attributes: ['createdAt', 'createdBy'], where: { wineryId } },
     required: false
   };
 }
@@ -601,7 +638,7 @@ async function linkNoticeToCalendarEvents({ noticeId, calendarEventIds = [], win
 
 async function ensureNoticeAndTask({ noticeId, taskId, wineryId, transaction }) {
   const [notice, task] = await Promise.all([
-    Notice.findOne({ where: { id: noticeId, wineryId }, include: [getNoticeAreaInclude()], transaction }),
+    Notice.findOne({ where: { id: noticeId, wineryId }, include: [getNoticeAreaInclude(wineryId)], transaction }),
     Task.findOne({ where: { id: taskId, wineryId }, transaction })
   ]);
 
@@ -661,7 +698,7 @@ async function listNoticeComments({ noticeId, wineryId, userId, userRole }) {
   const comments = await NoticeComment.findAll({
     where: { noticeId, wineryId },
     include: [
-      { model: User, as: 'Author', attributes: ['id', 'displayName', 'email', 'role'] }
+      sameWineryUserInclude('Author', wineryId)
     ],
     order: [['createdAt', 'ASC'], ['id', 'ASC']]
   });
@@ -698,7 +735,7 @@ async function createNoticeComment({ noticeId, wineryId, userId, userRole, data 
   return NoticeComment.findOne({
     where: { id: comment.id, wineryId },
     include: [
-      { model: User, as: 'Author', attributes: ['id', 'displayName', 'email', 'role'] }
+      sameWineryUserInclude('Author', wineryId)
     ]
   }).then(serializeNoticeComment);
 }
@@ -754,6 +791,7 @@ async function createNotice({ wineryId, userId, userRole, data }) {
       requireManage: true,
       transaction
     });
+    await validateNoticeAudienceUsers(audience, wineryId, transaction);
     notice = await Notice.create({
       ...noticeData,
       ...audience,
@@ -785,7 +823,7 @@ async function createNotice({ wineryId, userId, userRole, data }) {
 async function updateNotice({ noticeId, wineryId, userId, userRole, updates }) {
   const notice = await Notice.findOne({
     where: { id: noticeId, wineryId },
-    include: [getNoticeAreaInclude()]
+    include: [getNoticeAreaInclude(wineryId)]
   });
   if (!notice) {
     throw new NotFoundError('Notice not found');
@@ -840,6 +878,7 @@ async function updateNotice({ noticeId, wineryId, userId, userRole, updates }) {
         ? updatePayload.audienceUserIds
         : notice.audienceUserIds
     });
+    await validateNoticeAudienceUsers(audienceUpdates, wineryId);
     delete updatePayload.audienceType;
     delete updatePayload.audienceRoles;
     delete updatePayload.audienceUserIds;
@@ -882,7 +921,7 @@ async function updateNotice({ noticeId, wineryId, userId, userRole, updates }) {
     const transaction = await Notice.sequelize.transaction();
     try {
       await CalendarEventNotice.destroy({
-        where: { noticeId: notice.id },
+        where: { noticeId: notice.id, wineryId },
         transaction
       });
       await CalendarEvent.update(
@@ -909,7 +948,7 @@ async function updateNotice({ noticeId, wineryId, userId, userRole, updates }) {
 async function archiveNotice({ noticeId, wineryId, userId, userRole }) {
   const notice = await Notice.findOne({
     where: { id: noticeId, wineryId },
-    include: [getNoticeAreaInclude()]
+    include: [getNoticeAreaInclude(wineryId)]
   });
   if (!notice) {
     throw new NotFoundError('Notice not found');

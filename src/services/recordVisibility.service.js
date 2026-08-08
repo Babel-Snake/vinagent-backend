@@ -1,5 +1,5 @@
 const { Op } = require('sequelize');
-const { NoticeArea, Notification, Project, ProjectItem, TaskArea } = require('../models');
+const { NoticeArea, Notification, Project, ProjectItem, Task, TaskArea } = require('../models');
 const operationalAreaService = require('./operationalArea.service');
 const { ForbiddenError, NotFoundError } = require('../utils/errors');
 
@@ -36,26 +36,42 @@ function linkedAreaIds(record) {
   return [];
 }
 
-async function getTaskAreaIds(taskId, transaction = null) {
-  const rows = await TaskArea.findAll({ where: { taskId }, attributes: ['areaId'], transaction });
+async function getTaskAreaIds(taskId, wineryId, transaction = null) {
+  const rows = await TaskArea.findAll({
+    where: { taskId, wineryId },
+    attributes: ['areaId'],
+    transaction
+  });
   return rows.map(row => Number(row.areaId));
 }
 
-async function getNoticeAreaIds(noticeId, transaction = null) {
-  const rows = await NoticeArea.findAll({ where: { noticeId }, attributes: ['areaId'], transaction });
+async function getNoticeAreaIds(noticeId, wineryId, transaction = null) {
+  const rows = await NoticeArea.findAll({
+    where: { noticeId, wineryId },
+    attributes: ['areaId'],
+    transaction
+  });
   return rows.map(row => Number(row.areaId));
 }
 
-async function getMentionTaskIds(userId, transaction = null) {
+async function getMentionTaskIds(userId, wineryId, transaction = null) {
   if (!Notification?.findAll) return [];
   const notifications = await Notification.findAll({
     where: { userId, type: 'MENTION' },
     attributes: ['data'],
     transaction
   });
-  return [...new Set(notifications
+  const candidateIds = [...new Set(notifications
     .map(notification => Number(jsonObject(notification.data).taskId))
     .filter(taskId => Number.isInteger(taskId) && taskId > 0))];
+  if (candidateIds.length === 0) return [];
+
+  const tasks = await Task.findAll({
+    where: { id: { [Op.in]: candidateIds }, wineryId },
+    attributes: ['id'],
+    transaction
+  });
+  return tasks.map(task => Number(task.id));
 }
 
 async function getDelegatedLeadTaskIds({ wineryId, userId, transaction = null }) {
@@ -89,7 +105,7 @@ async function isDelegatedProjectLeadForTask(taskId, context) {
 async function buildTaskVisibilityPredicate({ wineryId, userId, userRole }) {
   if (operationalAreaService.isGlobalManager(userRole)) return null;
   const { areaIds } = await operationalAreaService.getUserAreaAccess({ userId, wineryId });
-  const mentionedTaskIds = await getMentionTaskIds(userId);
+  const mentionedTaskIds = await getMentionTaskIds(userId, wineryId);
   const delegatedLeadTaskIds = await getDelegatedLeadTaskIds({ wineryId, userId });
   const areaTaskRows = areaIds.length > 0
     ? await TaskArea.findAll({
@@ -118,11 +134,13 @@ async function canViewTask(task, { wineryId, userId, userRole, transaction = nul
   if (operationalAreaService.isGlobalManager(userRole)) return true;
   if (Number(value.assigneeId) === Number(userId) || Number(value.createdBy) === Number(userId)) return true;
   if (await isDelegatedProjectLeadForTask(value.id, { wineryId, userId, transaction })) return true;
-  if ((await getMentionTaskIds(userId, transaction)).includes(Number(value.id))) return true;
+  if ((await getMentionTaskIds(userId, wineryId, transaction)).includes(Number(value.id))) return true;
   if (value.areaScope !== 'AREAS') return !value.assigneeId;
 
   const taskAreaIds = linkedAreaIds(value);
-  const resolvedAreaIds = taskAreaIds.length > 0 ? taskAreaIds : await getTaskAreaIds(value.id, transaction);
+  const resolvedAreaIds = taskAreaIds.length > 0
+    ? taskAreaIds
+    : await getTaskAreaIds(value.id, wineryId, transaction);
   if (resolvedAreaIds.length === 0) return false;
   const { areaIds } = await operationalAreaService.getUserAreaAccess({ userId, wineryId, transaction });
   return resolvedAreaIds.some(areaId => areaIds.includes(areaId));
@@ -137,7 +155,9 @@ async function canMutateTask(task, context) {
   if (value.areaScope !== 'AREAS') return !value.assigneeId;
 
   const taskAreaIds = linkedAreaIds(value);
-  const resolvedAreaIds = taskAreaIds.length > 0 ? taskAreaIds : await getTaskAreaIds(value.id, context.transaction);
+  const resolvedAreaIds = taskAreaIds.length > 0
+    ? taskAreaIds
+    : await getTaskAreaIds(value.id, context.wineryId, context.transaction);
   const { managedAreaIds } = await operationalAreaService.getUserAreaAccess(context);
   if (resolvedAreaIds.some(areaId => managedAreaIds.includes(areaId))) return true;
   return !value.assigneeId;
@@ -149,7 +169,9 @@ async function canManageTask(task, { wineryId, userId, userRole, transaction = n
   if (operationalAreaService.isGlobalManager(userRole)) return true;
   if (value.areaScope !== 'AREAS') return false;
   const taskAreaIds = linkedAreaIds(value);
-  const resolvedAreaIds = taskAreaIds.length > 0 ? taskAreaIds : await getTaskAreaIds(value.id, transaction);
+  const resolvedAreaIds = taskAreaIds.length > 0
+    ? taskAreaIds
+    : await getTaskAreaIds(value.id, wineryId, transaction);
   const { managedAreaIds } = await operationalAreaService.getUserAreaAccess({ userId, wineryId, transaction });
   return resolvedAreaIds.length > 0 && resolvedAreaIds.every(areaId => managedAreaIds.includes(areaId));
 }
@@ -183,7 +205,9 @@ async function canViewNotice(notice, { wineryId, userId, userRole, areaIds = nul
   if (value.areaScope !== 'AREAS') return true;
 
   const noticeAreaIds = linkedAreaIds(value);
-  const resolvedAreaIds = noticeAreaIds.length > 0 ? noticeAreaIds : await getNoticeAreaIds(value.id, transaction);
+  const resolvedAreaIds = noticeAreaIds.length > 0
+    ? noticeAreaIds
+    : await getNoticeAreaIds(value.id, wineryId, transaction);
   const accessAreaIds = areaIds || (await operationalAreaService.getUserAreaAccess({ userId, wineryId, transaction })).areaIds;
   return resolvedAreaIds.some(areaId => accessAreaIds.includes(areaId));
 }
@@ -194,7 +218,9 @@ async function canManageNotice(notice, { wineryId, userId, userRole, transaction
   if (operationalAreaService.isGlobalManager(userRole)) return true;
   if (value.areaScope !== 'AREAS') return false;
   const noticeAreaIds = linkedAreaIds(value);
-  const resolvedAreaIds = noticeAreaIds.length > 0 ? noticeAreaIds : await getNoticeAreaIds(value.id, transaction);
+  const resolvedAreaIds = noticeAreaIds.length > 0
+    ? noticeAreaIds
+    : await getNoticeAreaIds(value.id, wineryId, transaction);
   const { managedAreaIds } = await operationalAreaService.getUserAreaAccess({ userId, wineryId, transaction });
   return resolvedAreaIds.length > 0 && resolvedAreaIds.every(areaId => managedAreaIds.includes(areaId));
 }

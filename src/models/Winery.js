@@ -53,6 +53,11 @@ module.exports = (sequelize, DataTypes) => {
             Winery.hasMany(models.WineryFAQItem, { foreignKey: 'wineryId', as: 'faqs' });
             Winery.hasMany(models.WinerySop, { foreignKey: 'wineryId', as: 'sops' });
             Winery.hasOne(models.WineryIntegrationConfig, { foreignKey: 'wineryId', as: 'integrationConfig' });
+            Winery.hasOne(models.WineryBillingProfile, { foreignKey: 'wineryId', as: 'billingProfile' });
+            Winery.hasMany(models.UsageEvent, { foreignKey: 'wineryId', as: 'usageEvents' });
+            Winery.hasMany(models.UsageCounterBucket, { foreignKey: 'wineryId', as: 'usageCounterBuckets' });
+            Winery.hasMany(models.UsageGaugeSnapshot, { foreignKey: 'wineryId', as: 'usageGaugeSnapshots' });
+            Winery.hasMany(models.UserActivityDaily, { foreignKey: 'wineryId', as: 'userActivityDays' });
         }
     }
 

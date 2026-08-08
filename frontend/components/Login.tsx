@@ -5,14 +5,13 @@ import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
 import { auth } from '../lib/firebase';
 import { errorMessage } from '../lib/errors';
-import ConfirmDialog from './ui/ConfirmDialog';
 import {
-    clearDefaultWineryContext,
     clearPinSession,
     getDefaultWineryContext,
     getMyProfile,
     getPinConfig,
     pinLogin,
+    resolveStaff,
     saveDefaultWineryContext,
     savePinSession,
     type DefaultWineryContext
@@ -33,28 +32,24 @@ export default function Login() {
     const [staffCode, setStaffCode] = useState('');
     const [pinCode, setPinCode] = useState('');
     const [error, setError] = useState('');
-    const [changeWineryRequested, setChangeWineryRequested] = useState(false);
 
     const router = useRouter();
 
     useEffect(() => {
         const storedContext = getDefaultWineryContext();
-        if (storedContext) {
-            setWineryContext(storedContext);
-            setMode('staff');
-            void loadStaffAccess(storedContext);
-        }
+        if (storedContext) setMode('staff');
+        void loadStaffAccess();
     }, []);
 
-    async function loadStaffAccess(context: DefaultWineryContext) {
+    async function loadStaffAccess() {
         setConfigLoading(true);
         setError('');
 
         try {
-            const config = await getPinConfig(context.wineryId);
+            const config = await getPinConfig();
             const nextContext = {
-                wineryId: context.wineryId,
-                wineryName: config.wineryName || context.wineryName
+                wineryId: config.wineryId,
+                wineryName: config.wineryName
             };
             setWineryContext(nextContext);
             saveDefaultWineryContext(nextContext);
@@ -112,7 +107,6 @@ export default function Login() {
         try {
             if (staffMethod === 'pin') {
                 const session = await pinLogin({
-                    wineryId: wineryContext.wineryId,
                     pin: pinCode.trim()
                 });
                 await signOut(auth).catch(() => undefined);
@@ -131,8 +125,8 @@ export default function Login() {
             }
 
             clearPinSession();
-            const loginEmail = `${cleanUsername}.w${wineryContext.wineryId}@vinagent.internal`;
-            const credential = await signInWithEmailAndPassword(auth, loginEmail, staffCode);
+            const resolvedStaff = await resolveStaff(cleanUsername);
+            const credential = await signInWithEmailAndPassword(auth, resolvedStaff.email, staffCode);
             await credential.user.getIdToken();
             await storeProfileWinery();
             router.push('/home');
@@ -144,17 +138,6 @@ export default function Login() {
                 setError(errorMessage(err, 'Login failed'));
             }
         }
-    }
-
-    function confirmChangeWinery() {
-        clearPinSession();
-        clearDefaultWineryContext();
-        setWineryContext(null);
-        setPinCode('');
-        setUsername('');
-        setStaffCode('');
-        setMode('manager');
-        setError('');
     }
 
     const wineryName = wineryContext?.wineryName || 'Configured winery';
@@ -176,15 +159,8 @@ export default function Login() {
                 </div>
 
                 {wineryContext && (
-                    <div className="mt-6 flex items-center justify-between gap-3 rounded-md border border-[var(--border)] bg-white px-3 py-2 text-sm">
+                    <div className="mt-6 rounded-md border border-[var(--border)] bg-white px-3 py-2 text-center text-sm">
                         <span className="min-w-0 truncate font-medium text-[#344039]">{wineryName}</span>
-                        <button
-                            type="button"
-                            onClick={() => setChangeWineryRequested(true)}
-                            className="shrink-0 text-sm font-medium text-[var(--accent)] hover:text-teal-900"
-                        >
-                            Change winery
-                        </button>
                     </div>
                 )}
 
@@ -310,7 +286,7 @@ export default function Login() {
                                 <div className="border-t border-[var(--border)] pt-4 text-center">
                                     <button
                                         type="button"
-                                        onClick={() => { setMode('staff'); setError(''); void loadStaffAccess(wineryContext); }}
+                                        onClick={() => { setMode('staff'); setError(''); void loadStaffAccess(); }}
                                         className="text-sm font-medium text-[var(--accent)] hover:text-teal-900"
                                     >
                                         Staff access
@@ -321,15 +297,6 @@ export default function Login() {
                     )}
                 </div>
             </div>
-            <ConfirmDialog
-                open={changeWineryRequested}
-                onClose={() => setChangeWineryRequested(false)}
-                onConfirm={confirmChangeWinery}
-                title="Change winery on this device?"
-                description="Staff access will be cleared and a manager will need to sign in again."
-                confirmLabel="Change winery"
-                destructive
-            />
         </div>
     );
 }

@@ -3,6 +3,21 @@ const logger = require('../config/logger');
 const { User, Winery } = require('../models');
 const { verifyPinSessionToken } = require('../utils/pinAuth');
 
+function deploymentAllowsWinery(wineryId) {
+  const configuredId = String(process.env.DEPLOYMENT_WINERY_ID || '').trim();
+  if (!configuredId) return true;
+  return Number(configuredId) === Number(wineryId);
+}
+
+function rejectWrongDeploymentWinery(res) {
+  return res.status(403).json({
+    error: {
+      code: 'ACCESS_DENIED',
+      message: 'This account is not available in this winery deployment.'
+    }
+  });
+}
+
 async function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization || '';
   const [, token] = authHeader.split(' ');
@@ -24,13 +39,26 @@ async function authMiddleware(req, res, next) {
         include: [{ model: Winery, attributes: ['name'] }]
       });
 
-      if (!user || !user.pinHash) {
+      const pinChangedAfterSession = Boolean(
+        user?.pinUpdatedAt
+        && ((Number(session.iat) * 1000) + 999) < new Date(user.pinUpdatedAt).getTime()
+      );
+
+      if (!user || !user.pinHash || pinChangedAfterSession) {
         return res.status(401).json({
           error: {
             code: 'UNAUTHENTICATED',
             message: 'Invalid or expired PIN session'
           }
         });
+      }
+
+      if (!deploymentAllowsWinery(user.wineryId)) {
+        logger.warn('Auth: PIN session rejected for another deployment winery', {
+          userId: user.id,
+          event: 'deployment_winery_mismatch'
+        });
+        return rejectWrongDeploymentWinery(res);
       }
 
       req.user = {
@@ -93,6 +121,15 @@ async function authMiddleware(req, res, next) {
         });
       }
 
+
+      if (!deploymentAllowsWinery(user.wineryId)) {
+        logger.warn('Auth: Test user rejected for another deployment winery', {
+          userId: user.id,
+          event: 'deployment_winery_mismatch'
+        });
+        return rejectWrongDeploymentWinery(res);
+      }
+
       req.user = {
         id: user.id,
         userId: user.id,
@@ -113,7 +150,7 @@ async function authMiddleware(req, res, next) {
     const decodedToken = await admin.auth().verifyIdToken(token);
     const { uid, email, iss, aud } = decodedToken;
 
-    logger.debug('Auth: Token verified successfully', { uid, email, aud });
+    logger.debug('Auth: Token verified successfully', { aud, hasEmailClaim: Boolean(email) });
 
     // 3. Extra Hardening: Explicit Issuer/Audience Check
     // (Redundant but requested for hardening)
@@ -130,19 +167,27 @@ async function authMiddleware(req, res, next) {
 
     // 4. Find Internal User
     const user = await User.findOne({
-      where: { email },
+      where: { firebaseUid: uid },
       include: [{ model: Winery, attributes: ['name'] }]
     });
 
     if (!user) {
-      // Strict: Reject users not in our DB
-      logger.warn(`Auth: User not found in DB for email: ${email}`, { uid });
-      return res.status(403).json({ error: { code: 'ACCESS_DENIED', message: `User ${email} not registered in system.` } });
+      // Strict: email is mutable and must never be used to bind a Firebase identity.
+      logger.warn('Auth: Firebase UID not registered in DB');
+      return res.status(403).json({ error: { code: 'ACCESS_DENIED', message: 'User is not registered in the system.' } });
     }
 
     if (!user.isActive) {
-      logger.warn(`Auth: Inactive user denied access: ${email}`, { uid, userId: user.id });
+      logger.warn('Auth: Inactive user denied access', { userId: user.id });
       return res.status(403).json({ error: { code: 'ACCESS_DENIED', message: 'User account is inactive.' } });
+    }
+
+    if (!deploymentAllowsWinery(user.wineryId)) {
+      logger.warn('Auth: Firebase user rejected for another deployment winery', {
+        userId: user.id,
+        event: 'deployment_winery_mismatch'
+      });
+      return rejectWrongDeploymentWinery(res);
     }
 
     req.user = {
@@ -153,7 +198,7 @@ async function authMiddleware(req, res, next) {
       role: user.role,
       wineryId: user.wineryId,
       wineryName: user.Winery ? user.Winery.name : 'Unknown Winery',
-      firebaseUid: uid
+      firebaseUid: user.firebaseUid
     };
 
     next();
@@ -161,7 +206,8 @@ async function authMiddleware(req, res, next) {
     logger.warn('Auth Token Verification Failed', {
       error: err.message,
       stack: err.stack,
-      token_prefix: token.substring(0, 10) + '...'
+      ip: req.ip,
+      userAgent: req.headers['user-agent']
     });
     return res.status(401).json({
       error: {

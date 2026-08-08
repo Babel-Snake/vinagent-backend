@@ -5,20 +5,19 @@ VinAgent supports an optional quick PIN login for shared staff devices.
 ## Access Modes
 
 - Manager login keeps the existing Firebase email/password flow and is still required for full manager and admin access.
-- Staff access is shown by default once the device has a configured winery.
+- Staff access is shown by default after the device has previously used staff mode.
 - Quick PIN uses a winery-scoped PIN. The PIN identifies the staff member, starts a short-lived session, and loads the normal staff view.
 - If quick PIN is disabled for the winery, staff access falls back to the existing username/access-code flow.
 - If manager basic PIN is enabled, managers can use a PIN, but the session is downgraded to staff-level access. Full manager pages still require manager login.
 
-## Device Winery Context
+## Deployment Winery Context
 
-The login screen remembers the last winery used on the device.
+The browser does not select the winery used for staff authentication.
 
-- A successful manager/full login stores the user's winery ID and winery name in browser storage.
-- Future visits to the login screen default to staff access for that winery.
-- Staff do not need to enter a winery ID once the device context is set.
-- Logging out or an idle PIN lock clears only the active session, not the device winery context.
-- Use `Change winery` on the login screen to clear the device context and require a manager to sign in again.
+- Set `DEPLOYMENT_WINERY_ID` on every production backend. It constrains Firebase, access-code, and PIN sessions to that winery and is changed only by a deployment operator. The exactly-one-winery fallback is for local development; public staff login fails closed when that fallback is ambiguous.
+- Public PIN configuration, PIN login, and username resolution all use that server-controlled winery. Query/body winery IDs are ignored and are never tenant-routing inputs.
+- Browser storage remembers only enough context to default the interface to staff mode and display the winery name. The backend response replaces that display context on every login-screen load.
+- Logging out or an idle PIN lock clears the active session without changing the deployment winery.
 
 ## Settings
 

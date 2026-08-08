@@ -24,7 +24,9 @@ describe('Error Handling & Correlation', () => {
         });
 
         testApp.get('/test-error/500', (req, res, next) => {
-            next(new Error('Unexpected system crash'));
+            const error = new Error('Unexpected system crash');
+            error.details = { connectionString: 'mysql://user:secret@database/internal' };
+            next(error);
         });
 
         testApp.get('/health', (req, res) => {
@@ -54,6 +56,7 @@ describe('Error Handling & Correlation', () => {
         expect(res.body.error).toBeDefined();
         expect(res.body.error.code).toBe('INTERNAL_ERROR');
         expect(res.body.error.message).toBe('An unexpected error occurred');
+        expect(res.body.error.details).toBeUndefined();
         expect(res.body.error.requestId).toBeDefined();
     });
 

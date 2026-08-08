@@ -3,6 +3,23 @@ const sendgridProvider = require('./providers/sendgrid.provider');
 const emailProviderFactory = require('../integrations/email');
 const { Message, WineryIntegrationConfig } = require('../../models');
 const logger = require('../../config/logger');
+const { safeRecordUsageEvent } = require('../usageTracking.service');
+const { METRICS } = require('../usageMetricCatalog');
+
+function summarizeProviderResult(result, providerName) {
+    if (!result || typeof result !== 'object') return null;
+    return {
+        provider: result.provider || providerName,
+        id: result.sid || result.id || null,
+        status: result.status || null
+    };
+}
+
+function unsupportedProviderError(channel, providerName) {
+    const error = new Error(`Provider '${providerName}' is not supported for ${channel} delivery.`);
+    error.code = 'INTEGRATION_PROVIDER_UNSUPPORTED';
+    return error;
+}
 
 class NotificationService {
     /**
@@ -14,10 +31,15 @@ class NotificationService {
      * @param {Object} [context] - { wineryId, memberId, taskId, userId } for logging
      */
     async send({ to, body, channel = 'sms', subject = null, from = null, cc = null }, context = {}) {
-        logger.info(`Sending notification via ${channel} to ${to}`);
+        logger.info('Sending notification', {
+            channel,
+            wineryId: context.wineryId || null,
+            taskId: context.taskId || null,
+            hasRecipient: Boolean(to)
+        });
 
         let providerResult;
-        let error = null;
+        let deliveryError = null;
         let providerName = channel === 'sms' ? 'twilio' : 'sendgrid';
         let integrationConfig = context.integrationConfig || null;
 
@@ -38,6 +60,9 @@ class NotificationService {
         try {
             if (channel === 'sms') {
                 providerName = integrationConfig?.smsProvider || 'twilio';
+                if (providerName !== 'twilio') {
+                    throw unsupportedProviderError(channel, providerName);
+                }
                 providerResult = await twilioProvider.sendSms(to, body, {
                     from: from || integrationConfig?.smsFromNumber || null
                 });
@@ -57,7 +82,7 @@ class NotificationService {
                         text: body,
                         cc
                     });
-                } else {
+                } else if (providerName === 'sendgrid') {
                     providerResult = await sendgridProvider.sendEmail({
                         to,
                         from: emailFrom,
@@ -65,6 +90,8 @@ class NotificationService {
                         text: body,
                         cc
                     });
+                } else {
+                    throw unsupportedProviderError(channel, providerName);
                 }
             } else {
                 throw new Error(`Channel '${channel}' not supported yet.`);
@@ -74,15 +101,20 @@ class NotificationService {
                 providerResult.provider = providerName;
             }
         } catch (err) {
-            error = err.message;
-            logger.error('Notification Service Error', err);
+            deliveryError = err;
+            logger.error('Notification delivery failed', {
+                channel,
+                provider: providerName,
+                code: err.code || null,
+                error: err.message
+            });
             // We might still want to log the attempt failure below
         }
 
         // Log to DB (Outbound Message)
         try {
             if (context.wineryId) {
-                await Message.create({
+                const storedMessage = await Message.create({
                     direction: 'outbound',
                     source: channel,
                     subject: channel === 'email' ? (subject || 'Update from your winery') : null,
@@ -91,8 +123,10 @@ class NotificationService {
                         provider: providerName,
                         from: from || integrationConfig?.emailFromAddress || integrationConfig?.smsFromNumber || null,
                         cc: channel === 'email' ? cc : null,
-                        result: providerResult || null,
-                        error
+                        result: summarizeProviderResult(providerResult, providerName),
+                        error: deliveryError
+                            ? { code: deliveryError.code || 'DELIVERY_FAILED' }
+                            : null
                     },
                     receivedAt: new Date(),
                     wineryId: context.wineryId,
@@ -102,12 +136,31 @@ class NotificationService {
                 }, {
                     transaction: context.transaction
                 });
+                await safeRecordUsageEvent({
+                    wineryId: context.wineryId,
+                    actorUserId: context.userId || null,
+                    metricKey: METRICS.MESSAGE_SENT,
+                    quantity: 1,
+                    occurredAt: storedMessage.createdAt || new Date(),
+                    sourceType: 'message',
+                    sourceId: storedMessage.id,
+                    idempotencyKey: `message:${storedMessage.id}:sent`,
+                    dimensions: {
+                        channel,
+                        provider: providerName,
+                        result: deliveryError ? 'failed' : 'success'
+                    },
+                    transaction: context.transaction
+                });
             }
         } catch (dbErr) {
-            logger.error('Failed to log outbound message to DB', dbErr);
+            logger.error('Failed to log outbound message to DB', {
+                code: dbErr.code || null,
+                error: dbErr.message
+            });
         }
 
-        if (error) throw new Error(error);
+        if (deliveryError) throw deliveryError;
         return providerResult;
     }
 }

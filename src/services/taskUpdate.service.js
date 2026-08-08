@@ -1,5 +1,6 @@
-const { Member, Task, TaskArea, WinerySettings } = require('../models');
+const { Task, TaskArea, WinerySettings } = require('../models');
 const logger = require('../config/logger');
+const AppError = require('../utils/AppError');
 const { validateStatusTransition } = require('../utils/validation');
 const aiSuggestionService = require('./aiSuggestion.service');
 const auditService = require('./audit.service');
@@ -21,6 +22,7 @@ const { processMentions } = require('./taskMention.service');
 const { queueSuggestionRefresh } = require('./taskSuggestionRefresh.service');
 const { applyTaskOutcomeUpdates } = require('./taskWorkflowPolicy.service');
 const { syncTaskWorkflow } = require('./taskWorkflow.service');
+const { assertTaskRelationshipsBelongToWinery } = require('./taskTenantScope.service');
 
 async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
   const transaction = await Task.sequelize.transaction();
@@ -30,7 +32,7 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
   try {
     const task = await Task.findOne({
       where: { id: taskId, wineryId },
-      include: [getTaskAreaInclude()],
+      include: [getTaskAreaInclude(wineryId)],
       transaction
     });
     if (!task) throw new Error('Task not found');
@@ -94,6 +96,15 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
       throw err;
     }
 
+    await assertTaskRelationshipsBelongToWinery({
+      wineryId,
+      memberId,
+      assigneeId,
+      parentTaskId,
+      currentTaskId: task.id,
+      transaction
+    });
+
     const nextStatus = status || task.status;
     if (
       nextStatus === 'PENDING'
@@ -129,18 +140,6 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
     setField('subType', subType);
     setField('sentiment', sentiment);
     if (memberId !== undefined) {
-      if (memberId !== null) {
-        const member = await Member.findOne({
-          where: { id: memberId, wineryId },
-          transaction
-        });
-        if (!member) {
-          const err = new Error('Member not found');
-          err.statusCode = 404;
-          err.code = 'NOT_FOUND';
-          throw err;
-        }
-      }
       setField('memberId', memberId);
       const nextCustomerType = memberId
         ? 'MEMBER'
@@ -344,7 +343,22 @@ async function updateTask({ taskId, wineryId, userId, userRole, updates }) {
         const settings = await WinerySettings.findOne({ where: { wineryId } });
         await executionService.executeTask(task, transaction, settings);
       } catch (execErr) {
-        logger.warn('Execution skipped for task', { taskId, reason: execErr.message });
+        logger.error('Automatic task execution failed', {
+          taskId,
+          wineryId,
+          code: execErr.code || null,
+          error: execErr.statusCode && execErr.statusCode < 500 ? execErr.message : undefined
+        });
+
+        if (execErr.statusCode && execErr.statusCode < 500) {
+          throw execErr;
+        }
+
+        throw new AppError(
+          'Automatic execution failed. The task was not actioned.',
+          502,
+          'EXECUTION_FAILED'
+        );
       }
 
       const postExecutionOutcomeDiff = applyTaskOutcomeUpdates(task, outcomeInput, task.status);

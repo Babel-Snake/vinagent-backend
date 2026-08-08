@@ -167,6 +167,16 @@ Because this is an address-change task and secure links are enabled:
 5. `TaskAction(EXECUTION_TRIGGERED)` is written
 6. the notification layer sends the SMS/email with the link
 
+New links use the public frontend route with the bearer token in the URL
+fragment:
+
+```text
+https://app.example.test/confirm-address#token=<opaque-token>
+```
+
+The fragment is not sent to the frontend server. The page reads it once,
+removes it from browser history, and validates it in a JSON request body.
+
 Representative token:
 
 ```text
@@ -194,7 +204,14 @@ This is intentional. In the current build, `PENDING` can mean "awaiting member f
 Emma opens the public page, which calls:
 
 ```http
-GET /api/public/address-update/validate?token=<opaque-token>
+POST /api/public/address-update/validate
+Content-Type: application/json
+```
+
+```json
+{
+  "token": "<opaque-token>"
+}
 ```
 
 The API returns:
@@ -203,6 +220,10 @@ The API returns:
 * current address
 * proposed address
 * token expiry
+
+The page uses the member's first name only, does not require staff
+authentication, and maps invalid, expired, already-used, rate-limited, and
+service failures to fixed non-sensitive messages.
 
 ## 9. Step 7: Member Confirms the Address
 

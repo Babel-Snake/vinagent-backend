@@ -64,7 +64,6 @@ const retellWebhookHandlers = [
 
 // Retell Webhook (Voice AI)
 router.post('/retell', ...retellWebhookHandlers);
-router.post('/retell/:wineryId', ...retellWebhookHandlers);
 
 router.post('/integration/:wineryId/:domain',
     webhookLimiter,

@@ -20,7 +20,7 @@ The backend also accepts valid PIN session bearer tokens for supported staff/PIN
 
 Public self-service APIs use `MemberActionToken` instead of Firebase auth.
 
-Webhook endpoints use provider-specific signature validation. Retell HMAC verification uses the raw request body captured by the Express parser.
+Webhook endpoints use provider-specific signature validation. Retell HMAC verification uses the exact raw request body captured by the Express parser, the signed millisecond timestamp, and a five-minute freshness window.
 
 ### 1.2 Current User Profile
 
@@ -83,18 +83,28 @@ Errors are returned as:
 
 Returns a simple service heartbeat.
 
-### 2.2 `GET /health`
+### 2.2 `GET /health/live` (`GET /health` compatibility alias)
 
-Returns a simple service heartbeat.
+Returns a dependency-free process heartbeat. A successful response does not
+mean that the database, migrations, or attachment storage are ready.
 
-### 2.3 `GET /api/health`
+### 2.3 `GET /health/ready`
 
-Returns:
+Returns HTTP `200` only when all production readiness checks pass. It returns
+HTTP `503` with bounded check codes while the database is unavailable,
+migrations are not current, attachment storage is unsafe, configuration is
+invalid, or the server is draining. This is the authoritative container and
+load-balancer readiness endpoint.
+
+### 2.4 `GET /api/health`
+
+Legacy liveness compatibility alias. It is not a readiness check. Returns:
 
 ```json
 {
   "status": "ok",
-  "timestamp": "2026-04-16T07:00:00.000Z"
+  "type": "liveness",
+  "readiness": "/health/ready"
 }
 ```
 
@@ -186,15 +196,17 @@ Success response:
 }
 ```
 
-### 3.4 `POST /api/webhooks/retell` / `POST /api/webhooks/retell/:wineryId`
+### 3.4 `POST /api/webhooks/retell`
 
 Consumes Retell callbacks.
 
-Retell signatures are validated with `x-retell-signature` against the exact raw request body. The winery-scoped URL is recommended for production setup:
+Retell signatures are validated with `x-retell-signature` in Retell's current `v=<unix-ms>,d=<hex-digest>` format. The digest is HMAC-SHA256 over the exact raw request body concatenated with `v`, using `RETELL_API_KEY` (or the legacy `RETELL_WEBHOOK_SECRET` fallback). Timestamps outside five minutes of server time are rejected.
 
 ```text
-POST /api/webhooks/retell/:wineryId
+POST /api/webhooks/retell
 ```
+
+The client does not select a winery. Route parameters, query values, body-level winery IDs, Retell metadata, and dynamic variables are not tenant-routing inputs. The server matches the signed Retell `call.agent_id` to an operations-managed `providerConnections.retell` entry in a winery or area integration config. No match or a match spanning multiple wineries is rejected.
 
 `call_analyzed` callbacks are stored as reviewable `IntegrationEvent` records:
 
@@ -267,9 +279,12 @@ Accepts signed third-party handoff payloads and creates reviewable `IntegrationE
 Required headers:
 
 * `x-vinagent-webhook-secret`: the shared secret configured for that winery/domain
-* `x-vinagent-webhook-signature`: HMAC-SHA256 of the exact raw request body using the same shared secret. The value may be either `<hex>` or `sha256=<hex>`.
+* `x-vinagent-webhook-timestamp`: the current Unix timestamp in seconds; the allowed clock skew is five minutes
+* `x-vinagent-webhook-signature`: HMAC-SHA256 of `<timestamp>.<exact raw request body>` using the same shared secret. The value may be either `<hex>` or `sha256=<hex>`.
 
 The API stores only a SHA-256 hash of the shared secret in `WineryIntegrationConfig.providerConnections.<domain>.webhookSecretHash`; the hash and raw secret are never returned by dashboard APIs.
+
+Signed webhook payloads must include a stable `externalEventId`. The timestamp window limits captured-request replay, while the unique `wineryId + provider + externalEventId` key makes accepted retries idempotent.
 
 Example payload:
 
@@ -905,13 +920,15 @@ Mounted under `/api/public`.
 
 Resolves a staff login username for the PIN/staff login flow.
 
+The username is immutable and resolved only within the server-controlled deployment winery. The response contains the managed Firebase login identity used by the browser; callers cannot supply or change the winery scope.
+
 This route is public by design and has an endpoint-specific per-IP limiter
 (`RESOLVE_STAFF_RATE_LIMIT_MAX`, default `20` per 15 minutes) in addition to
 the global API limiter.
 
-### 5.2 `GET /api/public/pin-config?wineryId=...`
+### 5.2 `GET /api/public/pin-config`
 
-Returns the public PIN-login configuration for the requested winery when PIN login is enabled.
+Returns the public PIN-login configuration for the server-controlled deployment winery. `DEPLOYMENT_WINERY_ID` is required in production and constrains every Firebase, access-code, and PIN login to that winery. The exactly-one-winery fallback is for local development only.
 
 ### 5.3 `POST /api/public/pin-login`
 
@@ -921,26 +938,37 @@ Request:
 
 ```json
 {
-  "wineryId": 1,
-  "username": "cellardoor",
-  "accessCode": "123456"
+  "pin": "4821"
 }
 ```
 
-Response includes the authenticated user context, token expiry, and idle timeout.
+Client-supplied winery IDs are not used. Response includes the authenticated user context, token expiry, and idle timeout.
 
-### 5.4 `GET /api/public/address-update/validate?token=...`
+### 5.4 `POST /api/public/address-update/validate`
 
-Validates a token and returns current/proposed address data.
+Validates a member action token and returns the context needed by the public
+confirmation page. `POST` is preferred so the bearer value does not appear in
+reverse-proxy URLs or access logs.
+
+Request:
+
+```json
+{
+  "token": "<opaque-token>"
+}
+```
+
+`GET /api/public/address-update/validate?token=...` remains available only for
+compatibility with previously issued clients. New clients should not use it.
+Successful validation and confirmation responses set `Cache-Control: no-store,
+private` because they contain or act on member data.
 
 Response:
 
 ```json
 {
   "member": {
-    "id": 42,
-    "firstName": "Emma",
-    "lastName": "Clarke"
+    "firstName": "Emma"
   },
   "currentAddress": {
     "addressLine1": "5 River Road",
@@ -992,21 +1020,13 @@ Response:
 ```json
 {
   "status": "ok",
-  "message": "Address updated successfully",
-  "member": {
-    "id": 42,
-    "firstName": "Emma",
-    "lastName": "Clarke"
-  },
-  "newAddress": {
-    "addressLine1": "12 Oak Street",
-    "suburb": "Stirling",
-    "state": "SA",
-    "postcode": "5152",
-    "country": "Australia"
-  }
+  "message": "Address updated successfully"
 }
 ```
+
+The response intentionally omits member identifiers and address data. The
+customer has already reviewed those fields, and returning them after the token
+is consumed would add no value.
 
 Side effects:
 
@@ -1168,6 +1188,8 @@ Contact create/update payloads support `primaryAreaId` and `linkedAreaIds`. No p
 Mounted under `/api/staff`.
 
 All staff management endpoints require manager/admin auth and are scoped to the authenticated user's winery.
+
+The authenticated user's winery supplies every staff assignment. `wineryId`, immutable `username`, and the managed Firebase login email cannot be changed through these endpoints; any future cross-winery reassignment requires a separate platform-administrator workflow.
 
 ### 7.1 `POST /api/staff/:id/reset-password`
 
@@ -1695,3 +1717,25 @@ Progress counts only required Tasks with `workflowState = COMPLETED`; coarse `Ta
 ### Project attachments
 
 The existing attachment APIs accept `entityType: PROJECT`. Project visibility is required for reads and Project manage authority is required for upload or deletion.
+
+## Usage metering
+
+Mounted under `/api/usage`; all routes require dashboard authentication.
+
+### `POST /api/usage/activity`
+
+Accepts a session UUID, monotonically increasing sequence, engaged seconds, and general route group. The authenticated user and winery are always server-derived. Intervals are clamped to 60 seconds, unknown route groups become `other`, and repeated user/session/sequence submissions return `duplicate: true` without incrementing activity.
+
+### `GET /api/usage/summary`
+
+Manager/admin only. Optional ISO `start` and `end` query parameters select a positive window of no more than 366 days; the default is 30 days. The response contains safe commercial status/plan/provider names, current seats/storage/members, aggregate activity, authoritative Task/Message counts, event/counter totals, and daily gauge history.
+
+Responses are `Cache-Control: no-store` and contain no external payment customer/subscription identifiers, customer content, or individual staff activity rows.
+
+### `POST /api/usage/snapshot`
+
+Manager/admin only. Idempotently captures the current winery-local daily active-seat, storage-byte, and member gauges.
+
+### `POST /api/usage/reconcile`
+
+Admin only. Optional `start`/`end` body fields follow the summary window rules. The effective start cannot precede the winery's `meteringStartedAt`. The response compares Task/Message source totals with ledger totals, refreshes gauges, and returns `409` when a discrepancy exists.

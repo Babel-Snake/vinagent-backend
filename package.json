@@ -1,6 +1,10 @@
 {
   "name": "vinagent-backend",
   "version": "0.1.0",
+  "engines": {
+    "node": ">=24.18.0 <25",
+    "npm": ">=10 <12"
+  },
   "main": "index.js",
   "scripts": {
     "dev": "nodemon src/server.js",
@@ -13,6 +17,9 @@
     "format": "prettier --write \"src/**/*.js\"",
     "db:migrate": "sequelize-cli db:migrate",
     "db:migrate:status": "sequelize-cli db:migrate:status",
+    "preflight:deployment": "node src/scripts/deploymentPreflight.js",
+    "pilot:bootstrap": "node src/scripts/pilotBootstrap.js",
+    "pilot:disable-unsupported-modules": "node src/scripts/disableUnsupportedPilotModules.js",
     "seed:sidewood": "node src/scripts/seedSidewoodEstate.js",
     "seed:sidewood:projects": "node src/scripts/seedSidewoodProjects.js",
     "smoke:sidewood": "node src/scripts/verifySidewoodProductionReadiness.js",
@@ -41,6 +48,7 @@
     "morgan": "^1.11.0",
     "mysql2": "^3.22.6",
     "openai": "^6.46.0",
+    "sequelize-cli": "^6.6.5",
     "sequelize": "^6.37.7",
     "twilio": "^5.13.1",
     "winston": "^3.19.0"
@@ -52,7 +60,6 @@
     "jest": "^30.2.0",
     "nodemon": "^3.1.11",
     "prettier": "^3.7.4",
-    "sequelize-cli": "^6.6.5",
     "sqlite3": "^6.0.1",
     "supertest": "^7.2.2"
   }

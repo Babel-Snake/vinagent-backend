@@ -108,6 +108,20 @@ function sanitizeProviderConnections(providerConnections) {
   }, {});
 }
 
+function serializeConnectionTestResult(connection = {}) {
+  const parsed = parseJsonObject(connection);
+  return {
+    provider: parsed.provider || null,
+    executionProvider: parsed.executionProvider || null,
+    liveAdapterAvailable: Boolean(parsed.liveAdapterAvailable),
+    status: parsed.status || 'not_connected',
+    lastTestedAt: parsed.lastTestedAt || null,
+    lastError: parsed.lastError || null,
+    summary: parsed.summary || null,
+    capabilities: Array.isArray(parsed.capabilities) ? parsed.capabilities : []
+  };
+}
+
 function serializeIntegrationConfig(config) {
   if (!config) return null;
   const plain = config.toJSON ? config.toJSON() : { ...config };
@@ -153,7 +167,7 @@ function normalizeProviderConnections(payload = {}, existingConfig = null) {
   const existingConnections = parseJsonObject(existingConfig?.providerConnections);
   const now = new Date().toISOString();
 
-  return DOMAINS.reduce((connections, domain) => {
+  const connections = DOMAINS.reduce((normalizedConnections, domain) => {
     const providerField = PROVIDER_FIELDS[domain];
     const provider = payload[providerField] || existingConfig?.[providerField] || DEFAULT_PROVIDERS[domain];
     const incoming = parseJsonObject(incomingConnections[domain]);
@@ -167,7 +181,7 @@ function normalizeProviderConnections(payload = {}, existingConfig = null) {
       ? null
       : (incomingSecret ? now : existing.webhookSecretLastRotatedAt || null);
 
-    connections[domain] = {
+    normalizedConnections[domain] = {
       provider,
       executionProvider,
       liveAdapterAvailable: hasLiveAdapter(domain, provider),
@@ -188,8 +202,21 @@ function normalizeProviderConnections(payload = {}, existingConfig = null) {
       notes: incoming.notes ?? existing.notes ?? ''
     };
 
-    return connections;
+    return normalizedConnections;
   }, {});
+
+  // Retell routing is operations-managed and deliberately absent from the
+  // ordinary integration API schema. Preserve a pre-existing trusted mapping
+  // during normal manager updates, but never accept one from the request.
+  const trustedRetellConnection = parseJsonObject(existingConnections.retell);
+  if (
+    String(trustedRetellConnection.provider || '').trim().toLowerCase() === 'retell'
+    && (trustedRetellConnection.externalLocationId || trustedRetellConnection.externalAccountId)
+  ) {
+    connections.retell = trustedRetellConnection;
+  }
+
+  return connections;
 }
 
 function areaWebhookPath({ wineryId, areaId, domain }) {
@@ -419,6 +446,7 @@ module.exports = {
   parseJsonObject,
   sanitizeProviderConnection,
   sanitizeProviderConnections,
+  serializeConnectionTestResult,
   serializeIntegrationConfig,
   serializeAreaIntegrationConfig,
   syncExecutionSettings,

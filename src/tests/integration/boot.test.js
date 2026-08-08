@@ -40,6 +40,27 @@ describe('Boot Sequence Integration', () => {
             .expect(200);
 
         expect(res.body.status).toBe('ok');
+
+        await request(app)
+            .get('/health/live')
+            .expect(200, { status: 'ok' });
+
+        const ready = await request(app)
+            .get('/health/ready')
+            .expect(200);
+        expect(ready.body).toEqual({
+            status: 'ready',
+            checks: { database: { status: 'pass' } }
+        });
+
+        const compatibilityAlias = await request(app)
+            .get('/api/health')
+            .expect(200);
+        expect(compatibilityAlias.body).toEqual({
+            status: 'ok',
+            type: 'liveness',
+            readiness: '/health/ready'
+        });
     });
 
     it('should be able to connect to database', async () => {

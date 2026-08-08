@@ -241,7 +241,13 @@ async function updateConfigForWineryWithAudit(wineryId, patch, { actorUserId, tr
 async function listConfigAuditEvents(wineryId, { limit = 10 } = {}) {
   return OperationalIntelligenceConfigAuditEvent.findAll({
     where: { wineryId },
-    include: [{ model: User, as: 'Actor', attributes: ['id', 'displayName', 'email', 'role'] }],
+    include: [{
+      model: User,
+      as: 'Actor',
+      where: { wineryId },
+      attributes: ['id', 'displayName', 'email', 'role'],
+      required: false
+    }],
     order: [['createdAt', 'DESC'], ['id', 'DESC']],
     limit
   });

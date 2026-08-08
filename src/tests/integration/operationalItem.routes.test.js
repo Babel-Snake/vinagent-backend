@@ -271,6 +271,15 @@ describe('Operational Request and Record Routes', () => {
     expect(comments.body.comments[0].body).toContain('Photos');
     expect(await OperationalItemComment.count({ where: { itemType: 'NOTE', itemId: recordId } })).toBe(1);
 
+    const legacyComment = await OperationalItemComment.findOne({ where: { itemType: 'NOTE', itemId: recordId } });
+    await legacyComment.update({ userId: 9 });
+    const tenantSafeComments = await request(app)
+      .get(`/api/operational-records/${recordId}/comments`)
+      .set('Authorization', auth)
+      .expect(200);
+    expect(tenantSafeComments.body.comments[0].Author).toBeNull();
+    expect(JSON.stringify(tenantSafeComments.body)).not.toContain('other@example.com');
+
     await request(app)
       .post('/api/attachments')
       .set('Authorization', auth)
@@ -352,12 +361,19 @@ describe('Operational Request and Record Routes', () => {
       .send({ targetType: 'REQUEST', targetId: relatedRequest.body.request.id, relationType: 'RELATES_TO' })
       .expect(201);
 
+    const legacyRelation = await OperationalItemRelation.findOne({
+      where: { sourceType: 'NOTE', sourceId: note.body.record.id, targetType: 'REQUEST' }
+    });
+    await legacyRelation.update({ createdBy: 9 });
+
     const relations = await request(app)
       .get(`/api/operational-records/${note.body.record.id}/relations`)
       .set('Authorization', auth)
       .expect(200);
     expect(relations.body.relations).toHaveLength(1);
     expect(relations.body.relations[0].targetId).toBe(relatedRequest.body.request.id);
+    expect(relations.body.relations[0].Creator).toBeNull();
+    expect(JSON.stringify(relations.body)).not.toContain('other@example.com');
   });
 
   test('returns a permission-scoped unified feed and searches bodies, comments, and attachment metadata', async () => {

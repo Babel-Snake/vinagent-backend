@@ -36,7 +36,8 @@ export default function Navbar({ user, fullProfile, onProfileUpdated }: NavbarPr
         { href: '/noticeboard', label: 'Noticeboard', icon: 'noticeboard' },
         { href: '/calendar', label: 'Calendar', icon: 'calendar' },
         { href: '/customers', label: 'Customers', icon: 'customers', visible: isManagerOrAdmin },
-        { href: '/analytics', label: 'Insights', icon: 'analytics', visible: isManagerOrAdmin }
+        { href: '/analytics', label: 'Insights', icon: 'analytics', visible: isManagerOrAdmin },
+        { href: '/usage', label: 'Usage', icon: 'usage', visible: isManagerOrAdmin }
     ].filter(item => item.visible !== false);
 
     const workItems: NavigationItem[] = [
@@ -192,7 +193,7 @@ function NavIcon({ name }: { name: string }) {
     if (name === 'calendar') return <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3M5 11h14M6 5h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" /></svg>;
     if (name === 'staff' || name === 'customers') return <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 14a4 4 0 1 0-8 0m8 0a6 6 0 0 1 4 5v1H4v-1a6 6 0 0 1 4-5m8 0H8m8-8a4 4 0 1 1-8 0 4 4 0 0 0 8 0Z" /></svg>;
     if (name === 'winery') return <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 20h16M6 20V9l6-4 6 4v11M9 20v-6h6v6" /></svg>;
-    if (name === 'analytics') return <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 19V9m7 10V5m7 14v-7" /></svg>;
+    if (name === 'analytics' || name === 'usage') return <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 19V9m7 10V5m7 14v-7" /></svg>;
     if (name === 'noticeboard') return <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h10M4 18h16M18 10l2 2-2 2" /></svg>;
     if (name === 'search') return <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z" /></svg>;
     if (name === 'projects') return <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7h6l2 2h8v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7Zm0 4h16" /></svg>;

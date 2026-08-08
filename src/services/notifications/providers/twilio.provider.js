@@ -1,5 +1,6 @@
 const twilio = require('twilio');
 const logger = require('../../../config/logger');
+const { getOutboundHttpTimeoutMs } = require('../../../utils/outboundHttpPolicy');
 
 class TwilioProvider {
     constructor() {
@@ -15,7 +16,9 @@ class TwilioProvider {
             .map(([key]) => key);
 
         if (this.missingCredentials.length === 0) {
-            this.client = twilio(this.accountSid, this.authToken);
+            this.client = twilio(this.accountSid, this.authToken, {
+                timeout: getOutboundHttpTimeoutMs()
+            });
             this.enabled = true;
             logger.info('Twilio Provider Initialized');
         } else {
@@ -43,12 +46,15 @@ class TwilioProvider {
                 const error = new Error(`Twilio SMS is not configured. Missing: ${this.missingCredentials.join(', ')}`);
                 error.code = 'TWILIO_NOT_CONFIGURED';
                 logger.error('Blocked SMS send because Twilio is not configured.', {
-                    to,
                     missingCredentials: this.missingCredentials
                 });
                 throw error;
             }
-            logger.info(`[MOCK SMS] To: ${to} | From: ${fromNumber || 'default'} | Body: ${body}`);
+            logger.info('Mock SMS delivery accepted', {
+                hasRecipient: Boolean(to),
+                hasCustomFrom: Boolean(options.from),
+                bodyLength: String(body || '').length
+            });
             return { sid: 'mock-sid-' + Date.now(), status: 'queued', provider: 'twilio' };
         }
 
@@ -58,10 +64,14 @@ class TwilioProvider {
                 from: fromNumber,
                 to
             });
-            logger.info(`Twilio SMS sent: ${message.sid}`);
+            logger.info('Twilio SMS sent', { messageSid: message.sid });
             return message;
         } catch (error) {
-            logger.error('Twilio Send Failed', error);
+            logger.error('Twilio send failed', {
+                code: error.code || null,
+                status: error.status || null,
+                error: error.message
+            });
             throw error;
         }
     }

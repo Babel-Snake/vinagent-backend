@@ -188,7 +188,7 @@ function buildReviewReminderKey(signal, kind, now = new Date(), options = {}) {
 async function findManagerUserId(wineryId, transaction) {
   if (!wineryId) return null;
   const manager = await User.findOne({
-    where: { wineryId, role: 'manager' },
+    where: { wineryId, role: 'manager', isActive: true },
     order: [['id', 'ASC']],
     transaction
   });
@@ -196,7 +196,15 @@ async function findManagerUserId(wineryId, transaction) {
 }
 
 async function resolveReviewReminderRecipient(signal, transaction) {
-  return signal.reviewOwnerUserId || await findManagerUserId(signal.wineryId, transaction);
+  if (signal.reviewOwnerUserId) {
+    const owner = await User.findOne({
+      where: { id: signal.reviewOwnerUserId, wineryId: signal.wineryId, isActive: true },
+      attributes: ['id'],
+      transaction
+    });
+    if (owner) return owner.id;
+  }
+  return findManagerUserId(signal.wineryId, transaction);
 }
 
 async function notificationExists({ userId, reminderKey, transaction }) {
@@ -234,6 +242,7 @@ async function notifyReviewDueSoon({ signal, state, now, transaction }) {
     userId,
     message: buildDueSoonMessage(signal),
     data: {
+      wineryId: signal.wineryId,
       signalId: signal.id,
       reviewOwnerUserId: signal.reviewOwnerUserId || null,
       reminderKind: 'OPERATIONAL_INTELLIGENCE_REVIEW_DUE_SOON',
@@ -254,6 +263,7 @@ async function notifyReviewOverdue({ signal, state, now, transaction }) {
     userId,
     message: buildOverdueMessage(signal, state.overdueHours),
     data: {
+      wineryId: signal.wineryId,
       signalId: signal.id,
       reviewOwnerUserId: signal.reviewOwnerUserId || null,
       reminderKind: 'OPERATIONAL_INTELLIGENCE_REVIEW_OVERDUE',

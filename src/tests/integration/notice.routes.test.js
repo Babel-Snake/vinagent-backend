@@ -152,6 +152,45 @@ describe('Notice Routes', () => {
     expect(await NoticeAcknowledgement.count({ where: { noticeId: notice.id } })).toBe(0);
   });
 
+  it('rejects foreign audience users and does not hydrate foreign authors from legacy data', async () => {
+    const foreignUser = await User.create({
+      id: 90,
+      firebaseUid: 'notice-foreign-user',
+      email: 'foreign.notice@example.com',
+      displayName: 'Foreign Notice User',
+      role: 'manager',
+      wineryId: otherWinery.id
+    });
+
+    await request(app)
+      .post('/api/notices')
+      .set('Authorization', authToken)
+      .send({
+        title: 'Invalid directed audience',
+        body: 'This must not target a user from another winery.',
+        audienceType: 'users',
+        audienceUserIds: [foreignUser.id]
+      })
+      .expect(400);
+
+    const legacyNotice = await Notice.create({
+      title: 'Legacy tenant mismatch',
+      body: 'The notice is local, but its old author link is not.',
+      category: 'GENERAL',
+      priority: 'normal',
+      wineryId: winery.id,
+      createdBy: foreignUser.id,
+      updatedBy: foreignUser.id
+    });
+    const detail = await request(app)
+      .get(`/api/notices/${legacyNotice.id}`)
+      .set('Authorization', authToken)
+      .expect(200);
+    expect(detail.body.notice.Author).toBeNull();
+    expect(detail.body.notice.Updater).toBeNull();
+    expect(JSON.stringify(detail.body)).not.toContain('foreign.notice@example.com');
+  });
+
   it('prevents staff from creating notices but lets staff view them', async () => {
     await Notice.create({
       title: 'Tasting flight changed',

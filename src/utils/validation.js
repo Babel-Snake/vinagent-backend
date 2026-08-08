@@ -537,6 +537,7 @@ const wineryIntegrationSchema = Joi.object({
     deliveryProvider: Joi.string().valid('auspost', 'shippit', 'startrack', 'other').default('other'),
     providerConnections: Joi.object()
         .pattern(Joi.string().valid(...INTEGRATION_DOMAINS), providerConnectionSchema)
+        .unknown(false)
         .default({})
     // planTier excluded for security (admin only via billing)
 });
@@ -548,6 +549,7 @@ const wineryIntegrationTestSchema = Joi.object({
 const areaIntegrationConfigSchema = Joi.object({
     providerConnections: Joi.object()
         .pattern(Joi.string().valid(...AREA_INTEGRATION_DOMAINS), providerConnectionSchema)
+        .unknown(false)
         .min(1)
         .required()
 });
@@ -679,6 +681,12 @@ const operationalIntelligenceConfigPreviewSchema = operationalIntelligenceConfig
 }).and('start', 'end').min(1);
 
 const winerySettingsSchema = Joi.object({
+    enableBookingModule: Joi.boolean().optional(),
+    enableWineClubModule: Joi.boolean().optional(),
+    enableOrdersModule: Joi.boolean().optional(),
+    enableSecureLinks: Joi.boolean().optional(),
+    enableInsights: Joi.boolean().optional(),
+    enableVoice: Joi.boolean().optional(),
     identityMatchingConfig: Joi.object({
         autoLinkThreshold: Joi.number().integer().min(100).max(400).default(180),
         reviewThreshold: Joi.number().integer().min(0).max(400).default(120),

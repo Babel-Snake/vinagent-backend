@@ -1,15 +1,15 @@
 // src/services/smsService.js
-// Wraps SMS provider (e.g. Twilio). For now, just logs calls.
+// Backwards-compatible wrapper around the configured Twilio provider.
 // In tests, this module can be mocked.
 
-const logger = require('../config/logger');
+const twilioProvider = require('./notifications/providers/twilio.provider');
 
-async function send({ to, body }) {
-  // TODO: integrate Twilio or other SMS provider.
-  logger.info('smsService.send called', { to, preview: body.slice(0, 60) });
+async function send({ to, body, from = null }) {
+  const result = await twilioProvider.sendSms(to, body, { from });
   return {
-    provider: 'twilio',
-    externalId: 'SM-placeholder'
+    provider: result.provider || 'twilio',
+    externalId: result.sid || result.id || null,
+    status: result.status || null
   };
 }
 

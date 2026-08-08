@@ -1,5 +1,7 @@
 # MVP Readiness Fix Plan
 
+> **Historical remediation log.** Counts, dependency findings, and blockers recorded in dated sections below are intentionally preserved as evidence of earlier work; they are not the current build status. Current release evidence lives in `READY_FOR_PRODUCTION.md`, `PRODUCTION_READINESS.md`, `FRONTEND_QA_RUNBOOK.md`, and `COOLIFY_DEPLOYMENT.md`.
+
 This document is the working plan and evidence log for moving VinAgent from final-testing candidate to MVP trial candidate.
 
 Assessment date: 2026-05-29.
@@ -59,7 +61,7 @@ Accepted narrow-trial risks to review before MVP:
 | 2026-05-29 | D1 PIN session secret | Complete | Focused `pinAuth` tests pass; full backend suite passes | Production requires a strong `PIN_SESSION_SECRET` or `SESSION_SECRET`. |
 | 2026-05-29 | D2 active Firebase users | Complete | Focused `authMiddleware` tests pass; full backend suite passes | Inactive local users receive `403 ACCESS_DENIED`. |
 | 2026-05-29 | D3 winery mass assignment | Complete | Winery route tests pass | Overview/product/booking/FAQ create/update now use explicit allow-lists. |
-| 2026-05-29 | D4 webhook signatures | Complete | Webhook security tests pass | Email comparisons use timing-safe comparison; Retell HMAC uses raw request body when present. |
+| 2026-05-29 | D4 webhook signatures | Complete | Webhook security tests pass | Email comparisons use timing-safe comparison; Retell requires the exact raw body, official timestamped HMAC format, and a five-minute freshness window. |
 | 2026-05-29 | D5 PIN browser storage review | Complete for current MVP docs | `docs/PIN_LOGIN.md` updated | HTTP-only same-site cookies remain the recommended future hardening path. |
 | 2026-05-29 | D6 HTTPS/proxy handling | Complete | Backend tests pass | Production HTTPS redirect uses configured `PUBLIC_URL` instead of untrusted Host header. |
 | 2026-06-12 | D7 Firebase Admin env credentials | Complete | Focused Firebase config unit tests added; full backend suite passes | Production can initialize Firebase Admin from env vars and no longer requires the ignored local JSON file. Partial production env credentials fail fast. |
@@ -274,11 +276,12 @@ Status: complete.
 Fix completed:
 
 * Email webhook secret comparison uses timing-safe comparison.
-* Raw request body is captured for Retell HMAC verification.
+* The exact raw request body is required for Retell HMAC verification.
+* Retell's `v=<unix-ms>,d=<hex-digest>` signature format and five-minute freshness window are enforced.
 
 Testable outcomes:
 
-* Webhook security tests pass, including raw-body formatting coverage.
+* Webhook security tests pass, including raw-body formatting, legacy-format rejection, and stale-signature replay coverage.
 
 ### D5. PIN browser storage strategy
 

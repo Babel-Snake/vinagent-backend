@@ -96,7 +96,7 @@ async function listMembers(req, res, next) {
                 include: [
                     [
                         require('sequelize').literal(
-                            '(SELECT COUNT(*) FROM Tasks WHERE Tasks.memberId = Member.id)'
+                            '(SELECT COUNT(*) FROM Tasks WHERE Tasks.memberId = Member.id AND Tasks.wineryId = Member.wineryId)'
                         ),
                         'taskCount'
                     ]
@@ -125,7 +125,9 @@ async function getMember(req, res, next) {
             include: [
                 {
                     model: Task,
+                    where: { wineryId },
                     attributes: ['id', 'category', 'subType', 'status', 'priority', 'createdAt'],
+                    required: false,
                     limit: 10,
                     order: [['createdAt', 'DESC']]
                 }
@@ -178,6 +180,13 @@ async function searchMembers(req, res, next) {
 // --- CREATE ---
 async function createMember(req, res, next) {
     try {
+        if (Object.prototype.hasOwnProperty.call(req.body, 'wineryId')) {
+            throw new AppError(
+                'Winery assignment is controlled by the authenticated account.',
+                400,
+                'IMMUTABLE_WINERY'
+            );
+        }
         const payload = normalizeMemberType(validate(createMemberSchema, req.body));
         const member = await Member.create({ ...payload, wineryId: req.user.wineryId });
         res.status(201).json({ success: true, member });
@@ -189,6 +198,9 @@ async function createMember(req, res, next) {
 // --- UPDATE ---
 async function updateMember(req, res, next) {
     try {
+        if (Object.prototype.hasOwnProperty.call(req.body, 'wineryId')) {
+            throw new AppError('Customer winery assignment cannot be changed.', 400, 'IMMUTABLE_WINERY');
+        }
         const payload = validate(updateMemberSchema, req.body);
         if (req.body.customerType === undefined) delete payload.customerType;
         if (req.body.isWineClubMember === undefined) delete payload.isWineClubMember;

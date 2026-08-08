@@ -1,5 +1,6 @@
 const MockBookingProvider = require('./providers/mock');
 const integrationConnectionService = require('../../integrationConnection.service');
+const { assertMockIntegrationAllowed, unsupportedProviderError } = require('../mockPolicy');
 // const TockBookingProvider = require('./providers/tock'); // Future
 
 class BookingIntegrationFactory {
@@ -20,6 +21,7 @@ class BookingIntegrationFactory {
 
         switch (providerName) {
             case 'mock':
+                assertMockIntegrationAllowed('booking', config.selectedProvider || providerName);
                 return new MockBookingProvider(config);
             case 'sevenrooms':
                 throw new Error('SevenRooms provider not yet implemented');
@@ -27,8 +29,7 @@ class BookingIntegrationFactory {
                 // return new TockBookingProvider(config);
                 throw new Error('Tock provider not yet implemented');
             default:
-                console.warn(`Unknown provider '${providerName}', falling back to Mock.`);
-                return new MockBookingProvider(config);
+                throw unsupportedProviderError('Booking', providerName);
         }
     }
 }

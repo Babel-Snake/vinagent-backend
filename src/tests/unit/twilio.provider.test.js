@@ -20,11 +20,13 @@ describe('Twilio notification provider', () => {
     }
 
     function mockLogger() {
-        jest.doMock('../../config/logger', () => ({
+        const logger = {
             info: jest.fn(),
             warn: jest.fn(),
             error: jest.fn()
-        }));
+        };
+        jest.doMock('../../config/logger', () => logger);
+        return logger;
     }
 
     afterEach(() => {
@@ -35,7 +37,7 @@ describe('Twilio notification provider', () => {
     test('uses mock SMS outside production when credentials are incomplete', async () => {
         process.env.NODE_ENV = 'test';
         clearTwilioEnv();
-        mockLogger();
+        const logger = mockLogger();
 
         const provider = require('../../services/notifications/providers/twilio.provider');
 
@@ -43,6 +45,9 @@ describe('Twilio notification provider', () => {
 
         expect(result.provider).toBe('twilio');
         expect(result.sid).toMatch(/^mock-sid-/);
+        const logOutput = JSON.stringify(logger.info.mock.calls);
+        expect(logOutput).not.toContain('+15551234567');
+        expect(logOutput).not.toContain('Hello');
     });
 
     test('fails closed in production when credentials are incomplete', async () => {
@@ -71,7 +76,7 @@ describe('Twilio notification provider', () => {
         const provider = require('../../services/notifications/providers/twilio.provider');
         const result = await provider.sendSms('+15551234567', 'Hello');
 
-        expect(twilioFactory).toHaveBeenCalledWith('AC123', 'auth-token');
+        expect(twilioFactory).toHaveBeenCalledWith('AC123', 'auth-token', { timeout: 10000 });
         expect(create).toHaveBeenCalledWith({
             body: 'Hello',
             from: '+15550000000',

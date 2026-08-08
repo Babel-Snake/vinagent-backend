@@ -1,4 +1,7 @@
 # Project Audit Report: VinAgent Backend
+
+> **Historical snapshot (30 December 2025).** The readiness verdict and test evidence below describe an older build and are not a current release decision. Use `READY_FOR_PRODUCTION.md`, `PRODUCTION_READINESS.md`, and `COOLIFY_DEPLOYMENT.md` for the current pilot gates.
+
 **Date:** 2025-12-30
 **Auditor:** Antigravity Agent
 **Version:** MVP Candidate 1.0

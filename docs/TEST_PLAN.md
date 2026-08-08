@@ -200,7 +200,9 @@ Cover:
 * SMS rejected without Twilio signature
 * voice rejected without Twilio signature
 * email rejected without signature
-* Retell rejected without valid HMAC
+* Retell rejected without the official timestamped HMAC format
+* Retell rejected when the signed timestamp is outside the five-minute replay window
+* Retell winery routing ignores URL/query/body/metadata winery IDs and requires one unique operations-managed agent mapping
 
 ### 5.3 Task API
 
@@ -266,6 +268,14 @@ The golden path test should assert:
 4. member confirmation updates the member
 5. the token is marked used
 6. the task ends `ACTIONED`
+
+The public frontend smoke test should also cover:
+
+* fragment and legacy query-token parsing
+* malformed token rejection before an API call
+* address normalization and client-side length/required validation
+* safe invalid, expired, already-used, rate-limited, and service-error states
+* a production build containing the unauthenticated `/confirm-address` route
 
 Recommended audit assertions:
 
@@ -420,3 +430,20 @@ Cover:
 * a Project that is merely visible through manager or area access is not treated as personal involvement
 * responses explain the relationship with ordered involvement roles and a delegated Task count
 * Home separates active/on-hold Projects from planned Projects and links every card to its permission-checked Project detail
+
+## 11. Usage metering
+
+Usage coverage must verify:
+
+* event idempotency is scoped by winery and the same external key is valid in a different winery
+* activity session/sequence retries do not double count
+* engagement intervals are clamped to 60 seconds and unknown routes become `other`
+* activity dimensions never accept customer fields, raw URLs, or arbitrary nested metadata
+* staff can submit their own heartbeat but only managers/admins can read aggregate summaries
+* only admins can reconcile source records against the ledger
+* API counters aggregate atomically by hour and dimension identity
+* active-seat, member, and attachment-byte snapshots are idempotent per winery-local day
+* summaries do not expose provider customer/subscription IDs or individual activity rows
+* Task, inbound Message, and outbound Message source totals reconcile with recorded events
+* the usage migration creates and rolls back every table and backfills existing wineries with a pilot profile
+* frontend lint/build includes the manager-only `/usage` page and non-blocking activity tracker

@@ -43,6 +43,11 @@ module.exports = (sequelize, DataTypes) => {
             },
             token: {
                 type: DataTypes.STRING(64),
+                allowNull: true,
+                unique: true
+            },
+            tokenHash: {
+                type: DataTypes.STRING(64),
                 allowNull: false,
                 unique: true
             },

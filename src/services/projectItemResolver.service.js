@@ -10,18 +10,28 @@ const {
 const operationalAreaService = require('./operationalArea.service');
 const operationalItemService = require('./operationalItem.service');
 const involvementService = require('./involvement.service');
-const { getTaskAreaInclude } = require('./taskArea.service');
 const recordVisibility = require('./recordVisibility.service');
 const { NotFoundError, ValidationError } = require('../utils/errors');
 
 const ITEM_TYPES = new Set(['TASK', 'REQUEST', 'NOTICE', 'NOTE', 'CALENDAR_EVENT']);
 
-function operationalAreaInclude() {
+function operationalAreaInclude(wineryId) {
   return {
     model: OperationalArea,
     as: 'OperationalAreas',
+    where: { wineryId },
     attributes: ['id', 'name'],
-    through: { attributes: [] },
+    through: { attributes: [], where: { wineryId } },
+    required: false
+  };
+}
+
+function sameWineryUserInclude(as, wineryId, attributes = ['id', 'displayName', 'email', 'role']) {
+  return {
+    model: User,
+    as,
+    where: { wineryId },
+    attributes,
     required: false
   };
 }
@@ -56,11 +66,23 @@ async function loadCalendarEvent(itemId, wineryId, transaction = null) {
   return CalendarEvent.findOne({
     where: { id: itemId, wineryId },
     include: [
-      { model: Task, as: 'LinkedTask', required: false },
-      { model: Task, as: 'LinkedTasks', through: { attributes: [] }, required: false },
-      { model: Notice, as: 'LinkedNotice', required: false },
-      { model: Notice, as: 'LinkedNotices', through: { attributes: [] }, required: false },
-      { model: User, as: 'Creator', attributes: ['id', 'displayName', 'email'], required: false }
+      { model: Task, as: 'LinkedTask', where: { wineryId }, required: false },
+      {
+        model: Task,
+        as: 'LinkedTasks',
+        where: { wineryId },
+        through: { attributes: [], where: { wineryId } },
+        required: false
+      },
+      { model: Notice, as: 'LinkedNotice', where: { wineryId }, required: false },
+      {
+        model: Notice,
+        as: 'LinkedNotices',
+        where: { wineryId },
+        through: { attributes: [], where: { wineryId } },
+        required: false
+      },
+      sameWineryUserInclude('Creator', wineryId, ['id', 'displayName', 'email'])
     ],
     transaction
   });
@@ -73,9 +95,9 @@ async function resolveVisibleProjectItem({ itemType, itemId, wineryId, userId, u
     const item = await Task.findOne({
       where: { id: itemId, wineryId },
       include: [
-        { model: User, as: 'Assignee', attributes: ['id', 'displayName', 'email', 'role'], required: false },
-        { model: User, as: 'Creator', attributes: ['id', 'displayName', 'email', 'role'], required: false },
-        getTaskAreaInclude()
+        sameWineryUserInclude('Assignee', wineryId),
+        sameWineryUserInclude('Creator', wineryId),
+        operationalAreaInclude(wineryId)
       ],
       transaction
     });
@@ -86,8 +108,8 @@ async function resolveVisibleProjectItem({ itemType, itemId, wineryId, userId, u
     const item = await Notice.findOne({
       where: { id: itemId, wineryId },
       include: [
-        { model: User, as: 'Author', attributes: ['id', 'displayName', 'email', 'role'], required: false },
-        operationalAreaInclude()
+        sameWineryUserInclude('Author', wineryId),
+        operationalAreaInclude(wineryId)
       ],
       transaction
     });
@@ -114,29 +136,32 @@ async function resolveProjectItemForManager({ itemType, itemId, wineryId, transa
   if (type === 'TASK') return Task.findOne({
     where: { id: itemId, wineryId },
     include: [
-      { model: User, as: 'Assignee', attributes: ['id', 'displayName', 'email', 'role'], required: false },
-      getTaskAreaInclude()
+      sameWineryUserInclude('Assignee', wineryId),
+      operationalAreaInclude(wineryId)
     ],
     transaction
   });
   if (type === 'NOTICE') return Notice.findOne({
     where: { id: itemId, wineryId },
-    include: [operationalAreaInclude()],
+    include: [operationalAreaInclude(wineryId)],
     transaction
   });
   if (type === 'REQUEST') return OperationalRequest.findOne({
     where: { id: itemId, wineryId },
     include: [
-      { model: User, as: 'RequestedFrom', attributes: ['id', 'displayName', 'email', 'role'], required: false },
-      operationalAreaInclude()
+      sameWineryUserInclude('RequestedFrom', wineryId),
+      operationalAreaInclude(wineryId)
     ],
     transaction
   });
   if (type === 'NOTE') return OperationalRecord.findOne({
     where: { id: itemId, wineryId },
     include: [
-      { model: User, as: 'Recipients', attributes: ['id', 'displayName', 'email', 'role'], through: { attributes: [] }, required: false },
-      operationalAreaInclude()
+      {
+        ...sameWineryUserInclude('Recipients', wineryId),
+        through: { attributes: [], where: { wineryId } }
+      },
+      operationalAreaInclude(wineryId)
     ],
     transaction
   });

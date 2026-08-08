@@ -21,8 +21,8 @@ export default function CreateStaffModal({ onClose }: CreateStaffModalProps) {
         setError('');
 
         try {
-            await createStaff({ username, password, pin: pin.trim() || undefined });
-            setSuccessUser(username);
+            const staff = await createStaff({ username, password, pin: pin.trim() || undefined });
+            setSuccessUser(staff.username || username);
             setSuccessPin(pin.trim());
         } catch (err: unknown) {
             setError(errorMessage(err));

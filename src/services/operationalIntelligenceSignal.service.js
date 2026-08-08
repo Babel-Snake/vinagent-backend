@@ -47,13 +47,13 @@ function buildFingerprint(data) {
   return crypto.createHash('sha256').update(stableJson(identity)).digest('hex');
 }
 
-function includeAssociations() {
+function includeAssociations(wineryId) {
   return [
-    { model: OperationalArea, as: 'Area', attributes: ['id', 'name'] },
-    { model: User, as: 'Creator', attributes: ['id', 'displayName', 'email', 'role'] },
-    { model: User, as: 'Reviewer', attributes: ['id', 'displayName', 'email', 'role'] },
-    { model: User, as: 'ReviewOwner', attributes: ['id', 'displayName', 'email', 'role'] },
-    { model: Task, as: 'ActionTask', attributes: ['id', 'status', 'category', 'subType', 'priority'] }
+    { model: OperationalArea, as: 'Area', where: { wineryId }, attributes: ['id', 'name'], required: false },
+    { model: User, as: 'Creator', where: { wineryId }, attributes: ['id', 'displayName', 'email', 'role'], required: false },
+    { model: User, as: 'Reviewer', where: { wineryId }, attributes: ['id', 'displayName', 'email', 'role'], required: false },
+    { model: User, as: 'ReviewOwner', where: { wineryId }, attributes: ['id', 'displayName', 'email', 'role'], required: false },
+    { model: Task, as: 'ActionTask', where: { wineryId }, attributes: ['id', 'status', 'category', 'subType', 'priority'], required: false }
   ];
 }
 
@@ -120,7 +120,7 @@ async function listSignals({ wineryId, query = {} }) {
   const pageSize = Number(query.pageSize || 25);
   const { rows, count } = await OperationalIntelligenceSignal.findAndCountAll({
     where,
-    include: includeAssociations(),
+    include: includeAssociations(wineryId),
     order: [['createdAt', 'DESC'], ['id', 'DESC']],
     limit: pageSize,
     offset: (page - 1) * pageSize
@@ -183,7 +183,7 @@ async function createSignal({ wineryId, userId, data, transaction = null }) {
     if (duplicateByDedupe) {
       await updateExistingSignalFromInput(duplicateByDedupe, defaults, t);
       if (ownTransaction) await t.commit();
-      const fresh = await OperationalIntelligenceSignal.findOne({ where: { id: duplicateByDedupe.id, wineryId }, include: includeAssociations() });
+      const fresh = await OperationalIntelligenceSignal.findOne({ where: { id: duplicateByDedupe.id, wineryId }, include: includeAssociations(wineryId) });
       return { signal: fresh, created: false, suppressedDuplicate: true };
     }
 
@@ -198,7 +198,7 @@ async function createSignal({ wineryId, userId, data, transaction = null }) {
     }
 
     if (ownTransaction) await t.commit();
-    const fresh = await OperationalIntelligenceSignal.findOne({ where: { id: signal.id, wineryId }, include: includeAssociations() });
+    const fresh = await OperationalIntelligenceSignal.findOne({ where: { id: signal.id, wineryId }, include: includeAssociations(wineryId) });
     return { signal: fresh, created };
   } catch (err) {
     if (ownTransaction && !t.finished) await t.rollback();
@@ -247,7 +247,7 @@ async function updateSignalReview({ signalId, wineryId, userId, data }) {
   signal.reviewedBy = userId;
   signal.reviewedAt = new Date();
   await signal.save();
-  return OperationalIntelligenceSignal.findOne({ where: { id: signal.id, wineryId }, include: includeAssociations() });
+  return OperationalIntelligenceSignal.findOne({ where: { id: signal.id, wineryId }, include: includeAssociations(wineryId) });
 }
 
 async function updateSignalWorkflow({ signalId, wineryId, userId, data }) {
@@ -263,7 +263,7 @@ async function updateSignalWorkflow({ signalId, wineryId, userId, data }) {
   signal.reviewedBy = userId;
   signal.reviewedAt = new Date();
   await signal.save();
-  return OperationalIntelligenceSignal.findOne({ where: { id: signal.id, wineryId }, include: includeAssociations() });
+  return OperationalIntelligenceSignal.findOne({ where: { id: signal.id, wineryId }, include: includeAssociations(wineryId) });
 }
 
 function priorityForSeverity(severity) {
@@ -338,7 +338,7 @@ async function createTaskFromSignal({ signalId, wineryId, userId, userRole, data
     await signal.save({ transaction: t });
     await t.commit();
 
-    const fresh = await OperationalIntelligenceSignal.findOne({ where: { id: signal.id, wineryId }, include: includeAssociations() });
+    const fresh = await OperationalIntelligenceSignal.findOne({ where: { id: signal.id, wineryId }, include: includeAssociations(wineryId) });
     return { task, signal: fresh, duplicate: false };
   } catch (err) {
     if (!t.finished) await t.rollback();

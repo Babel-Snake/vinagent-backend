@@ -109,7 +109,8 @@ Supported actions:
 Creates an intake event from a signed public webhook. Configure the shared secret from Winery -> Integrations for the relevant domain, then send:
 
 - `x-vinagent-webhook-secret`: the configured shared secret
-- `x-vinagent-webhook-signature`: HMAC-SHA256 of the exact raw request body using that same secret, formatted as either `<hex>` or `sha256=<hex>`
+- `x-vinagent-webhook-timestamp`: the current Unix timestamp in seconds; timestamps more than five minutes from server time are rejected
+- `x-vinagent-webhook-signature`: HMAC-SHA256 of `<timestamp>.<exact raw request body>` using that same secret, formatted as either `<hex>` or `sha256=<hex>`
 
 The webhook accepts either a wrapped payload:
 
@@ -125,7 +126,7 @@ The webhook accepts either a wrapped payload:
 }
 ```
 
-or a direct payload with top-level `eventType` fields. Events still land in `PENDING_REVIEW` and must be reviewed by a manager before they become notices or tasks.
+or a direct payload with top-level `eventType` fields. Every webhook must supply a stable `externalEventId`. For adapter compatibility, `external_id`, `eventId`, or `id` at the top level, and `id`, `eventId`, or `externalEventId` inside `rawPayload`, are also normalized to that field. This keeps retries idempotent after the five-minute signature window. Events still land in `PENDING_REVIEW` and must be reviewed by a manager before they become notices or tasks.
 
 ### `POST /api/webhooks/integration/:wineryId/:domain/:areaId`
 
@@ -206,18 +207,39 @@ Retell is the first real provider proof for this pipeline. Retell-specific parsi
 Recommended Retell webhook URL:
 
 ```text
-/api/webhooks/retell/:wineryId
+/api/webhooks/retell
 ```
 
 Behavior:
 
-- Retell HMAC validation continues to use `x-retell-signature` and `RETELL_WEBHOOK_SECRET`.
+- Retell verification uses `x-retell-signature: v=<unix-ms>,d=<hex-digest>` and `RETELL_API_KEY` (with `RETELL_WEBHOOK_SECRET` retained only as a legacy environment-name fallback).
+- the digest covers the exact raw body followed by the timestamp; signatures outside the five-minute freshness window are rejected.
 - `call_analyzed` callbacks become `call.intake` events in `PENDING_REVIEW`.
 - transient callbacks such as `call_started` are acknowledged but skipped to avoid review queue noise.
 - Retell retries are deduplicated by `call_id + retell event`.
 - managers review the event from `/integration-events` and can create a normal external phone task.
 
-If the webhook URL cannot include `:wineryId`, the adapter can also read winery context from Retell call metadata or dynamic variables using `wineryId`, `winery_id`, `vinagentWineryId`, or `vinagent_winery_id`.
+### Operations-managed tenant mapping
+
+Retell tenant routing is deliberately not configurable through the ordinary winery or area-manager integration API. Operations must add a dedicated `retell` entry directly through controlled admin tooling, a reviewed seed, or a migration in either `WineryIntegrationConfig.providerConnections` or `OperationalAreaIntegrationConfig.providerConnections`:
+
+```json
+{
+  "retell": {
+    "provider": "retell",
+    "externalLocationId": "agent_...",
+    "externalAccountId": "optional-retell-account-id"
+  }
+}
+```
+
+Accepted routing fields:
+
+- the connection key must be exactly `retell` and `provider` must be `retell`;
+- `externalLocationId` is the exact, case-sensitive Retell agent ID and is required for standard Retell call webhooks;
+- `externalAccountId` is an optional additional boundary when Retell supplies a signed `account_id` field. Metadata account IDs are never trusted for routing.
+
+Before enabling a Retell agent, verify its ID maps to exactly one winery across winery-level and area-level configs. Multiple matching records belonging to the same winery are safe; no match or matches across different wineries fail closed. Winery IDs in the URL, query string, webhook body, call metadata, or dynamic variables are ignored. The removed `/api/webhooks/retell/:wineryId` route returns `404`.
 
 ## Provider Adapter Rule
 
@@ -243,5 +265,6 @@ Recommended future adapter locations:
 - Review APIs are manager/admin-only.
 - Event deduplication uses `provider + externalEventId + wineryId`.
 - Call transcripts and imported staff notices should remain behind authenticated dashboard APIs.
-- Public generic integration webhooks require the configured shared secret header and an HMAC signature over the raw body.
+- Public generic integration webhooks require the configured shared secret, a fresh Unix timestamp, and an HMAC signature over `<timestamp>.<raw body>`.
+- Generic webhook events require a stable external event ID and are durably deduplicated by `wineryId + provider + externalEventId`.
 - Raw webhook secrets are never returned by dashboard APIs; the app stores a SHA-256 hash and derives `webhookSigningConfigured` from that hash.

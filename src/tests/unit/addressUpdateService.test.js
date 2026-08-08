@@ -61,6 +61,11 @@ describe('addressUpdateService', () => {
                 token: 'test-token'
             });
 
+            expect(memberActionTokenService.validateToken).toHaveBeenCalledWith('test-token', {
+                expectedType: 'ADDRESS_CHANGE',
+                transaction: expect.anything(),
+                lock: true
+            });
             expect(result.member.id).toBe(42);
             expect(mockMember.save).toHaveBeenCalled();
             expect(mockMember.addressLine1).toBe('12 Oak Street');
@@ -89,18 +94,30 @@ describe('addressUpdateService', () => {
             });
         });
 
-        it('should throw error if member not found', async () => {
-            memberActionTokenService.validateToken.mockResolvedValue({
-                tokenRecord: { id: 1, payload: { addressLine1: 'Test' } },
-                member: null,
-                task: null
+        it('should roll back when token relationship validation fails', async () => {
+            const invalidTokenError = Object.assign(new Error('Invalid token context'), {
+                code: 'INVALID_TOKEN_CONTEXT'
             });
+            memberActionTokenService.validateToken.mockRejectedValue(invalidTokenError);
 
             await expect(
                 addressUpdateService.confirmAddress({ token: 'test' })
             ).rejects.toMatchObject({
-                code: 'MEMBER_NOT_FOUND'
+                code: 'INVALID_TOKEN_CONTEXT'
             });
+        });
+
+        it('rejects non-string address values', async () => {
+            memberActionTokenService.validateToken.mockResolvedValue({
+                tokenRecord: { id: 1, payload: { addressLine1: 'Test' } },
+                member: { id: 1 },
+                task: null
+            });
+
+            await expect(addressUpdateService.confirmAddress({
+                token: 'test',
+                newAddress: { addressLine1: { unexpected: true } }
+            })).rejects.toMatchObject({ code: 'INVALID_ADDRESS' });
         });
     });
 });

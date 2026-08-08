@@ -76,7 +76,13 @@ async function listComments({ itemType, itemId, wineryId, userId, userRole }) {
   await resolveVisibleItem({ itemType: type, itemId, wineryId, userId, userRole });
   const comments = await OperationalItemComment.findAll({
     where: { wineryId, itemType: type, itemId },
-    include: [{ model: User, as: 'Author', attributes: ['id', 'displayName', 'email', 'role'] }],
+    include: [{
+      model: User,
+      as: 'Author',
+      where: { wineryId },
+      attributes: ['id', 'displayName', 'email', 'role'],
+      required: false
+    }],
     order: [['createdAt', 'ASC'], ['id', 'ASC']]
   });
   return buildCommentThreads(comments);
@@ -116,7 +122,13 @@ async function createComment({ itemType, itemId, wineryId, userId, userRole, dat
     await transaction.commit();
     return OperationalItemComment.findOne({
       where: { id: comment.id, wineryId },
-      include: [{ model: User, as: 'Author', attributes: ['id', 'displayName', 'email', 'role'] }]
+      include: [{
+        model: User,
+        as: 'Author',
+        where: { wineryId },
+        attributes: ['id', 'displayName', 'email', 'role'],
+        required: false
+      }]
     }).then(serializeComment);
   } catch (err) {
     if (!transaction.finished) await transaction.rollback();
@@ -163,7 +175,13 @@ async function listRelations({ itemType, itemId, wineryId, userId, userRole }) {
         { targetType: type, targetId: itemId }
       ]
     },
-    include: [{ model: User, as: 'Creator', attributes: ['id', 'displayName', 'email', 'role'] }],
+    include: [{
+      model: User,
+      as: 'Creator',
+      where: { wineryId },
+      attributes: ['id', 'displayName', 'email', 'role'],
+      required: false
+    }],
     order: [['createdAt', 'DESC'], ['id', 'DESC']]
   });
   const visible = [];

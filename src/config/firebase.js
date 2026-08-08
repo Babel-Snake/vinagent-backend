@@ -103,7 +103,10 @@ try {
     }
 } catch (error) {
     if (process.env.NODE_ENV === 'production') {
-        logger.error('Firebase Admin Initialization Failed:', error);
+        logger.error('Firebase Admin Initialization Failed', {
+            code: error.code || null,
+            error: error.message
+        });
         process.exit(1);
     } else if (serviceAccountSource === 'environment') {
         logger.warn('Firebase Admin initialization from env failed; retrying local fallback.', {
@@ -120,7 +123,10 @@ try {
             logger.warn('Firebase local service account fallback failed.', { error: fallbackError.message });
         }
     } else {
-        logger.error('Firebase Admin Initialization Failed:', error);
+        logger.error('Firebase Admin Initialization Failed', {
+            code: error.code || null,
+            error: error.message
+        });
     }
 }
 

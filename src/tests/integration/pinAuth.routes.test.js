@@ -1,6 +1,7 @@
 process.env.ALLOW_TEST_AUTH_BYPASS = 'true';
 process.env.PIN_SESSION_SECRET = 'pin-auth-test-secret';
 process.env.RESOLVE_STAFF_RATE_LIMIT_MAX = '2';
+process.env.DEPLOYMENT_WINERY_ID = '1';
 
 const request = require('supertest');
 const app = require('../../app');
@@ -8,7 +9,7 @@ const { sequelize, Winery, WinerySettings, User } = require('../../models');
 const { hashPin } = require('../../utils/pinAuth');
 
 describe('PIN Auth Routes', () => {
-    let winery;
+    let winery, otherWinery;
 
     beforeAll(async () => {
         await sequelize.sync({ force: true });
@@ -18,6 +19,13 @@ describe('PIN Auth Routes', () => {
             name: 'PIN Route Test Winery',
             timeZone: 'Australia/Adelaide',
             contactEmail: 'pin@example.com'
+        });
+
+        otherWinery = await Winery.create({
+            id: 2,
+            name: 'Other Winery',
+            timeZone: 'Australia/Adelaide',
+            contactEmail: 'other-pin@example.com'
         });
 
         await WinerySettings.create({
@@ -44,6 +52,7 @@ describe('PIN Auth Routes', () => {
         await User.create({
             firebaseUid: 'staff-pin-uid',
             email: 'staff.pin@example.com',
+            username: 'staffpin',
             displayName: 'Staff PIN',
             role: 'staff',
             wineryId: winery.id,
@@ -60,16 +69,28 @@ describe('PIN Auth Routes', () => {
             pinHash: hashPin('MGR7'),
             pinUpdatedAt: new Date()
         });
+
+        await User.create({
+            firebaseUid: 'other-staff-pin-uid',
+            email: 'other.pin@example.com',
+            username: 'otherpin',
+            displayName: 'Other Staff PIN',
+            role: 'staff',
+            wineryId: otherWinery.id,
+            pinHash: hashPin('9988'),
+            pinUpdatedAt: new Date()
+        });
     });
 
     afterAll(async () => {
+        delete process.env.DEPLOYMENT_WINERY_ID;
         await sequelize.close();
     });
 
     it('returns the public PIN configuration for a winery', async () => {
         const res = await request(app)
             .get('/api/public/pin-config')
-            .query({ wineryId: winery.id })
+            .query({ wineryId: otherWinery.id })
             .expect(200);
 
         expect(res.body.pinLoginEnabled).toBe(true);
@@ -78,15 +99,22 @@ describe('PIN Auth Routes', () => {
         expect(res.body.wineryName).toBe('PIN Route Test Winery');
     });
 
-    it('rate-limits repeated public staff resolution attempts', async () => {
-        await request(app)
+    it('resolves immutable staff usernames only inside the deployment winery', async () => {
+        await User.update({ displayName: 'Renamed Staff Member' }, { where: { username: 'staffpin' } });
+
+        const resolved = await request(app)
             .get('/api/public/resolve-staff')
-            .query({ username: 'Missing Staff' })
-            .expect(404);
+            .query({ username: 'staffpin' })
+            .expect(200);
+
+        expect(resolved.body).toEqual({
+            email: 'staff.pin@example.com',
+            wineryId: winery.id
+        });
 
         await request(app)
             .get('/api/public/resolve-staff')
-            .query({ username: 'Missing Staff' })
+            .query({ username: 'otherpin' })
             .expect(404);
 
         const limited = await request(app)
@@ -95,6 +123,42 @@ describe('PIN Auth Routes', () => {
             .expect(429);
 
         expect(limited.body.error).toMatch(/too many staff resolution attempts/i);
+    });
+
+    it('ignores a client-supplied winery ID during PIN login', async () => {
+        const res = await request(app)
+            .post('/api/public/pin-login')
+            .send({ wineryId: otherWinery.id, pin: '9988' })
+            .expect(401);
+
+        expect(res.body.error.code).toBe('INVALID_PIN');
+    });
+
+    it('rejects winery and login-identity changes through ordinary manager APIs', async () => {
+        const createAttempt = await request(app)
+            .post('/api/staff')
+            .set('Authorization', 'Bearer mock-token')
+            .send({ username: 'movedstaff', password: 'password1', wineryId: otherWinery.id })
+            .expect(400);
+
+        expect(createAttempt.body.error.code).toBe('IMMUTABLE_WINERY');
+
+        const staff = await User.findOne({ where: { username: 'staffpin' } });
+        const updateAttempt = await request(app)
+            .put(`/api/staff/${staff.id}`)
+            .set('Authorization', 'Bearer mock-token')
+            .send({ email: 'replacement@example.com', wineryId: otherWinery.id })
+            .expect(400);
+
+        expect(updateAttempt.body.error.code).toBe('IMMUTABLE_STAFF_IDENTITY');
+
+        const profileAttempt = await request(app)
+            .patch('/api/public/me')
+            .set('Authorization', 'Bearer mock-token')
+            .send({ wineryId: otherWinery.id })
+            .expect(400);
+
+        expect(profileAttempt.body.error.code).toBe('IMMUTABLE_WINERY');
     });
 
     it('creates a staff PIN session that can fetch the current profile', async () => {

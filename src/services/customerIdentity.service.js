@@ -1,5 +1,6 @@
 const { Op } = require('sequelize');
 const { Member } = require('../models');
+const { getMemberForWinery } = require('./taskTenantScope.service');
 
 const AUTO_CREATE_MEMBER_CATEGORIES = new Set(['BOOKING', 'ORDER', 'ACCOUNT']);
 const DEFAULT_IDENTITY_MATCHING_CONFIG = {
@@ -235,7 +236,13 @@ async function resolveExternalIdentity({
   allowAutoCreate = true
 }) {
   if (memberId) {
-    return { memberId, matchReason: 'selected_member', suggestedCandidates: [], matchedMember: null };
+    const selectedMember = await getMemberForWinery({ memberId, wineryId, transaction });
+    return {
+      memberId: selectedMember.id,
+      matchReason: 'selected_member',
+      suggestedCandidates: [],
+      matchedMember: selectedMember
+    };
   }
 
   if (taskOrigin !== 'EXTERNAL') {

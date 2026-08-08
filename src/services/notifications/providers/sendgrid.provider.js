@@ -1,5 +1,6 @@
 const axios = require('axios');
 const logger = require('../../../config/logger');
+const { getAxiosOutboundPolicy } = require('../../../utils/outboundHttpPolicy');
 
 class SendgridProvider {
     constructor() {
@@ -31,7 +32,13 @@ class SendgridProvider {
                 logger.error('Blocked email send because SendGrid is not configured.');
                 throw error;
             }
-            logger.info(`[MOCK EMAIL] To: ${to} | Cc: ${cc || ''} | From: ${from} | Subject: ${subject} | Body: ${text}`);
+            logger.info('Mock email delivery accepted', {
+                toCount: this.parseRecipients(to).length,
+                ccCount: this.parseRecipients(cc).length,
+                hasFrom: Boolean(from),
+                subjectLength: String(subject || '').length,
+                bodyLength: String(text || '').length
+            });
             return {
                 id: `mock-email-${Date.now()}`,
                 status: 'queued',
@@ -61,6 +68,7 @@ class SendgridProvider {
                     content: [{ type: 'text/plain', value: text }]
                 },
                 {
+                    ...getAxiosOutboundPolicy(),
                     headers: {
                         Authorization: `Bearer ${this.apiKey}`,
                         'Content-Type': 'application/json'
@@ -74,7 +82,11 @@ class SendgridProvider {
                 provider: 'sendgrid'
             };
         } catch (error) {
-            logger.error('SendGrid Send Failed', error.response?.data || error.message);
+            logger.error('SendGrid send failed', {
+                code: error.code || null,
+                status: error.response?.status || null,
+                error: error.message
+            });
             throw error;
         }
     }

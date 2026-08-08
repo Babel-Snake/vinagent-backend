@@ -19,39 +19,41 @@ const { ForbiddenError, NotFoundError, ValidationError } = require('../utils/err
 
 const USER_ATTRIBUTES = ['id', 'displayName', 'email', 'role'];
 
-function areaInclude() {
+function areaInclude(wineryId) {
   return {
     model: OperationalArea,
     as: 'OperationalAreas',
+    where: { wineryId },
     attributes: ['id', 'name', 'description', 'isActive', 'sortOrder'],
-    through: { attributes: ['relationshipType'] },
+    through: { attributes: ['relationshipType'], where: { wineryId } },
     required: false
   };
 }
 
-function requestIncludes() {
+function requestIncludes(wineryId) {
   return [
-    areaInclude(),
-    { model: User, as: 'Creator', attributes: USER_ATTRIBUTES },
-    { model: User, as: 'RequestedFrom', attributes: USER_ATTRIBUTES },
-    { model: User, as: 'DecisionMaker', attributes: USER_ATTRIBUTES },
-    { model: User, as: 'Confirmer', attributes: USER_ATTRIBUTES }
+    areaInclude(wineryId),
+    { model: User, as: 'Creator', where: { wineryId }, attributes: USER_ATTRIBUTES, required: false },
+    { model: User, as: 'RequestedFrom', where: { wineryId }, attributes: USER_ATTRIBUTES, required: false },
+    { model: User, as: 'DecisionMaker', where: { wineryId }, attributes: USER_ATTRIBUTES, required: false },
+    { model: User, as: 'Confirmer', where: { wineryId }, attributes: USER_ATTRIBUTES, required: false }
   ];
 }
 
-function recordIncludes() {
+function recordIncludes(wineryId) {
   return [
-    areaInclude(),
+    areaInclude(wineryId),
     {
       model: User,
       as: 'Recipients',
+      where: { wineryId },
       attributes: USER_ATTRIBUTES,
-      through: { attributes: [] },
+      through: { attributes: [], where: { wineryId } },
       required: false
     },
-    { model: User, as: 'Creator', attributes: USER_ATTRIBUTES },
-    { model: User, as: 'Confirmer', attributes: USER_ATTRIBUTES },
-    { model: Member, attributes: ['id', 'firstName', 'lastName', 'email', 'phone'] }
+    { model: User, as: 'Creator', where: { wineryId }, attributes: USER_ATTRIBUTES, required: false },
+    { model: User, as: 'Confirmer', where: { wineryId }, attributes: USER_ATTRIBUTES, required: false },
+    { model: Member, where: { wineryId }, attributes: ['id', 'firstName', 'lastName', 'email', 'phone'], required: false }
   ];
 }
 
@@ -142,6 +144,7 @@ async function validateRecordRecipients({ recipientUserIds = [], wineryId, place
     include: [{
       model: UserAreaMembership,
       as: 'AreaMemberships',
+      where: { wineryId },
       attributes: ['areaId'],
       required: false
     }],
@@ -183,8 +186,8 @@ async function validateSourceEvent(sourceEventId, wineryId, transaction) {
   if (!event) throw new ValidationError('Source integration event is invalid.');
 }
 
-async function getItemAreaIds({ joinModel, foreignKey, itemId, transaction = null }) {
-  const rows = await joinModel.findAll({ where: { [foreignKey]: itemId }, attributes: ['areaId'], transaction });
+async function getItemAreaIds({ joinModel, foreignKey, itemId, wineryId, transaction = null }) {
+  const rows = await joinModel.findAll({ where: { [foreignKey]: itemId, wineryId }, attributes: ['areaId'], transaction });
   return rows.map(row => Number(row.areaId));
 }
 
@@ -193,7 +196,7 @@ async function canViewItem(item, { wineryId, userId, userRole, joinModel, foreig
   if (!value || Number(value.wineryId) !== Number(wineryId)) return false;
   if (operationalAreaService.isGlobalManager(userRole)) return true;
   if (value.areaScope !== 'AREAS') return true;
-  const itemAreaIds = await getItemAreaIds({ joinModel, foreignKey, itemId: value.id, transaction });
+  const itemAreaIds = await getItemAreaIds({ joinModel, foreignKey, itemId: value.id, wineryId, transaction });
   const { areaIds } = await operationalAreaService.getUserAreaAccess({ userId, wineryId, transaction });
   return itemAreaIds.some(areaId => areaIds.includes(areaId));
 }
@@ -203,7 +206,7 @@ async function canManageItem(item, { wineryId, userId, userRole, joinModel, fore
   if (!value || Number(value.wineryId) !== Number(wineryId)) return false;
   if (operationalAreaService.isGlobalManager(userRole)) return true;
   if (value.areaScope !== 'AREAS') return false;
-  const itemAreaIds = await getItemAreaIds({ joinModel, foreignKey, itemId: value.id, transaction });
+  const itemAreaIds = await getItemAreaIds({ joinModel, foreignKey, itemId: value.id, wineryId, transaction });
   const { managedAreaIds } = await operationalAreaService.getUserAreaAccess({ userId, wineryId, transaction });
   return itemAreaIds.length > 0 && itemAreaIds.every(areaId => managedAreaIds.includes(areaId));
 }
@@ -243,7 +246,7 @@ async function applyAreaFilter({ where, areaId, wineryId, joinModel, foreignKey 
 async function getAuditEvents({ itemType, itemId, wineryId }) {
   return OperationalItemAuditEvent.findAll({
     where: { itemType, itemId, wineryId },
-    include: [{ model: User, as: 'Actor', attributes: USER_ATTRIBUTES }],
+    include: [{ model: User, as: 'Actor', where: { wineryId }, attributes: USER_ATTRIBUTES, required: false }],
     order: [['createdAt', 'DESC'], ['id', 'DESC']]
   }).then(rows => rows.map(plain));
 }
@@ -367,7 +370,7 @@ async function listRequests({ wineryId, userId, userRole, filters }) {
   }
   const { rows, count } = await OperationalRequest.findAndCountAll({
     where,
-    include: requestIncludes(),
+    include: requestIncludes(wineryId),
     distinct: true,
     order: [['createdAt', filters.sortBy === 'oldest' ? 'ASC' : 'DESC'], ['id', filters.sortBy === 'oldest' ? 'ASC' : 'DESC']],
     limit: filters.pageSize,
@@ -380,7 +383,7 @@ async function listRequests({ wineryId, userId, userRole, filters }) {
 }
 
 async function getRequestById({ requestId, wineryId, userId, userRole, transaction = null }) {
-  const item = await OperationalRequest.findOne({ where: { id: requestId, wineryId }, include: requestIncludes(), transaction });
+  const item = await OperationalRequest.findOne({ where: { id: requestId, wineryId }, include: requestIncludes(wineryId), transaction });
   if (!item || !(await canViewItem(item, { wineryId, userId, userRole, joinModel: OperationalRequestArea, foreignKey: 'requestId', transaction }))) {
     throw new NotFoundError('Request not found');
   }
@@ -595,7 +598,7 @@ async function listRecords({ wineryId, userId, userRole, filters }) {
   }
   const { rows, count } = await OperationalRecord.findAndCountAll({
     where,
-    include: recordIncludes(),
+    include: recordIncludes(wineryId),
     distinct: true,
     order: [['occurredAt', filters.sortBy === 'oldest' ? 'ASC' : 'DESC'], ['id', filters.sortBy === 'oldest' ? 'ASC' : 'DESC']],
     limit: filters.pageSize,
@@ -608,7 +611,7 @@ async function listRecords({ wineryId, userId, userRole, filters }) {
 }
 
 async function getRecordById({ recordId, wineryId, userId, userRole, transaction = null }) {
-  const item = await OperationalRecord.findOne({ where: { id: recordId, wineryId }, include: recordIncludes(), transaction });
+  const item = await OperationalRecord.findOne({ where: { id: recordId, wineryId }, include: recordIncludes(wineryId), transaction });
   if (!item || !(await canViewItem(item, { wineryId, userId, userRole, joinModel: OperationalRecordArea, foreignKey: 'recordId', transaction }))) {
     throw new NotFoundError('Operational record not found');
   }

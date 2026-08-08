@@ -6,6 +6,48 @@ const { Member, TaskAction } = require('../models');
 const memberActionTokenService = require('./memberActionTokenService');
 const { getDefaultTaskOutcome } = require('../utils/taskOutcome');
 
+const ADDRESS_FIELDS = ['addressLine1', 'addressLine2', 'suburb', 'state', 'postcode', 'country'];
+const MAX_ADDRESS_FIELD_LENGTH = 255;
+
+function addressError(message, code = 'INVALID_ADDRESS') {
+  const err = new Error(message);
+  err.statusCode = 400;
+  err.code = code;
+  return err;
+}
+
+function normalizeAddress(address) {
+  if (!address || typeof address !== 'object' || Array.isArray(address)) {
+    throw addressError('No address to apply', 'NO_ADDRESS');
+  }
+
+  const normalized = {};
+  for (const field of ADDRESS_FIELDS) {
+    if (address[field] === undefined) continue;
+
+    if (address[field] === null && field !== 'addressLine1') {
+      normalized[field] = null;
+      continue;
+    }
+
+    if (typeof address[field] !== 'string') {
+      throw addressError(`${field} must be a string`);
+    }
+
+    const value = address[field].trim();
+    if (value.length > MAX_ADDRESS_FIELD_LENGTH) {
+      throw addressError(`${field} must not exceed ${MAX_ADDRESS_FIELD_LENGTH} characters`);
+    }
+    normalized[field] = value || (field === 'addressLine1' ? '' : null);
+  }
+
+  if (!normalized.addressLine1) {
+    throw addressError('No address to apply', 'NO_ADDRESS');
+  }
+
+  return normalized;
+}
+
 /**
  * Confirm an address change using a MemberActionToken
  * @param {Object} params
@@ -13,33 +55,21 @@ const { getDefaultTaskOutcome } = require('../utils/taskOutcome');
  * @param {Object} [params.newAddress] - Optional override address (if member corrects it)
  */
 async function confirmAddress({ token, newAddress }) {
-  // 1. Validate token
-  const { tokenRecord, member, task } = await memberActionTokenService.validateToken(token);
-
-  if (!member) {
-    const err = new Error('Member not found for this token');
-    err.statusCode = 404;
-    err.code = 'MEMBER_NOT_FOUND';
-    throw err;
-  }
-
-  // 2. Get address from payload or override
-  const payload = tokenRecord.payload || {};
-  const tokenAddress = payload.newAddress || payload;
-  const addressToApply = newAddress || tokenAddress || {};
-
-  if (!addressToApply.addressLine1) {
-    const err = new Error('No address to apply');
-    err.statusCode = 400;
-    err.code = 'NO_ADDRESS';
-    throw err;
-  }
-
-  // 3. Start transaction
   const t = await Member.sequelize.transaction();
 
   try {
-    // 4. Update Member address
+    // Lock and validate inside the same transaction as the update. This makes
+    // the single-use guarantee effective even when two confirmations race.
+    const { tokenRecord, member, task } = await memberActionTokenService.validateToken(token, {
+      expectedType: 'ADDRESS_CHANGE',
+      transaction: t,
+      lock: true
+    });
+
+    const payload = tokenRecord.payload || {};
+    const tokenAddress = payload.newAddress || payload;
+    const addressToApply = normalizeAddress(newAddress === undefined ? tokenAddress : newAddress);
+
     const { addressLine1, addressLine2, suburb, state, postcode, country } = addressToApply;
 
     if (addressLine1 !== undefined) member.addressLine1 = addressLine1;
@@ -51,10 +81,10 @@ async function confirmAddress({ token, newAddress }) {
 
     await member.save({ transaction: t });
 
-    // 5. Mark token as used
+    // The conditional update prevents a second consumer from marking the same
+    // token used if the database dialect cannot provide a row lock.
     await memberActionTokenService.markTokenUsed(tokenRecord.id, t);
 
-    // 6. Update Task status to ACTIONED (if linked)
     if (task) {
       const defaultOutcome = getDefaultTaskOutcome(task, 'ACTIONED');
       task.status = 'ACTIONED';
@@ -73,7 +103,6 @@ async function confirmAddress({ token, newAddress }) {
       task.resolvedAt = new Date();
       await task.save({ transaction: t });
 
-      // 7. Create TaskAction
       await TaskAction.create({
         taskId: task.id,
         userId: null, // Member action, no staff user

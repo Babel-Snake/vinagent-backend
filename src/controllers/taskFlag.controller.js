@@ -1,9 +1,15 @@
-const { UserTaskFlag } = require('../models');
+const { Task, UserTaskFlag } = require('../models');
+const { NotFoundError } = require('../utils/errors');
 
 async function toggleFlag(req, res, next) {
     try {
-        const { userId } = req.user;
+        const { userId, wineryId } = req.user;
         const { taskId } = req.params;
+        const task = await Task.findOne({
+            where: { id: taskId, wineryId },
+            attributes: ['id']
+        });
+        if (!task) throw new NotFoundError('Task not found');
 
         const existing = await UserTaskFlag.findOne({
             where: { userId, taskId }
@@ -21,23 +27,23 @@ async function toggleFlag(req, res, next) {
     }
 }
 
-async function listFlaggedTasks(req, res) {
+async function listFlaggedTasks(req, res, next) {
     try {
-        if (!UserTaskFlag) {
-            console.error('CRITICAL: UserTaskFlag model is undefined!');
-            return res.status(500).json({ error: 'Model UserTaskFlag not loaded' });
-        }
-
-        const { userId } = req.user;
+        const { userId, wineryId } = req.user;
         const flags = await UserTaskFlag.findAll({
             where: { userId },
-            attributes: ['taskId']
+            attributes: ['taskId'],
+            include: [{
+                model: Task,
+                where: { wineryId },
+                attributes: [],
+                required: true
+            }]
         });
         const taskIds = flags.map(f => f.taskId);
         res.json({ taskIds });
     } catch (err) {
-        console.error('Failed to list flags:', err);
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 }
 

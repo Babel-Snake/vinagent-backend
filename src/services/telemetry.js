@@ -43,12 +43,11 @@ function recordTriage(source, category, durationMs) {
 /**
  * Records a DLQ or dropped message event.
  */
-function recordDroppedMessage(source, reason, rawSnippet) {
+function recordDroppedMessage(source, reason, _rawSnippet) {
     logger.error('Metric: Dropped Message', {
         metric: 'dropped_message',
         source,
-        reason,
-        raw_snippet: rawSnippet ? rawSnippet.substring(0, 100) : ''
+        reason
     });
 }
 

@@ -384,7 +384,14 @@ async function conversionMetrics({ wineryId, start, end }) {
 
 async function trendMetrics({ wineryId, start, end }) {
   const previousPeriod = periodBefore(start, end);
-  const areaInclude = () => ({ model: OperationalArea, as: 'OperationalAreas', attributes: ['id', 'name'], through: { attributes: [] }, required: false });
+  const areaInclude = () => ({
+    model: OperationalArea,
+    as: 'OperationalAreas',
+    where: { wineryId },
+    attributes: ['id', 'name'],
+    through: { attributes: [], where: { wineryId } },
+    required: false
+  });
   const currentFilter = { [Op.gte]: start, [Op.lt]: end };
   const previousFilter = { [Op.gte]: previousPeriod.start, [Op.lt]: previousPeriod.end };
   const commonAttributes = ['id', 'createdAt'];
@@ -422,7 +429,14 @@ async function trendMetrics({ wineryId, start, end }) {
 async function getOperationalIntelligence({ wineryId, start, end, now = new Date() }) {
   const periodFilter = { [Op.gte]: start, [Op.lt]: end };
   const recurrenceLimit = 250;
-  const areaInclude = () => ({ model: OperationalArea, as: 'OperationalAreas', attributes: ['id', 'name'], through: { attributes: [] }, required: false });
+  const areaInclude = () => ({
+    model: OperationalArea,
+    as: 'OperationalAreas',
+    where: { wineryId },
+    attributes: ['id', 'name'],
+    through: { attributes: [], where: { wineryId } },
+    required: false
+  });
   const [pendingRequests, requests, records, classificationRequests, classificationRecords, tasks, notices, conversions, trends] = await Promise.all([
     OperationalRequest.findAll({ where: { wineryId, status: 'PENDING' }, attributes: ['id', 'title', 'priority', 'dueAt', 'createdAt'], raw: true }),
     OperationalRequest.findAll({ where: { wineryId, createdAt: periodFilter }, include: [areaInclude()], order: [['createdAt', 'DESC']], limit: recurrenceLimit }),
@@ -457,8 +471,9 @@ async function getNoticeAcknowledgementMetrics({ wineryId, userId, start, end })
     include: [{
       model: OperationalArea,
       as: 'OperationalAreas',
+      where: { wineryId },
       attributes: ['id', 'name'],
-      through: { attributes: [] },
+      through: { attributes: [], where: { wineryId } },
       required: false
     }]
   });

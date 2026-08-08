@@ -34,12 +34,14 @@ The default local URL is `http://localhost:3000`. `NEXT_PUBLIC_API_URL` must poi
 
 ```bash
 npm run dev
-npm run lint
+npm run lint:ci
+npm run test:smoke
 npm run build
+npm run test:browser-smoke
 npm run start
 ```
 
-`npm run build` is the production build gate. The app uses system fonts so the build does not depend on fetching remote font assets.
+`npm run build` is the production build gate. Run `test:browser-smoke` after the build; it uses `playwright-core` with a locally installed Edge/Chrome executable. Set `PLAYWRIGHT_EXECUTABLE_PATH` when the browser is not installed in a standard location. The app uses system fonts so the build does not depend on fetching remote font assets.
 
 ## Route Overview
 
@@ -49,15 +51,27 @@ Implemented dashboard routes:
 * `/login`
 * `/home`
 * `/tasks`
+* `/projects`
+* `/requests`
+* `/notes`
+* `/operations`
+* `/integration-events`
 * `/staff`
 * `/noticeboard`
 * `/calendar`
 * `/customers`
 * `/analytics`
+* `/usage`
 * `/winery`
+
+Public member route:
+
+* `/confirm-address` — validates a single-use member action token, lets the
+  member review/correct their proposed address, and confirms it without staff
+  authentication
 
 ## API Contract
 
-Frontend API calls are centralized in `lib/api.ts` and target the backend `/api` route groups documented in `../docs/API_SPEC.md`.
+Authenticated frontend API calls are centralized in `lib/api.ts` and target the backend `/api` route groups documented in `../docs/API_SPEC.md`. The public address flow uses `lib/publicAddressFlow.mjs` and deliberately sends no Firebase or PIN credentials.
 
 Authentication uses Firebase ID tokens for dashboard users. Staff PIN login stores a short-lived PIN session token in browser storage; see `../docs/PIN_LOGIN.md` for the current threat model and migration recommendation.

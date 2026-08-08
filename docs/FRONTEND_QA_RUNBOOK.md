@@ -1,16 +1,17 @@
 # Frontend Phase 7 QA Runbook
 
-## Current automated evidence — 2026-07-14
+## Current automated evidence — 2026-08-08
 
 | Check | Result | Scope |
 |---|---|---|
-| `npm run lint` | Passed | Frontend source |
-| `npm run build` | Passed | Production Next build, TypeScript, and all 17 static routes |
-| Production route smoke | Passed | HTTP 200 for `/`, `/login`, `/home`, `/tasks`, `/noticeboard`, `/calendar`, `/customers`, `/staff`, `/analytics`, `/winery`, `/integration-events`, `/requests`, `/notes`, and `/operations` |
+| `npm run lint:ci` | Passed | Frontend source, zero warnings |
+| `npm run build` | Passed | Production Next build, TypeScript, and all 20 generated pages, including `/confirm-address` and `/usage` |
+| `npm run test:smoke` | Passed, 6/6 | Public-token extraction, endpoint construction, address normalization/validation, and safe customer error states |
+| `npm run test:browser-smoke` | Passed | Real local headless Edge/Chromium against the production Next server: public address confirmation and expiry, token removal from the URL, fixed-winery login, manager/staff navigation visibility, aggregate manager Usage rendering, and 375px shell overflow checks |
 | Legacy Customer/Staff overlays | Passed source audit | No `fixed inset-0` overlay remains in Customer, Staff, or Create Staff modal files; each uses `ui/Dialog` |
 | Native browser feedback | Passed source audit | No `alert`, `confirm`, or `prompt` usage outside the `ConfirmDialog` component's internal handler |
 
-The repository has no installed browser-test runner. A local headless-browser DOM snapshot was unavailable, so it is deliberately not counted as interaction evidence. The checks below require a real authenticated session and the listed roles.
+The repository now uses `playwright-core` with an installed local Edge/Chrome executable for deterministic browser smoke. The automated manager/staff profiles and API responses are test fixtures; they verify browser rendering and role-visible navigation but do not replace the real backend, Firebase, PIN, provider, or populated-data staging checks below.
 
 ## Test accounts and data
 
@@ -32,7 +33,7 @@ Run the core workflow at 1280 x 800. For each viewport below, inspect navigation
 
 | Viewport | Result |
 |---|---|
-| 375 x 812 | Pending |
+| 375 x 812 | Public confirmation and manager/staff navigation shells passed automatically; populated workflow checks pending |
 | 768 x 1024 | Pending |
 | 1024 x 768 | Pending |
 | 1280 x 800 | Pending |
@@ -42,7 +43,9 @@ Run the core workflow at 1280 x 800. For each viewport below, inspect navigation
 
 | Scenario | Expected result | Result |
 |---|---|---|
-| Manager primary navigation | All permitted destinations visible and reachable; Work subnavigation is clear | Pending |
+| Manager primary navigation | All permitted destinations visible and reachable; Work subnavigation is clear | Role visibility passed automatically; live destinations pending |
+| Aggregate Usage dashboard | Manager/admin can view seats, engagement, API, messaging, task, AI-token, and storage totals; staff cannot see the route in navigation | Fixture-backed rendering and role visibility passed automatically; live reconciliation pending |
+| Public member address confirmation | Token is removed from the URL; review, correction, explicit confirmation, success, and expired states are safe and usable | Passed automatically at 375 x 812 |
 | Queue totals over 20 tasks | Home and Queue totals match API totals, not just loaded cards | Pending |
 | Task pagination/deep link | Page/filter state remains after opening and closing a task | Pending |
 | Noticeboard over 50 notices | Next page exposes records beyond page one | Pending |
@@ -52,7 +55,7 @@ Run the core workflow at 1280 x 800. For each viewport below, inspect navigation
 | Calendar keyboard path | Linked records and edit dialog work with keyboard only | Pending |
 | Customer mobile edit | Search and edit complete without horizontal overflow at 375px | Pending |
 | Insights/Winery hierarchy | Reporting period survives Insights view change; area/global permissions are correct | Pending |
-| PIN staff path | Staff-critical work is available without manager-only destinations/actions | Pending |
+| PIN staff path | Staff-critical work is available without manager-only destinations/actions | Manager-only navigation exclusion passed automatically; live PIN and task work pending |
 
 ## Dialog and accessibility smoke
 

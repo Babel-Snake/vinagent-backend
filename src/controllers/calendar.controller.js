@@ -7,7 +7,6 @@ const {
     User
 } = require('../models');
 const { Op } = require('sequelize');
-const logger = require('../config/logger');
 const recordVisibility = require('../services/recordVisibility.service');
 
 const LINKED_TASK_ATTRIBUTES = [
@@ -52,25 +51,27 @@ function normalizeIdList(values, legacyValue) {
     return Array.from(new Set(ids));
 }
 
-function buildEventInclude() {
+function buildEventInclude(wineryId) {
     return [
-        { model: Task, as: 'LinkedTask', attributes: LINKED_TASK_ATTRIBUTES },
+        { model: Task, as: 'LinkedTask', where: { wineryId }, attributes: LINKED_TASK_ATTRIBUTES, required: false },
         {
             model: Task,
             as: 'LinkedTasks',
+            where: { wineryId },
             attributes: LINKED_TASK_ATTRIBUTES,
-            through: { attributes: ['createdAt', 'createdBy'] },
+            through: { attributes: ['createdAt', 'createdBy'], where: { wineryId } },
             required: false
         },
-        { model: Notice, as: 'LinkedNotice', attributes: LINKED_NOTICE_ATTRIBUTES },
+        { model: Notice, as: 'LinkedNotice', where: { wineryId }, attributes: LINKED_NOTICE_ATTRIBUTES, required: false },
         {
             model: Notice,
             as: 'LinkedNotices',
+            where: { wineryId },
             attributes: LINKED_NOTICE_ATTRIBUTES,
-            through: { attributes: ['createdAt', 'createdBy'] },
+            through: { attributes: ['createdAt', 'createdBy'], where: { wineryId } },
             required: false
         },
-        { model: User, as: 'Creator', attributes: ['id', 'displayName', 'email'] }
+        { model: User, as: 'Creator', where: { wineryId }, attributes: ['id', 'displayName', 'email'], required: false }
     ];
 }
 
@@ -104,11 +105,11 @@ async function assertLinkedRecords({ wineryId, taskIds, noticeIds, transaction }
 
 async function replaceEventLinks({ event, taskIds, noticeIds, wineryId, userId, transaction }) {
     await CalendarEventTask.destroy({
-        where: { calendarEventId: event.id },
+        where: { calendarEventId: event.id, wineryId },
         transaction
     });
     await CalendarEventNotice.destroy({
-        where: { calendarEventId: event.id },
+        where: { calendarEventId: event.id, wineryId },
         transaction
     });
 
@@ -140,11 +141,11 @@ async function replaceEventLinks({ event, taskIds, noticeIds, wineryId, userId, 
 async function getCalendarEventById(id, wineryId) {
     return CalendarEvent.findOne({
         where: { id, wineryId },
-        include: buildEventInclude()
+        include: buildEventInclude(wineryId)
     });
 }
 
-exports.listEvents = async (req, res) => {
+exports.listEvents = async (req, res, next) => {
     try {
         const { start, end, search, pageSize, eventId } = req.query;
         if (!req.user) {
@@ -185,7 +186,7 @@ exports.listEvents = async (req, res) => {
         const limit = pageSize ? Math.min(Math.max(Number(pageSize) || 20, 1), 100) : undefined;
         const events = await CalendarEvent.findAll({
             where,
-            include: buildEventInclude(),
+            include: buildEventInclude(wineryId),
             order: [['start', 'ASC']]
         });
 
@@ -229,12 +230,11 @@ exports.listEvents = async (req, res) => {
 
         res.json(limit ? visibleEvents.slice(0, limit) : visibleEvents);
     } catch (error) {
-        logger.error('Error fetching calendar events:', error);
-        res.status(500).json({ error: 'Failed to fetch events' });
+        next(error);
     }
 };
 
-exports.createEvent = async (req, res) => {
+exports.createEvent = async (req, res, next) => {
     const transaction = await CalendarEvent.sequelize.transaction();
     try {
         const { title, description, start, end, allDay, type } = req.body;
@@ -275,12 +275,11 @@ exports.createEvent = async (req, res) => {
         res.status(201).json(eventWithLinks);
     } catch (error) {
         if (!transaction.finished) await transaction.rollback();
-        logger.error('Error creating calendar event:', error);
-        res.status(error.statusCode || 500).json({ error: error.message || 'Failed to create event' });
+        next(error);
     }
 };
 
-exports.updateEvent = async (req, res) => {
+exports.updateEvent = async (req, res, next) => {
     const transaction = await CalendarEvent.sequelize.transaction();
     try {
         const { id } = req.params;
@@ -316,12 +315,11 @@ exports.updateEvent = async (req, res) => {
         res.json(eventWithLinks);
     } catch (error) {
         if (!transaction.finished) await transaction.rollback();
-        logger.error('Error updating calendar event:', error);
-        res.status(error.statusCode || 500).json({ error: error.message || 'Failed to update event' });
+        next(error);
     }
 };
 
-exports.deleteEvent = async (req, res) => {
+exports.deleteEvent = async (req, res, next) => {
     try {
         const { id } = req.params;
         const wineryId = req.user.wineryId;
@@ -334,7 +332,6 @@ exports.deleteEvent = async (req, res) => {
         await event.destroy();
         res.json({ message: 'Event deleted successfully' });
     } catch (error) {
-        logger.error('Error deleting calendar event:', error);
-        res.status(500).json({ error: 'Failed to delete event' });
+        next(error);
     }
 };

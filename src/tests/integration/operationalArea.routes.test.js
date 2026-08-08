@@ -4,6 +4,7 @@ process.env.NODE_ENV = 'test';
 const request = require('supertest');
 const app = require('../../app');
 const integrationConnectionService = require('../../services/integrationConnection.service');
+const wineryService = require('../../services/winery.service');
 const {
   sequelize,
   AreaProductListing,
@@ -119,6 +120,109 @@ describe('Operational Area Routes and Visibility', () => {
       .expect(200);
 
     expect(list.body.areas.map(area => area.name)).toEqual(['Cellar Door', 'Restaurant', 'Logistics']);
+  });
+
+  it('does not hydrate foreign-winery configuration through corrupted area associations', async () => {
+    const foreignArea = await OperationalArea.create({
+      wineryId: otherWinery.id,
+      name: 'Foreign Private Area',
+      sortOrder: 1
+    });
+    await OperationalAreaProfile.create({
+      wineryId: otherWinery.id,
+      areaId: areaA.id,
+      publicEmail: 'foreign-private@example.com'
+    });
+    const contact = await WineryContact.create({
+      wineryId: winery.id,
+      name: 'Local Contact',
+      role: 'Coordinator'
+    });
+    await WineryContactArea.create({
+      wineryId: winery.id,
+      contactId: contact.id,
+      areaId: foreignArea.id,
+      relationshipType: 'PRIMARY'
+    });
+
+    const response = await request(app)
+      .get('/api/winery/full')
+      .set('Authorization', authToken)
+      .expect(200);
+
+    const localArea = response.body.data.OperationalAreas.find(area => area.id === areaA.id);
+    const localContact = response.body.data.contacts.find(item => item.id === contact.id);
+    expect(localArea.Profile).toBeNull();
+    expect(localContact.OperationalAreas).toEqual([]);
+    expect(JSON.stringify(response.body)).not.toContain('foreign-private@example.com');
+    expect(JSON.stringify(response.body)).not.toContain('Foreign Private Area');
+
+    const aiContext = await wineryService.getAiContext(winery.id);
+    expect(aiContext.organisation.find(item => item.name === contact.name).areas).toEqual([]);
+    expect(JSON.stringify(aiContext)).not.toContain('foreign-private@example.com');
+    expect(JSON.stringify(aiContext)).not.toContain('Foreign Private Area');
+  });
+
+  it('does not expose foreign-winery users or memberships through local area and user lists', async () => {
+    const foreignUser = await User.create({
+      id: 99,
+      firebaseUid: 'foreign-area-user',
+      email: 'foreign-area-user@example.com',
+      displayName: 'Foreign Area User',
+      role: 'staff',
+      wineryId: otherWinery.id
+    });
+    const foreignArea = await OperationalArea.create({
+      wineryId: otherWinery.id,
+      name: 'Foreign Membership Area',
+      sortOrder: 1
+    });
+    await UserAreaMembership.bulkCreate([
+      {
+        wineryId: otherWinery.id,
+        userId: foreignUser.id,
+        areaId: areaA.id,
+        membershipRole: 'MEMBER',
+        isPrimary: false
+      },
+      {
+        wineryId: otherWinery.id,
+        userId: otherStaff.id,
+        areaId: foreignArea.id,
+        membershipRole: 'MANAGER',
+        isPrimary: false
+      },
+      {
+        wineryId: winery.id,
+        userId: currentUser.id,
+        areaId: foreignArea.id,
+        membershipRole: 'MANAGER',
+        isPrimary: false
+      }
+    ]);
+
+    const areas = await request(app)
+      .get('/api/operational-areas?includeInactive=true')
+      .set('Authorization', authToken)
+      .expect(200);
+    const localArea = areas.body.areas.find(area => area.id === areaA.id);
+    expect(localArea.Memberships).toEqual([]);
+    expect(JSON.stringify(areas.body)).not.toContain('foreign-area-user@example.com');
+
+    const users = await request(app)
+      .get('/api/users')
+      .set('Authorization', authToken)
+      .expect(200);
+    const localUser = users.body.users.find(user => user.id === otherStaff.id);
+    expect(localUser.areaIds).not.toContain(foreignArea.id);
+    const current = users.body.users.find(user => user.id === currentUser.id);
+    expect(current.managedAreaIds).not.toContain(foreignArea.id);
+
+    await User.update({ role: 'staff' }, { where: { id: currentUser.id } });
+    await request(app)
+      .get('/api/winery/full')
+      .set('Authorization', authToken)
+      .expect(403);
   });
 
   it('lets winery managers maintain shared and cross-area reporting contacts without hierarchy cycles', async () => {

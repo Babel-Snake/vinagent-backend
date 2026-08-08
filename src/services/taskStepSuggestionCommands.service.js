@@ -25,11 +25,12 @@ async function generateTaskStepSuggestion({ taskId, stepId, wineryId, userId, us
     const task = await Task.findOne({
       where: { id: taskId, wineryId },
       include: [
-        { model: Member },
-        { model: User, as: 'Assignee', attributes: ['id', 'displayName', 'email', 'role'] },
+        { model: Member, where: { wineryId }, required: false },
+        { model: User, as: 'Assignee', where: { wineryId }, attributes: ['id', 'displayName', 'email', 'role'], required: false },
         {
           model: Message,
           as: 'Messages',
+          where: { wineryId },
           required: false,
           separate: true,
           order: [['receivedAt', 'ASC'], ['id', 'ASC']],
@@ -39,7 +40,7 @@ async function generateTaskStepSuggestion({ taskId, stepId, wineryId, userId, us
           model: TaskStep,
           as: 'TaskSteps',
           required: false,
-          include: [{ model: User, as: 'Owner', attributes: ['id', 'displayName', 'email', 'role'] }]
+          include: [{ model: User, as: 'Owner', where: { wineryId }, attributes: ['id', 'displayName', 'email', 'role'], required: false }]
         }
       ],
       transaction
@@ -151,7 +152,7 @@ async function generateTaskStepSuggestion({ taskId, stepId, wineryId, userId, us
 
     return TaskStep.findOne({
       where: { id: stepId, taskId },
-      include: [{ model: User, as: 'Owner', attributes: ['id', 'displayName', 'email', 'role'] }]
+      include: [{ model: User, as: 'Owner', where: { wineryId }, attributes: ['id', 'displayName', 'email', 'role'], required: false }]
     });
   } catch (err) {
     if (!transaction.finished) await transaction.rollback();
@@ -166,8 +167,8 @@ async function actionTaskStepSuggestion({ taskId, stepId, wineryId, userId, user
     const task = await Task.findOne({
       where: { id: taskId, wineryId },
       include: [
-        { model: Member },
-        { model: User, as: 'Assignee', attributes: ['id', 'displayName', 'email', 'role'] }
+        { model: Member, where: { wineryId }, required: false },
+        { model: User, as: 'Assignee', where: { wineryId }, attributes: ['id', 'displayName', 'email', 'role'], required: false }
       ],
       transaction
     });
@@ -182,7 +183,7 @@ async function actionTaskStepSuggestion({ taskId, stepId, wineryId, userId, user
 
     const step = await TaskStep.findOne({
       where: { id: stepId, taskId },
-      include: [{ model: User, as: 'Owner', attributes: ['id', 'displayName', 'email', 'role'] }],
+      include: [{ model: User, as: 'Owner', where: { wineryId }, attributes: ['id', 'displayName', 'email', 'role'], required: false }],
       transaction
     });
     if (!step) throw new Error('Task step not found');
@@ -323,7 +324,7 @@ async function actionTaskStepSuggestion({ taskId, stepId, wineryId, userId, user
 
     const freshStep = await TaskStep.findOne({
       where: { id: stepId, taskId },
-      include: [{ model: User, as: 'Owner', attributes: ['id', 'displayName', 'email', 'role'] }]
+      include: [{ model: User, as: 'Owner', where: { wineryId }, attributes: ['id', 'displayName', 'email', 'role'], required: false }]
     });
 
     return {

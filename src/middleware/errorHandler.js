@@ -20,7 +20,7 @@ function errorHandler(err, req, res, _next) {
 
   // If the error has a known shape, use it using defaults
   const status = err.statusCode || 500;
-  const code = err.code || 'INTERNAL_ERROR';
+  const code = err.code || (status === 413 ? 'PAYLOAD_TOO_LARGE' : 'INTERNAL_ERROR');
   const message =
     status === 500
       ? 'An unexpected error occurred'
@@ -30,7 +30,9 @@ function errorHandler(err, req, res, _next) {
     error: {
       code,
       message,
-      details: err.details || undefined,
+      // Validation details are useful to clients; internal-error details may
+      // contain database/provider diagnostics and must stay server-side.
+      details: status < 500 ? err.details || undefined : undefined,
       requestId
     }
   });

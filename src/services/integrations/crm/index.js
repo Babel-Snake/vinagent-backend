@@ -1,5 +1,6 @@
 const MockCrmProvider = require('./providers/mock');
 const integrationConnectionService = require('../../integrationConnection.service');
+const { assertMockIntegrationAllowed, unsupportedProviderError } = require('../mockPolicy');
 // const Commerce7Provider = require('./providers/commerce7'); // Future
 
 class CrmIntegrationFactory {
@@ -20,14 +21,14 @@ class CrmIntegrationFactory {
 
         switch (providerName) {
             case 'mock':
+                assertMockIntegrationAllowed('CRM', config.selectedProvider || providerName);
                 return new MockCrmProvider(config);
             case 'commerce7':
                 throw new Error('Commerce7 provider not yet implemented');
             case 'winedirect':
                 throw new Error('WineDirect provider not yet implemented');
             default:
-                console.warn(`Unknown CRM provider '${providerName}', falling back to Mock.`);
-                return new MockCrmProvider(config);
+                throw unsupportedProviderError('CRM', providerName);
         }
     }
 }

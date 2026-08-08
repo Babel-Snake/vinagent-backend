@@ -9,6 +9,7 @@ const {
   STEP_TERMINAL_STATUSES,
   getOrderedTaskSteps
 } = require('./taskWorkflow.service');
+const { getUserForWinery } = require('./taskTenantScope.service');
 
 async function getStaffAssignmentReviewSteps(taskId, transaction) {
   const steps = await TaskStep.findAll({
@@ -25,22 +26,13 @@ async function resolveTaskAssignee({ assigneeId, wineryId, transaction }) {
     return null;
   }
 
-  const assignee = await User.findOne({
-    where: {
-      id: Number(assigneeId),
-      wineryId
-    },
-    transaction
+  return getUserForWinery({
+    userId: assigneeId,
+    wineryId,
+    transaction,
+    notFoundMessage: 'Assigned user not found for this winery.',
+    notFoundCode: 'ASSIGNEE_NOT_FOUND'
   });
-
-  if (!assignee) {
-    const err = new Error('Assigned user not found for this winery.');
-    err.statusCode = 404;
-    err.code = 'ASSIGNEE_NOT_FOUND';
-    throw err;
-  }
-
-  return assignee;
 }
 
 async function validateTaskAssignmentTarget({ taskId, wineryId, assigneeId, transaction }) {

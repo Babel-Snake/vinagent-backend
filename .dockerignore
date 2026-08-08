@@ -1,0 +1,15 @@
+.git
+.github
+.agents
+.codex
+.env
+.env.*
+*.log
+coverage
+docs
+frontend
+node_modules
+scripts
+src/config/serviceAccountKey.json
+src/tests
+uploads

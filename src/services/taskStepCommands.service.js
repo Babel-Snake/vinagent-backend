@@ -12,6 +12,7 @@ const {
   getOrderedTaskSteps,
   syncTaskWorkflow
 } = require('./taskWorkflow.service');
+const { assertTaskRelationshipsBelongToWinery } = require('./taskTenantScope.service');
 
 async function createTaskStep({ taskId, wineryId, userId, userRole, data }) {
   const transaction = await Task.sequelize.transaction();
@@ -33,6 +34,11 @@ async function createTaskStep({ taskId, wineryId, userId, userRole, data }) {
       action: 'add workflow steps to this task'
     });
     await recordVisibility.assertCanMutateTask(task, { wineryId, userId, userRole, transaction });
+    await assertTaskRelationshipsBelongToWinery({
+      wineryId,
+      steps: [data],
+      transaction
+    });
 
     const existingSteps = await getOrderedTaskSteps(taskId, transaction);
     const requestedSortOrder = Number.isInteger(data?.sortOrder) ? data.sortOrder : existingSteps.length;
@@ -98,7 +104,7 @@ async function updateTaskStep({ taskId, stepId, wineryId, userId, userRole, upda
   try {
     const task = await Task.findOne({
       where: { id: taskId, wineryId },
-      include: [getTaskAreaInclude()],
+      include: [getTaskAreaInclude(wineryId)],
       transaction
     });
     if (!task) throw new Error('Task not found');
@@ -127,6 +133,12 @@ async function updateTaskStep({ taskId, stepId, wineryId, userId, userRole, upda
       err.code = 'FORBIDDEN';
       throw err;
     }
+
+    await assertTaskRelationshipsBelongToWinery({
+      wineryId,
+      steps: [updates],
+      transaction
+    });
 
     const changes = {};
     const oldValues = {};

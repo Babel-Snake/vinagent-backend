@@ -13,6 +13,7 @@ const {
     digestWebhookSecret,
     parseJsonObject
 } = require('../services/integrationConnection.service');
+const { configuredWineryId } = require('../services/deploymentWinery.service');
 
 function timingSafeStringEqual(candidate, expected) {
     const candidateBuffer = Buffer.from(String(candidate || ''), 'utf8');
@@ -63,43 +64,59 @@ function constructWebhookUrl(req) {
 }
 
 function validateRetellSignature(req, res, next) {
-    const secret = process.env.RETELL_WEBHOOK_SECRET;
+    const secret = process.env.RETELL_API_KEY || process.env.RETELL_WEBHOOK_SECRET;
 
     if (!secret) {
-        if (process.env.NODE_ENV === 'production') {
-            logger.error('CRITICAL: RETELL_WEBHOOK_SECRET missing in production.');
-            return res.status(500).json({ error: 'Server configuration error' });
-        }
-        logger.warn('Skipping Retell webhook signature validation (RETELL_WEBHOOK_SECRET missing)');
-        return next();
+        logger.error('CRITICAL: Retell webhook verification key is missing.');
+        return res.status(500).json({ error: 'Server configuration error' });
     }
 
     const signature = req.headers['x-retell-signature'];
-    if (!signature) {
+    if (typeof signature !== 'string') {
         logger.warn('Missing Retell webhook signature header');
         return res.status(403).json({ error: 'Missing signature' });
     }
 
     try {
-        const payload = req.rawBody || Buffer.from(JSON.stringify(req.body));
+        const match = /^v=(\d+),d=([a-f\d]{64})$/i.exec(signature.trim());
+        if (!match) {
+            logger.warn('Malformed Retell webhook signature');
+            return res.status(403).json({ error: 'Invalid signature' });
+        }
+
+        const [, timestampText, digest] = match;
+        const timestamp = Number(timestampText);
+        const maxAgeMs = 5 * 60 * 1000;
+
+        if (!Number.isSafeInteger(timestamp) || Math.abs(Date.now() - timestamp) > maxAgeMs) {
+            logger.warn('Expired Retell webhook signature');
+            return res.status(403).json({ error: 'Invalid or expired signature' });
+        }
+
+        if (!Buffer.isBuffer(req.rawBody)) {
+            logger.error('Retell webhook raw request body is unavailable');
+            return res.status(500).json({ error: 'Server configuration error' });
+        }
+
         const computed = crypto
             .createHmac('sha256', secret)
-            .update(payload)
-            .digest('hex');
+            .update(req.rawBody)
+            .update(timestampText, 'utf8')
+            .digest();
 
-        // Timing-safe comparison
-        const signatureBuffer = Buffer.from(signature, 'hex');
-        const computedBuffer = Buffer.from(computed, 'hex');
+        const provided = Buffer.from(digest, 'hex');
 
-        if (signatureBuffer.length !== computedBuffer.length ||
-            !crypto.timingSafeEqual(signatureBuffer, computedBuffer)) {
+        if (provided.length !== computed.length || !crypto.timingSafeEqual(provided, computed)) {
             logger.warn('Invalid Retell webhook signature');
             return res.status(403).json({ error: 'Invalid signature' });
         }
 
         return next();
     } catch (err) {
-        logger.error('Error validating Retell signature', err);
+        logger.error('Error validating Retell signature', {
+            code: err.code || null,
+            error: err.message
+        });
         return res.status(500).json({ error: 'Validation error' });
     }
 }
@@ -114,9 +131,13 @@ function normalizeSignature(value) {
     return signature.startsWith('sha256=') ? signature.slice('sha256='.length) : signature;
 }
 
-function validateHmacSignature({ secret, signature, payload }) {
+const INTEGRATION_WEBHOOK_MAX_AGE_MS = 5 * 60 * 1000;
+
+function validateHmacSignature({ secret, signature, timestamp, payload }) {
     const expected = crypto
         .createHmac('sha256', String(secret || '').trim())
+        .update(String(timestamp), 'utf8')
+        .update('.', 'utf8')
         .update(payload)
         .digest('hex');
 
@@ -131,6 +152,10 @@ async function validateIntegrationWebhookSignature(req, res, next) {
         const areaId = hasAreaId ? Number.parseInt(req.params.areaId, 10) : null;
 
         if (!Number.isInteger(wineryId) || wineryId < 1 || !DOMAINS.includes(domain)) {
+            return res.status(404).json({ error: 'Webhook not found' });
+        }
+        const deploymentWineryId = configuredWineryId();
+        if (deploymentWineryId && wineryId !== deploymentWineryId) {
             return res.status(404).json({ error: 'Webhook not found' });
         }
         if (hasAreaId && (!Number.isInteger(areaId) || areaId < 1 || !AREA_DOMAINS.includes(domain))) {
@@ -170,8 +195,34 @@ async function validateIntegrationWebhookSignature(req, res, next) {
             return res.status(403).json({ error: 'Missing signature' });
         }
 
-        const payload = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
-        if (!validateHmacSignature({ secret, signature, payload })) {
+        const timestampText = String(getSingleHeader(req.headers, 'x-vinagent-webhook-timestamp') || '').trim();
+        if (!timestampText) {
+            logger.warn('Missing integration webhook timestamp header', { wineryId, domain });
+            return res.status(403).json({ error: 'Missing timestamp' });
+        }
+
+        if (!/^\d{10}$/.test(timestampText)) {
+            logger.warn('Malformed integration webhook timestamp', { wineryId, domain });
+            return res.status(403).json({ error: 'Invalid or expired timestamp' });
+        }
+
+        const timestampMs = Number(timestampText) * 1000;
+        if (!Number.isSafeInteger(timestampMs) || Math.abs(Date.now() - timestampMs) > INTEGRATION_WEBHOOK_MAX_AGE_MS) {
+            logger.warn('Expired integration webhook timestamp', { wineryId, domain });
+            return res.status(403).json({ error: 'Invalid or expired timestamp' });
+        }
+
+        if (!Buffer.isBuffer(req.rawBody)) {
+            logger.error('Integration webhook raw request body is unavailable', { wineryId, domain });
+            return res.status(500).json({ error: 'Server configuration error' });
+        }
+
+        if (!validateHmacSignature({
+            secret,
+            signature,
+            timestamp: timestampText,
+            payload: req.rawBody
+        })) {
             logger.warn('Invalid integration webhook signature', { wineryId, domain });
             return res.status(403).json({ error: 'Invalid signature' });
         }
@@ -185,7 +236,10 @@ async function validateIntegrationWebhookSignature(req, res, next) {
 
         return next();
     } catch (err) {
-        logger.error('Error validating integration webhook signature', err);
+        logger.error('Error validating integration webhook signature', {
+            code: err.code || null,
+            error: err.message
+        });
         return res.status(500).json({ error: 'Validation error' });
     }
 }
@@ -222,16 +276,20 @@ function validateTwilioSignature(req, res, next) {
         if (isValid) {
             return next();
         } else {
-            logger.warn('Invalid Twilio Signature', { signature, url });
+            logger.warn('Invalid Twilio signature');
             return res.status(403).json({ error: 'Invalid signature' });
         }
     } catch (err) {
-        logger.error('Error validating Twilio signature', err);
+        logger.error('Error validating Twilio signature', {
+            code: err.code || null,
+            error: err.message
+        });
         return res.status(500).json({ error: 'Validation error' });
     }
 }
 
 module.exports = {
+    INTEGRATION_WEBHOOK_MAX_AGE_MS,
     validateTwilioSignature,
     validateEmailSignature,
     validateRetellSignature,

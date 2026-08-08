@@ -58,7 +58,6 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
     // Edit state
     const [editingUser, setEditingUser] = useState<Staff | null>(null);
     const [editName, setEditName] = useState('');
-    const [editEmail, setEditEmail] = useState('');
     const [editRole, setEditRole] = useState('staff');
     const [editIsActive, setEditIsActive] = useState(true);
     const [editResponsibilities, setEditResponsibilities] = useState('');
@@ -120,7 +119,6 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
         setOperationError('');
         setEditingUser(user);
         setEditName(user.displayName || '');
-        setEditEmail(user.email || '');
         setEditRole(user.role || 'staff');
         setEditIsActive(user.isActive ?? true);
         setEditResponsibilities(user.responsibilities || '');
@@ -190,7 +188,6 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
         try {
             const updated = await updateStaff(editingUser.id, {
                 displayName: editName,
-                email: editEmail,
                 role: editRole,
                 isActive: editIsActive,
                 responsibilities: editResponsibilities
@@ -523,7 +520,7 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
                                     PIN
                                 </th>
                                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase text-[var(--muted)]">
-                                    Contact
+                                    Login
                                 </th>
                                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase text-[var(--muted)]">
                                     Areas
@@ -593,9 +590,7 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
                                         )}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                        <a href={`mailto:${user.email}`} className="text-blue-600 hover:text-blue-800 hover:underline">
-                                            {user.email}
-                                        </a>
+                                        {user.username ? `@${user.username}` : user.email}
                                     </td>
                                     <td className="px-6 py-4 text-sm text-gray-500">
                                         {(user.areaMemberships || []).length > 0
@@ -693,14 +688,11 @@ export function StaffManagement({ embedded = false, winery: wineryFromProps = nu
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700">Email Address</label>
-                                <input
-                                    type="email"
-                                    required
-                                    value={editEmail}
-                                    onChange={e => setEditEmail(e.target.value)}
-                                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 sm:text-sm"
-                                />
+                                <span className="block text-sm font-medium text-gray-700">Login identity</span>
+                                <div className="mt-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600">
+                                    {editingUser.username ? `@${editingUser.username}` : editingUser.email}
+                                </div>
+                                <p className="mt-1 text-xs text-gray-500">Login identity and winery assignment cannot be changed here.</p>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>

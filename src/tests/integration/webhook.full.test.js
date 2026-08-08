@@ -15,6 +15,7 @@ jest.mock('twilio', () => {
 const app = require('../../app');
 
 describe('Webhook Full Integration (with SQLite)', () => {
+    const originalDeploymentWineryId = process.env.DEPLOYMENT_WINERY_ID;
 
     beforeAll(async () => {
         // Force sync with SQLite (creates in-memory tables)
@@ -26,6 +27,13 @@ describe('Webhook Full Integration (with SQLite)', () => {
             name: 'Test Winery',
             contactPhone: '+15557654321', // Corresponds to 'To'
             contactEmail: 'winery@test.com'
+        });
+
+        await Winery.create({
+            id: 2,
+            name: 'Second Test Winery',
+            contactPhone: '+15559876543',
+            contactEmail: 'second-winery@test.com'
         });
 
         await Member.create({
@@ -42,9 +50,17 @@ describe('Webhook Full Integration (with SQLite)', () => {
             enableWineClubModule: true,
             enableOrdersModule: true
         });
+
+        await WinerySettings.create({
+            wineryId: 2,
+            enableWineClubModule: true,
+            enableOrdersModule: true
+        });
     });
 
     afterAll(async () => {
+        if (originalDeploymentWineryId === undefined) delete process.env.DEPLOYMENT_WINERY_ID;
+        else process.env.DEPLOYMENT_WINERY_ID = originalDeploymentWineryId;
         await sequelize.close();
     });
 
@@ -165,6 +181,85 @@ describe('Webhook Full Integration (with SQLite)', () => {
         expect(res.status).toBe(200);
         expect(res.body.duplicate).toBe(true);
         expect(res.body.taskId).toBeNull();
+    });
+
+    it('accepts the same provider message ID for different wineries', async () => {
+        const sharedMessageSid = 'SM_SHARED_ACROSS_WINERIES_001';
+        const firstResponse = await request(app)
+            .post('/api/webhooks/sms')
+            .set('x-twilio-signature', 'mock-signature')
+            .send({
+                From: '+15551234567',
+                To: '+15557654321',
+                Body: 'Can you confirm your opening hours?',
+                MessageSid: sharedMessageSid
+            });
+        const secondResponse = await request(app)
+            .post('/api/webhooks/sms')
+            .set('x-twilio-signature', 'mock-signature')
+            .send({
+                From: '+15550002222',
+                To: '+15559876543',
+                Body: 'Can you confirm your opening hours?',
+                MessageSid: sharedMessageSid
+            });
+
+        expect(firstResponse.status).toBe(200);
+        expect(secondResponse.status).toBe(200);
+        expect(firstResponse.body.duplicate).not.toBe(true);
+        expect(secondResponse.body.duplicate).not.toBe(true);
+
+        const messages = await Message.findAll({
+            where: { source: 'sms', externalId: sharedMessageSid },
+            order: [['wineryId', 'ASC']]
+        });
+        expect(messages).toHaveLength(2);
+        expect(messages.map(message => message.wineryId)).toEqual([1, 2]);
+    });
+
+    it('rejects contact-routed webhooks for a winery outside the configured deployment', async () => {
+        process.env.DEPLOYMENT_WINERY_ID = '1';
+        try {
+            const response = await request(app)
+                .post('/api/webhooks/sms')
+                .set('x-twilio-signature', 'mock-signature')
+                .send({
+                    From: '+15550003333',
+                    To: '+15559876543',
+                    Body: 'This belongs to the other winery',
+                    MessageSid: 'SM_WRONG_DEPLOYMENT_WINERY_001'
+                });
+
+            expect(response.status).toBe(400);
+            expect(response.body.error.code).toBe('UNKNOWN_DESTINATION');
+            expect(await Message.count({ where: { externalId: 'SM_WRONG_DEPLOYMENT_WINERY_001' } })).toBe(0);
+        } finally {
+            if (originalDeploymentWineryId === undefined) delete process.env.DEPLOYMENT_WINERY_ID;
+            else process.env.DEPLOYMENT_WINERY_ID = originalDeploymentWineryId;
+        }
+    });
+
+    it('enforces duplicate provider IDs in the database within one winery', async () => {
+        const duplicateData = {
+            source: 'email',
+            direction: 'inbound',
+            body: 'Database idempotency check',
+            externalId: 'EMAIL_DB_UNIQUE_001',
+            receivedAt: new Date(),
+            wineryId: 1
+        };
+
+        await Message.create(duplicateData);
+
+        await expect(Message.create(duplicateData)).rejects.toMatchObject({
+            name: 'SequelizeUniqueConstraintError'
+        });
+
+        await expect(Message.create({ ...duplicateData, wineryId: 2 })).resolves.toMatchObject({
+            wineryId: 2,
+            source: 'email',
+            externalId: 'EMAIL_DB_UNIQUE_001'
+        });
     });
 
     it('should drop message for unknown winery', async () => {

@@ -4,53 +4,23 @@
 const dotenv = require('dotenv');
 dotenv.config();
 
-const { assertPinSessionSecret } = require('../utils/pinAuth');
+const {
+  formatProductionEnvironmentIssues,
+  validateProductionEnvironment
+} = require('../services/deploymentEnvironment.service');
 
 // Fail-Fast for Production
 if (process.env.NODE_ENV === 'production') {
-  const requiredVars = [
-    'FIREBASE_PRIVATE_KEY',
-    'FIREBASE_CLIENT_EMAIL',
-    'FIREBASE_PROJECT_ID',
-    'DB_HOST',
-    'DB_USER',
-    'DB_PASSWORD',
-    'DB_NAME',
-    'PUBLIC_URL',
-    'EMAIL_WEBHOOK_SECRET',
-    'RETELL_WEBHOOK_SECRET',
-    'TWILIO_ACCOUNT_SID',
-    'TWILIO_AUTH_TOKEN',
-    'TWILIO_PHONE_NUMBER'
-  ];
-
-  const missing = requiredVars.filter(key => !process.env[key]);
-  if (!process.env.PIN_SESSION_SECRET && !process.env.SESSION_SECRET) {
-    missing.push('PIN_SESSION_SECRET or SESSION_SECRET');
-  }
-
-  if (missing.length > 0) {
+  const validation = validateProductionEnvironment(process.env);
+  if (!validation.ready) {
     // Use console.error because logger might depend on invalid config or not be initialized fully
-    console.error(`FATAL: Missing required environment variables: ${missing.join(', ')}`);
-    process.exit(1);
-  }
-
-  // CRITICAL: Reject any attempt to enable test bypass in production
-  if (process.env.ALLOW_TEST_AUTH_BYPASS === 'true') {
-    console.error('FATAL: ALLOW_TEST_AUTH_BYPASS=true is forbidden in production. Exiting.');
-    process.exit(1);
-  }
-
-  try {
-    assertPinSessionSecret();
-  } catch (error) {
-    console.error(`FATAL: ${error.message}`);
+    console.error(`FATAL: Invalid production configuration: ${formatProductionEnvironmentIssues(validation.issues)}`);
     process.exit(1);
   }
 }
 
 module.exports = {
-  port: process.env.PORT || 3000,
+  port: process.env.PORT || 4000,
   db: {
     host: process.env.DB_HOST || 'localhost',
     port: Number(process.env.DB_PORT) || 3306,

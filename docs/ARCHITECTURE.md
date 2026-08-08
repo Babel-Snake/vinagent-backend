@@ -17,6 +17,7 @@ The main subsystems are:
 * Winery knowledge/configuration services
 * Public token-based self-service flows
 * Operational analytics over workflow, response, identity, and follow-up data
+* Billing-ready usage metering over immutable events, counters, gauges, and engagement aggregates
 * Dashboard frontend (`frontend/`)
 * MySQL persistence via `Sequelize`
 
@@ -30,15 +31,15 @@ The canonical backend flow is:
 4. The backend creates a `Task` and, where available, an initial `TaskStep` plan.
 5. The inbound `Message` is linked onto the task communication timeline.
 6. Staff review, annotate, assign, action, or reject the task through `/api/tasks`.
-7. If a task is actioned, `execution.service` may perform best-effort automation.
+7. If a task is actioned, `execution.service` performs the supported automation. Execution failures roll the task transition back; unsupported live providers fail closed.
 8. Outbound notifications are logged back onto the same task as outbound `Message` records.
 9. If the case closes with explicit follow-up, customer no response, or escalation semantics, `taskService` can create or update a managed child follow-up task.
 10. All staff actions and automation linkage events are written to `TaskAction`.
-11. If the task requires a secure member confirmation, a `MemberActionToken` is created and the member completes the action through `/api/public/...`.
+11. If the task requires secure member confirmation, a hashed-at-rest `MemberActionToken` is created and the member completes the action through the public `/confirm-address` page and `/api/public/...` API.
 
 ## 3. Routing Surface
 
-The app mounts all API routes under `/api`.
+The app mounts business API routes under `/api`. Container probes are exposed separately as `/health/live` and `/health/ready` so readiness can check the database, migrations, storage, and production configuration without dashboard authentication.
 
 Current route groups:
 
@@ -46,6 +47,14 @@ Current route groups:
 * `/api/public/*` - token-based member self-service
 * `/api/tasks/*` - task list/detail/update flows
 * `/api/tasks/flags/*` - per-user task flags
+* `/api/notices/*` - noticeboard, acknowledgement, comments, and task links
+* `/api/integration-events/*` - review queue for imported provider events
+* `/api/operational-areas/*` - operational-area membership and configuration
+* `/api/requests/*` - operational requests and decisions
+* `/api/operational-records/*` - operational notes/records
+* `/api/operations/*` - cross-record search and classification
+* `/api/projects/*` - projects, items, dependencies, participants, and audit events
+* `/api/attachments/*` - scoped upload/download/delete flows
 * `/api/members/*`
 * `/api/staff/*`
 * `/api/users/*`
@@ -53,6 +62,7 @@ Current route groups:
 * `/api/notifications/*`
 * `/api/calendar/*`
 * `/api/analytics/*`
+* `/api/usage/*` - aggregate usage reporting, activity heartbeat, snapshots, and reconciliation
 
 Global middleware currently handles:
 
@@ -62,6 +72,7 @@ Global middleware currently handles:
 * CORS
 * rate limiting
 * centralized error responses
+* authenticated API request counter bucketing without raw paths or query data
 
 ## 4. Layering
 
@@ -320,6 +331,12 @@ The current backend models winery context as a core winery record plus modular p
 * winery contacts
 
 This data is used both by the dashboard and by the AI layer.
+
+### 10.1 Usage Metering
+
+`usageTracking.service.js` owns the provider-independent measurement contract. Durable business facts use tenant-scoped idempotent `UsageEvent` rows; authenticated HTTP volume uses hourly `UsageCounterBucket` rows; seats, members, and attachment bytes use winery-local daily `UsageGaugeSnapshot` rows. The dashboard activity heartbeat produces only bounded engaged seconds and daily aggregate activity.
+
+The `/usage` dashboard and `/api/usage/summary` expose winery aggregates to managers/admins. Payment-provider identifiers are not returned. OpenTelemetry remains operational observability and is not the commercial ledger. See `USAGE_METERING.md` for exact definitions and reconciliation gates.
 
 ## 11. Security Model
 

@@ -3,10 +3,14 @@ const { Op } = require('sequelize');
 const { OperationalArea, User, UserAreaMembership } = require('../models');
 const AppError = require('../utils/AppError');
 const { hashPin, validatePin, verifyPin } = require('../utils/pinAuth');
+const { buildManagedStaffEmail, normalizeStaffUsername } = require('../utils/staffIdentity');
+const { safeRecordUsageEvent } = require('../services/usageTracking.service');
+const { METRICS } = require('../services/usageMetricCatalog');
 
 function staffPayload(user) {
     return {
         id: user.id,
+        username: user.username,
         displayName: user.displayName,
         email: user.email,
         createdAt: user.createdAt,
@@ -95,6 +99,10 @@ exports.createStaff = async (req, res, next) => {
             throw new AppError('Only Managers or Admins can create staff accounts.', 403, 'FORBIDDEN');
         }
 
+        if (Object.prototype.hasOwnProperty.call(req.body, 'wineryId')) {
+            throw new AppError('Winery assignment is controlled by the authenticated account.', 400, 'IMMUTABLE_WINERY');
+        }
+
         const wineryId = requester.wineryId;
         if (!wineryId) {
             throw new AppError('Manager must belong to a winery to create staff.', 400, 'WINERY_REQUIRED');
@@ -103,20 +111,21 @@ exports.createStaff = async (req, res, next) => {
         // 1. Generate Internal Email
         // Format: username.w{ID}@vinagent.internal
         // Sanitize username (alphanumeric only)
-        const cleanUsername = username.toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (cleanUsername.length < 3) {
-            throw new AppError('Username must be at least 3 alphanumeric characters.', 400, 'INVALID_USERNAME');
+        const cleanDisplayName = typeof username === 'string' ? username.trim() : '';
+        const cleanUsername = normalizeStaffUsername(cleanDisplayName);
+        if (cleanUsername.length < 3 || cleanUsername.length > 64) {
+            throw new AppError('Username must be 3 to 64 alphanumeric characters.', 400, 'INVALID_USERNAME');
         }
 
         // Password Validation (min 8 chars, at least 1 number)
-        if (!password || password.length < 8) {
+        if (typeof password !== 'string' || password.length < 8) {
             throw new AppError('Password must be at least 8 characters.', 400, 'WEAK_PASSWORD');
         }
         if (!/\d/.test(password)) {
             throw new AppError('Password must contain at least one number.', 400, 'WEAK_PASSWORD');
         }
 
-        const email = `${cleanUsername}.w${wineryId}@vinagent.internal`;
+        const email = buildManagedStaffEmail(cleanUsername, wineryId);
         if (pin) {
             await assertPinAvailable({ pin, wineryId });
         }
@@ -127,7 +136,7 @@ exports.createStaff = async (req, res, next) => {
             const userRecord = await admin.auth().createUser({
                 email: email,
                 password: password,
-                displayName: username, // Use original casing for display
+                displayName: cleanDisplayName,
                 emailVerified: true
             });
             uid = userRecord.uid;
@@ -141,12 +150,25 @@ exports.createStaff = async (req, res, next) => {
         // 3. Create in Database
         const newUser = await User.create({
             firebaseUid: uid,
+            username: cleanUsername,
             email: email,
-            displayName: username,
+            displayName: cleanDisplayName,
             role: 'staff',
             wineryId: wineryId,
             pinHash: pin ? hashPin(pin) : null,
             pinUpdatedAt: pin ? new Date() : null
+        });
+
+        await safeRecordUsageEvent({
+            wineryId,
+            actorUserId: requester.id,
+            metricKey: METRICS.SEAT_ACTIVATED,
+            quantity: 1,
+            occurredAt: newUser.createdAt || new Date(),
+            sourceType: 'user',
+            sourceId: newUser.id,
+            idempotencyKey: `user:${newUser.id}:seat:activated:${new Date(newUser.createdAt || Date.now()).toISOString()}`,
+            dimensions: { role: newUser.role }
         });
 
         res.status(201).json({
@@ -179,6 +201,7 @@ exports.listStaff = async (req, res, next) => {
             },
             attributes: [
                 'id',
+                'username',
                 'displayName',
                 'email',
                 'createdAt',
@@ -211,21 +234,28 @@ exports.listStaff = async (req, res, next) => {
 exports.updateStaff = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { displayName, email, role, isActive, responsibilities } = req.body;
+        const { displayName, role, isActive, responsibilities } = req.body;
         const requester = req.user;
 
         if (!requester.wineryId) {
             throw new AppError('User not associated with a winery.', 400, 'WINERY_REQUIRED');
         }
 
-        const staffToUpdate = await User.findByPk(id);
-        if (!staffToUpdate) {
-            throw new AppError('Staff member not found.', 404, 'NOT_FOUND');
+        if (['wineryId', 'username', 'email'].some(field => Object.prototype.hasOwnProperty.call(req.body, field))) {
+            throw new AppError(
+                'Winery, username, and login email are immutable in staff management.',
+                400,
+                'IMMUTABLE_STAFF_IDENTITY'
+            );
         }
 
-        // Verify staff belongs to manager's winery
-        if (staffToUpdate.wineryId !== requester.wineryId) {
-            throw new AppError('Unauthorized to modify this staff member.', 403, 'FORBIDDEN');
+        if (displayName !== undefined && (typeof displayName !== 'string' || displayName.trim().length < 2)) {
+            throw new AppError('Display name must be at least 2 characters.', 400, 'INVALID_DISPLAY_NAME');
+        }
+
+        const staffToUpdate = await User.findOne({ where: { id, wineryId: requester.wineryId } });
+        if (!staffToUpdate) {
+            throw new AppError('Staff member not found.', 404, 'NOT_FOUND');
         }
 
         // Protect Admins
@@ -239,8 +269,7 @@ exports.updateStaff = async (req, res, next) => {
         }
 
         const fbUpdates = {};
-        if (displayName !== undefined) fbUpdates.displayName = displayName;
-        if (email !== undefined) fbUpdates.email = email;
+        if (displayName !== undefined) fbUpdates.displayName = displayName.trim();
         if (isActive !== undefined) fbUpdates.disabled = !isActive;
 
         if (Object.keys(fbUpdates).length > 0) {
@@ -248,14 +277,30 @@ exports.updateStaff = async (req, res, next) => {
             await admin.auth().updateUser(staffToUpdate.firebaseUid, fbUpdates);
         }
 
+        const wasActive = Boolean(staffToUpdate.isActive);
+
         // 2. Update Database
-        if (displayName !== undefined) staffToUpdate.displayName = displayName;
-        if (email !== undefined) staffToUpdate.email = email;
+        if (displayName !== undefined) staffToUpdate.displayName = displayName.trim();
         if (role !== undefined) staffToUpdate.role = role;
         if (isActive !== undefined) staffToUpdate.isActive = isActive;
         if (responsibilities !== undefined) staffToUpdate.responsibilities = responsibilities;
 
         await staffToUpdate.save();
+
+        if (isActive !== undefined && Boolean(isActive) !== wasActive) {
+            const metricKey = isActive ? METRICS.SEAT_ACTIVATED : METRICS.SEAT_DEACTIVATED;
+            await safeRecordUsageEvent({
+                wineryId: requester.wineryId,
+                actorUserId: requester.id,
+                metricKey,
+                quantity: 1,
+                occurredAt: staffToUpdate.updatedAt || new Date(),
+                sourceType: 'user',
+                sourceId: staffToUpdate.id,
+                idempotencyKey: `user:${staffToUpdate.id}:seat:${isActive ? 'activated' : 'deactivated'}:${new Date(staffToUpdate.updatedAt || Date.now()).toISOString()}`,
+                dimensions: { role: staffToUpdate.role }
+            });
+        }
 
         res.json({
             message: 'Staff updated successfully.',
@@ -294,13 +339,9 @@ exports.resetStaffPassword = async (req, res, next) => {
             throw new AppError('Access code must contain at least one number.', 400, 'WEAK_PASSWORD');
         }
 
-        const staffToUpdate = await User.findByPk(id);
+        const staffToUpdate = await User.findOne({ where: { id, wineryId: requester.wineryId } });
         if (!staffToUpdate) {
             throw new AppError('Staff member not found.', 404, 'NOT_FOUND');
-        }
-
-        if (staffToUpdate.wineryId !== requester.wineryId) {
-            throw new AppError('Unauthorized to modify this staff member.', 403, 'FORBIDDEN');
         }
 
         if (staffToUpdate.role === 'admin') {
@@ -343,14 +384,9 @@ exports.deleteStaff = async (req, res, next) => {
             throw new AppError('User not associated with a winery.', 400, 'WINERY_REQUIRED');
         }
 
-        const staffToDelete = await User.findByPk(id);
+        const staffToDelete = await User.findOne({ where: { id, wineryId: requester.wineryId } });
         if (!staffToDelete) {
             throw new AppError('Staff member not found.', 404, 'NOT_FOUND');
-        }
-
-        // Verify staff belongs to manager's winery
-        if (staffToDelete.wineryId !== requester.wineryId) {
-            throw new AppError('Unauthorized to delete this staff member.', 403, 'FORBIDDEN');
         }
 
         // Protect Admins

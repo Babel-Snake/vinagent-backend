@@ -1,4 +1,4 @@
-const { User, UserAreaMembership } = require('../models');
+const { OperationalArea, User, UserAreaMembership } = require('../models');
 
 async function listUsers(req, res, next) {
     try {
@@ -9,7 +9,15 @@ async function listUsers(req, res, next) {
             include: [{
                 model: UserAreaMembership,
                 as: 'AreaMemberships',
+                where: { wineryId },
                 attributes: ['areaId', 'membershipRole'],
+                include: [{
+                    model: OperationalArea,
+                    as: 'Area',
+                    where: { wineryId },
+                    attributes: [],
+                    required: true
+                }],
                 required: false
             }]
         });

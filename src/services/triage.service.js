@@ -13,6 +13,7 @@ const { STEP_TYPES, WAITING_ON } = require('../utils/validation');
 const { inferStepType, inferWaitingOn, getWorkflowTemplateForTask } = require('./taskWorkflowTemplates');
 const { classifyMessageHeuristically } = require('./taskClassificationHeuristics');
 const { classifyOperationalType } = require('./operationalClassification.service');
+const { getMemberForWinery } = require('./taskTenantScope.service');
 
 function normalizeSuggestedSteps(rawSteps, context = {}) {
     const fallback = getWorkflowTemplateForTask(context);
@@ -84,7 +85,10 @@ async function triageMessage(message, context = {}) {
             // Merge AI result
             result = { ...result, ...aiResult };
         } catch (err) {
-            logger.warn('AI Triage unavailable/failed', { error: err.message, body: messageBody.substring(0, 50) });
+            logger.warn('AI Triage unavailable/failed', {
+                error: err.message,
+                messageLength: messageBody.length
+            });
             // 3. Fallback to Heuristics (Legacy Logic)
             result = classifyMessageHeuristically(messageBody, { ...context, customerType, suggestedChannel });
         }
@@ -179,8 +183,6 @@ async function classifyStaffNote(input) {
         requesterPhone,
         suggestedChannel
     } = input;
-    const { Member } = require('../models');
-
     // Simulate message object for triage
     const source = inboundMethod === 'email'
         ? 'email'
@@ -212,11 +214,9 @@ async function classifyStaffNote(input) {
     let foundMember = null;
 
     if (memberId) {
-        const member = await Member.findByPk(memberId);
-        if (member) {
-            context.member = member;
-            foundMember = member;
-        }
+        const member = await getMemberForWinery({ memberId, wineryId });
+        context.member = member;
+        foundMember = member;
     } else {
         // Try to extract and find member from text
         foundMember = await extractMemberFromText(text, wineryId);
@@ -292,7 +292,6 @@ async function extractMemberFromText(text, wineryId) {
 
             if (member) {
                 logger.info('Extracted member from staff note', {
-                    name,
                     memberId: member.id,
                     wineryId
                 });

@@ -42,9 +42,9 @@ Copy-Item .env.example .env
 Important current variables:
 
 ```text
-PORT=3000
+PORT=4000
 NODE_ENV=development
-CORS_ORIGIN=http://localhost:3001
+CORS_ORIGIN=http://localhost:3000
 
 DB_HOST=localhost
 DB_PORT=3306
@@ -65,7 +65,7 @@ AI_SKIP=false
 TWILIO_ACCOUNT_SID=...
 TWILIO_AUTH_TOKEN=...
 TWILIO_PHONE_NUMBER=...
-RETELL_WEBHOOK_SECRET=...
+RETELL_API_KEY=key_...
 ```
 
 Important:
@@ -73,6 +73,7 @@ Important:
 * the repo uses `DB_*` variable names, not `DATABASE_*`
 * `ALLOW_TEST_AUTH_BYPASS` should only be enabled for local test/dev scenarios
 * production outbound SMS requires `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_PHONE_NUMBER`; otherwise SMS sends fail closed
+* `RETELL_API_KEY` must be the Retell key marked for webhook authentication; `RETELL_WEBHOOK_SECRET` is accepted only as a legacy variable-name fallback
 
 ## 4. Create the Database
 
@@ -101,9 +102,10 @@ npm run dev
 
 Useful health checks:
 
-* `http://localhost:3000/`
-* `http://localhost:3000/health`
-* `http://localhost:3000/api/health`
+* `http://localhost:4000/`
+* `http://localhost:4000/health/live`
+* `http://localhost:4000/health/ready`
+* `http://localhost:4000/api/health` (legacy liveness alias)
 
 ## 6. Run Tests
 

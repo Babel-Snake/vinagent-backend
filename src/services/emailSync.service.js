@@ -5,6 +5,8 @@ const logger = require('../config/logger');
 const taskService = require('./taskService');
 const triageService = require('./triage.service');
 const { redact, scrubPII } = require('../utils/sanitizer');
+const { safeRecordUsageEvent } = require('./usageTracking.service');
+const { METRICS } = require('./usageMetricCatalog');
 
 function positiveIntegerFromEnv(name, fallback) {
     const parsed = Number.parseInt(process.env[name], 10);
@@ -112,6 +114,18 @@ async function ingestEmailMessage({ winery, message, provider, transaction }) {
         wineryId: winery.id,
         memberId: member ? member.id : null
     }, { transaction });
+
+    await safeRecordUsageEvent({
+        wineryId: winery.id,
+        metricKey: METRICS.MESSAGE_RECEIVED,
+        quantity: 1,
+        occurredAt: storedMessage.createdAt || new Date(),
+        sourceType: 'message',
+        sourceId: storedMessage.id,
+        idempotencyKey: `message:${storedMessage.id}:received`,
+        dimensions: { channel: 'email', provider },
+        transaction
+    });
 
     const triageResult = await triageService.triageMessage(
         { body: body || message.subject || '', source: 'email' },

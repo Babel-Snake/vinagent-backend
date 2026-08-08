@@ -14,8 +14,8 @@ We continue to use Firebase Auth as the security backbone, but "mask" it from th
     *   Inputs: Name (e.g. "Sarah"), Code/Password (e.g. "1234").
     *   System: Auto-generates a dummy email (e.g. `sarah@winery1.vinagent.internal`) and creates the Firebase User in the background.
 2.  **Login**: Staff sees a simplified "Staff Login" screen.
-    *   Inputs: Winery Code (optional, or implicit from URL), Username ("Sarah"), Password ("1234").
-    *   Frontend: Constructs the dummy email and authenticates against Firebase.
+    *   Inputs: Immutable username ("Sarah") and password/access code.
+    *   The backend resolves that username only inside the deployment winery and returns the managed Firebase login identity. The browser never chooses a winery or constructs an identity from a client-supplied winery ID.
 3.  **Security**: Inherits all Firebase protections (rate limiting, secure storage).
 
 **Pros:**
@@ -44,3 +44,11 @@ We build a parallel authentication system just for staff.
 
 ## Recommendation
 **Proceed with Option A**. It delivers the exact "Internal Password" experience requested but keeps the system secure and maintainable.
+
+## Winery and identity binding
+
+- Set `DEPLOYMENT_WINERY_ID` for each production deployment. It constrains every Firebase, access-code, and PIN session to that winery and is changed only by a deployment operator. A database containing exactly one winery can be resolved automatically for local development; zero or multiple candidates fail closed for public staff login.
+- Firebase ID tokens are joined to application users by the stored, unique `firebaseUid`, never by mutable email.
+- `Users.username` is immutable, normalized, and unique within a winery. Existing staff identities are backfilled deterministically from their managed login email, display name, email local-part, or staff ID; collisions receive a stable ID suffix so no login-capable staff account is left without a username.
+- Ordinary profile and staff-management APIs do not accept winery, username, or login-email reassignment. A future cross-winery move must be a separate platform-administrator workflow with its own audit and relationship migration rules.
+- Display names, roles, responsibilities, active status, passwords, and PINs can still be managed without changing the staff login identity.

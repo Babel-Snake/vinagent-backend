@@ -14,7 +14,10 @@ if (process.env.NODE_ENV === 'production' || process.env.ENABLE_TELEMETRY === 't
         sdk.start();
         logger.info('OpenTelemetry SDK started');
     } catch (err) {
-        logger.error('Failed to start OpenTelemetry SDK', err);
+        logger.error('Failed to start OpenTelemetry SDK', {
+            code: err.code || null,
+            error: err.message
+        });
     }
 }
 

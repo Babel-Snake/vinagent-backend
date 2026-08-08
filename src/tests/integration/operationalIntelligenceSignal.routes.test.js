@@ -11,19 +11,23 @@ const {
   OperationalIntelligenceSignal,
   OperationalRequest,
   Task,
+  TaskArea,
   User,
   Winery,
   WinerySettings
 } = require('../../models');
+const operationalIntelligenceService = require('../../services/operationalIntelligence.service');
 const signalSchedulerService = require('../../services/operationalIntelligenceScheduler.service');
 
 describe('Operational intelligence signal routes', () => {
   const auth = 'Bearer mock-token';
   let area;
+  let foreignArea;
 
   beforeAll(async () => {
     await sequelize.sync({ force: true });
     await Winery.create({ id: 1, name: 'Signal Winery', timeZone: 'Australia/Adelaide' });
+    await Winery.create({ id: 2, name: 'Foreign Signal Winery', timeZone: 'Australia/Adelaide' });
     await User.create({
       id: 7,
       firebaseUid: 'stub-uid',
@@ -40,7 +44,16 @@ describe('Operational intelligence signal routes', () => {
       role: 'staff',
       wineryId: 1
     });
+    await User.create({
+      id: 9,
+      firebaseUid: 'foreign-signal-user',
+      email: 'foreign-signal@example.com',
+      displayName: 'Foreign Signal User',
+      role: 'manager',
+      wineryId: 2
+    });
     area = await OperationalArea.create({ wineryId: 1, name: 'Cellar Door', sortOrder: 1 });
+    foreignArea = await OperationalArea.create({ wineryId: 2, name: 'Foreign Private Area', sortOrder: 1 });
   });
 
   afterAll(async () => {
@@ -106,6 +119,107 @@ describe('Operational intelligence signal routes', () => {
       .expect(200);
     expect(reviewed.body.signal.status).toBe('ACKNOWLEDGED');
     expect(reviewed.body.signal.reviewNote).toBe('Watch next week.');
+  });
+
+  it('does not hydrate foreign associations on a legacy local signal', async () => {
+    const foreignTask = await Task.create({
+      wineryId: 2,
+      category: 'OPERATIONS',
+      subType: 'FOREIGN_SIGNAL_TASK',
+      status: 'PENDING',
+      workflowState: 'NOT_STARTED',
+      priority: 'normal',
+      areaScope: 'ORGANISATION',
+      payload: { summary: 'Foreign private action' },
+      createdBy: 9,
+      updatedBy: 9
+    });
+    const signal = await OperationalIntelligenceSignal.create({
+      wineryId: 1,
+      signalType: 'TREND',
+      status: 'OPEN',
+      severity: 'warning',
+      title: 'Legacy association mismatch',
+      fingerprint: `legacy-foreign-${Date.now()}`,
+      reviewDueAt: new Date(Date.now() + 60 * 60 * 1000),
+      areaId: foreignArea.id,
+      createdBy: 9,
+      reviewedBy: 9,
+      reviewOwnerUserId: 9,
+      actionTaskId: foreignTask.id
+    });
+    const auditEvent = await OperationalIntelligenceConfigAuditEvent.create({
+      wineryId: 1,
+      actorUserId: 9,
+      eventType: 'CONFIG_UPDATED',
+      beforeSnapshot: {},
+      afterSnapshot: {},
+      changedKeys: []
+    });
+
+    const response = await request(app)
+      .get('/api/operations/intelligence/signals')
+      .set('Authorization', auth)
+      .expect(200);
+    const result = response.body.signals.find(item => item.id === signal.id);
+    expect(result.Area).toBeNull();
+    expect(result.Creator).toBeNull();
+    expect(result.Reviewer).toBeNull();
+    expect(result.ReviewOwner).toBeNull();
+    expect(result.ActionTask).toBeNull();
+    expect(JSON.stringify(result)).not.toContain('foreign-signal@example.com');
+    expect(JSON.stringify(result)).not.toContain('Foreign Private Area');
+
+    await signalSchedulerService.sendSignalReviewReminders({
+      wineryId: 1,
+      now: new Date(),
+      dueSoonHours: 24
+    });
+    const reminderNotifications = await Notification.findAll();
+    const signalReminders = reminderNotifications.filter(item => Number(item.data?.signalId) === Number(signal.id));
+    expect(signalReminders).toHaveLength(1);
+    expect(signalReminders[0].userId).toBe(7);
+    expect(signalReminders[0].data.wineryId).toBe(1);
+
+    const config = await request(app)
+      .get('/api/operations/intelligence/config')
+      .set('Authorization', auth)
+      .expect(200);
+    expect(config.body.auditEvents.find(item => item.id === auditEvent.id).Actor).toBeNull();
+    expect(JSON.stringify(config.body)).not.toContain('foreign-signal@example.com');
+
+    const localTask = await Task.create({
+      wineryId: 1,
+      category: 'OPERATIONS',
+      subType: 'LEGACY_AREA_ASSOCIATION',
+      status: 'PENDING',
+      workflowState: 'NOT_STARTED',
+      priority: 'normal',
+      areaScope: 'AREAS',
+      payload: { summary: 'Local task with a corrupt area link' },
+      createdBy: 7,
+      updatedBy: 7
+    });
+    await TaskArea.create({
+      wineryId: 1,
+      taskId: localTask.id,
+      areaId: foreignArea.id,
+      relationshipType: 'PRIMARY'
+    });
+    const now = Date.now();
+    const intelligence = await operationalIntelligenceService.getOperationalIntelligence({
+      wineryId: 1,
+      start: new Date(now - 24 * 60 * 60 * 1000),
+      end: new Date(now + 24 * 60 * 60 * 1000)
+    });
+    expect(intelligence.trends.byArea.some(item => item.areaId === foreignArea.id)).toBe(false);
+    expect(JSON.stringify(intelligence)).not.toContain('Foreign Private Area');
+    await TaskArea.destroy({ where: { taskId: localTask.id } });
+    await localTask.destroy();
+    await Promise.all(signalReminders.map(notification => notification.destroy()));
+    await signal.destroy();
+    await auditEvent.destroy();
+    await foreignTask.destroy();
   });
 
   it('lets managers read and update operational intelligence controls', async () => {

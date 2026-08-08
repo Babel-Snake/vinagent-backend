@@ -2,6 +2,7 @@ import type { AreaMembership, Task } from './api';
 
 export interface Staff {
     id: number;
+    username?: string | null;
     displayName: string;
     email: string;
     createdAt: string;

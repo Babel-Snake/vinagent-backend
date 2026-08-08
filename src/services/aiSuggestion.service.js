@@ -1,5 +1,6 @@
 const { Task, Member, Message, TaskAction, TaskStep, User } = require('../models');
 const logger = require('../config/logger');
+const { getUserForWinery } = require('./taskTenantScope.service');
 
 function resolveContactForChannel(task, channel) {
     const manualIntake = task.payload?.manualIntake || {};
@@ -54,10 +55,11 @@ async function generateAiSuggestion(taskId, wineryId, options = {}) {
         const task = await Task.findOne({
             where: { id: taskId, wineryId },
             include: [
-                { model: Member },
+                { model: Member, where: { wineryId }, required: false },
                 {
                     model: Message,
                     as: 'Messages',
+                    where: { wineryId },
                     required: false,
                     separate: true,
                     order: [['receivedAt', 'ASC'], ['id', 'ASC']],
@@ -67,7 +69,13 @@ async function generateAiSuggestion(taskId, wineryId, options = {}) {
                     model: TaskStep,
                     as: 'TaskSteps',
                     required: false,
-                    include: [{ model: User, as: 'Owner', attributes: ['id', 'displayName', 'role'] }]
+                    include: [{
+                        model: User,
+                        as: 'Owner',
+                        where: { wineryId },
+                        attributes: ['id', 'displayName', 'role'],
+                        required: false
+                    }]
                 }
             ]
         });
@@ -149,7 +157,12 @@ async function generateAiSuggestion(taskId, wineryId, options = {}) {
         if (includeHistory) {
             const actions = await TaskAction.findAll({
                 where: { taskId },
-                include: [{ model: User, attributes: ['id', 'displayName', 'role'] }],
+                include: [{
+                    model: User,
+                    where: { wineryId },
+                    attributes: ['id', 'displayName', 'role'],
+                    required: false
+                }],
                 order: [['createdAt', 'ASC']],
                 limit: 15
             });
@@ -212,7 +225,13 @@ async function generateAiSuggestion(taskId, wineryId, options = {}) {
 
             // Auto-assign if AI suggested a specific staff member and task is unassigned
             if (aiResult.suggestedAssigneeId && !task.assigneeId) {
-                task.assigneeId = aiResult.suggestedAssigneeId;
+                const suggestedAssignee = await getUserForWinery({
+                    userId: aiResult.suggestedAssigneeId,
+                    wineryId: task.wineryId,
+                    attributes: ['id'],
+                    notFoundMessage: 'Suggested assignee not found for this winery.'
+                });
+                task.assigneeId = suggestedAssignee.id;
             }
 
             // Save suggested recipient and CC
@@ -252,7 +271,7 @@ async function generateAiSuggestion(taskId, wineryId, options = {}) {
 
         // Try to update task with error message so UI shows feedback
         try {
-            const task = await Task.findByPk(taskId);
+            const task = await Task.findOne({ where: { id: taskId, wineryId } });
             if (task) {
                 task.suggestedReplyBody = `[AI Error: ${err.message}]`;
                 await task.save();

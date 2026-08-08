@@ -33,33 +33,36 @@ exports.getAiContext = async (wineryId, { areaIds = [] } = {}) => {
                 include: [{
                     model: OperationalArea,
                     as: 'OperationalAreas',
+                    where: { wineryId },
                     attributes: ['id', 'name'],
-                    through: { attributes: ['relationshipType'] }
+                    through: { attributes: ['relationshipType'], where: { wineryId } },
+                    required: false
                 }]
             },
             {
                 model: OperationalArea,
                 as: 'OperationalAreas',
                 where: {
+                    wineryId,
                     isActive: true,
                     ...(scopedAreaIds.length > 0 ? { id: scopedAreaIds } : {})
                 },
                 required: false,
                 separate: true,
                 include: [
-                    { model: OperationalAreaProfile, as: 'Profile', required: false },
-                    { model: OperationalAreaBookingsConfig, as: 'BookingsConfig', required: false },
-                    { model: OperationalAreaIntegrationConfig, as: 'IntegrationConfig', required: false },
-                    { model: WineryFAQItem, as: 'FAQs', where: { isActive: true }, required: false, separate: true },
-                    { model: WinerySop, as: 'Sops', where: { isActive: true }, required: false, separate: true },
-                    { model: WineryBookingType, as: 'BookingTypes', where: { isActive: true }, required: false, separate: true },
+                    { model: OperationalAreaProfile, as: 'Profile', where: { wineryId }, required: false },
+                    { model: OperationalAreaBookingsConfig, as: 'BookingsConfig', where: { wineryId }, required: false },
+                    { model: OperationalAreaIntegrationConfig, as: 'IntegrationConfig', where: { wineryId }, required: false },
+                    { model: WineryFAQItem, as: 'FAQs', where: { wineryId, isActive: true }, required: false, separate: true },
+                    { model: WinerySop, as: 'Sops', where: { wineryId, isActive: true }, required: false, separate: true },
+                    { model: WineryBookingType, as: 'BookingTypes', where: { wineryId, isActive: true }, required: false, separate: true },
                     {
                         model: AreaProductListing,
                         as: 'ProductListings',
-                        where: { isAvailable: true },
+                        where: { wineryId, isAvailable: true },
                         required: false,
                         separate: true,
-                        include: [{ model: WineryProduct, as: 'Product', where: { isActive: true }, required: true }]
+                        include: [{ model: WineryProduct, as: 'Product', where: { wineryId, isActive: true }, required: true }]
                     }
                 ]
             }

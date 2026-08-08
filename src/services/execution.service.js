@@ -22,6 +22,15 @@ function _cloneTaskPayload(task) {
     return {};
 }
 
+function _integrationErrorDetails(taskId, error) {
+    return {
+        taskId,
+        code: error?.code || null,
+        status: error?.response?.status || error?.status || null,
+        error: error?.message || 'Integration operation failed'
+    };
+}
+
 async function _getPrimaryAreaId(task, transaction) {
     if (task.areaScope !== 'AREAS') return null;
     const primary = await TaskArea.findOne({
@@ -206,14 +215,17 @@ async function _sendNotification(task, member, transaction) {
             target: target.to,
             subject: target.subject,
             cc: target.cc || null,
-            summary: notifyErr.message
+            summary: `Notification delivery failed (${notifyErr.code || 'DELIVERY_FAILED'}).`
         });
         throw notifyErr;
     }
 }
 
 async function _executeAddressChange(task, transaction) {
-    const member = await Member.findByPk(task.memberId, { transaction });
+    const member = await Member.findOne({
+        where: { id: task.memberId, wineryId: task.wineryId },
+        transaction
+    });
     if (!member) {
         throw new Error(`Member not found for task ${task.id}`);
     }
@@ -236,7 +248,7 @@ async function _executeAddressChange(task, transaction) {
         transaction
     });
 
-    const confirmationUrl = memberActionTokenService.getConfirmationUrl(tokenRecord.token);
+    const confirmationUrl = memberActionTokenService.getConfirmationUrl(tokenRecord.rawToken);
     const baseBody = task.suggestedReplyBody || 'Hi, please confirm your address update using this secure link:';
     const replyBody = baseBody.includes('http')
         ? baseBody
@@ -279,7 +291,10 @@ async function _executeAddressChange(task, transaction) {
 }
 
 async function _executeBooking(task, transaction) {
-    const member = await Member.findByPk(task.memberId, { transaction });
+    const member = await Member.findOne({
+        where: { id: task.memberId, wineryId: task.wineryId },
+        transaction
+    });
     if (!member) throw new Error('Member not found for booking');
 
     const bookingFactory = require('./integrations/booking');
@@ -340,7 +355,7 @@ async function _executeBooking(task, transaction) {
             status: 'FAILED',
             summary: bookingError.message
         });
-        logger.error('Booking Provider Failed', bookingError);
+        logger.error('Booking provider failed', _integrationErrorDetails(task.id, bookingError));
         throw new Error(`Booking Failed: ${bookingError.message}`);
     }
 
@@ -349,7 +364,10 @@ async function _executeBooking(task, transaction) {
 
 async function _executeOrderUpdate(task, transaction) {
     const crmFactory = require('./integrations/crm');
-    const member = task.memberId ? await Member.findByPk(task.memberId, { transaction }) : null;
+    const member = task.memberId ? await Member.findOne({
+        where: { id: task.memberId, wineryId: task.wineryId },
+        transaction
+    }) : null;
     const customerProfile = _extractRequesterProfile(task, member);
 
     if (!customerProfile.email && !customerProfile.phone) {
@@ -429,7 +447,7 @@ async function _executeOrderUpdate(task, transaction) {
             orderId: task.payload?.orderId || null,
             summary: orderError.message
         });
-        logger.error('Order writeback failed', orderError);
+        logger.error('Order writeback failed', _integrationErrorDetails(task.id, orderError));
         throw new Error(`Order Writeback Failed: ${orderError.message}`);
     }
 
@@ -442,7 +460,12 @@ async function executeTask(task, transaction, settings) {
         settings = await WinerySettings.findOne({ where: { wineryId: task.wineryId }, transaction });
     }
 
-    let member = task.memberId ? await Member.findByPk(task.memberId, { transaction }) : null;
+    let member = task.memberId ? await Member.findOne({
+        where: { id: task.memberId, wineryId: task.wineryId },
+        transaction
+    }) : null;
+
+    let completedExternalAction = false;
 
     if (_isAddressTask(task)) {
         if (!settings || !settings.enableSecureLinks) {
@@ -470,6 +493,7 @@ async function executeTask(task, transaction, settings) {
         } else {
             _validateBookingPayload(task);
             member = await _executeBooking(task, transaction);
+            completedExternalAction = true;
         }
     } else if (_isOrderTask(task)) {
         if (settings && settings.enableOrdersModule === false) {
@@ -484,6 +508,7 @@ async function executeTask(task, transaction, settings) {
         } else {
             _validateOrderPayload(task);
             member = await _executeOrderUpdate(task, transaction);
+            completedExternalAction = true;
         }
     } else {
         logger.info('No automatic execution logic for task', { type: task.subType || task.type, taskId: task.id });
@@ -493,7 +518,11 @@ async function executeTask(task, transaction, settings) {
         try {
             await _sendNotification(task, member, transaction);
         } catch (notifyErr) {
-            logger.error('Failed to send notification', notifyErr);
+            logger.error('Failed to send notification', _integrationErrorDetails(task.id, notifyErr));
+            // Do not roll back a booking/CRM action that has already succeeded in an
+            // external system. Notification-only and secure-link workflows remain
+            // atomic: if delivery fails, the task cannot be marked as actioned.
+            if (!completedExternalAction) throw notifyErr;
         }
     }
 }

@@ -16,8 +16,18 @@ function getAIService() {
         return new MockAdapter();
     }
 
-    if (skip || !apiKey) {
-        logger.warn(skip ? 'AI Service explicitly skipped via AI_SKIP.' : 'No API key found for AI Service. Using Mock Adapter.');
+    if (skip) {
+        logger.warn('AI Service explicitly skipped via AI_SKIP; using deterministic heuristic adapter.');
+        return new MockAdapter();
+    }
+
+    if (!apiKey) {
+        if (process.env.NODE_ENV === 'production') {
+            const error = new Error('OPENAI_API_KEY is required in production unless AI_SKIP=true.');
+            error.code = 'AI_CONFIGURATION_ERROR';
+            throw error;
+        }
+        logger.warn('No API key found for AI Service. Using deterministic heuristic adapter outside production.');
         return new MockAdapter();
     }
 
@@ -25,8 +35,11 @@ function getAIService() {
         case 'openai':
             return new OpenAIAdapter(apiKey, model);
         default:
-            logger.warn(`Unknown AI Provider: ${provider}. Defaulting to OpenAI.`);
-            return new OpenAIAdapter(apiKey, model);
+            {
+                const error = new Error(`Unknown AI provider '${provider}'.`);
+                error.code = 'AI_CONFIGURATION_ERROR';
+                throw error;
+            }
     }
 }
 

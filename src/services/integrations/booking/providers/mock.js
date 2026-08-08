@@ -1,12 +1,13 @@
 const BookingAdapter = require('../booking.adapter');
+const logger = require('../../../../config/logger');
 
 class MockBookingProvider extends BookingAdapter {
     isAuthenticated() {
         return true;
     }
 
-    async findAvailability({ date, time, pax }) {
-        console.log(`[MockBooking] Checking availability for ${date} @ ${time} for ${pax} pax`);
+    async findAvailability({ date: _date, time, pax }) {
+        logger.info('Mock booking availability checked', { pax });
         // Always return available for mock
         return {
             available: true,
@@ -15,7 +16,10 @@ class MockBookingProvider extends BookingAdapter {
     }
 
     async createReservation(details) {
-        console.log('[MockBooking] Creating reservation:', details);
+        logger.info('Mock booking reservation created', {
+            pax: details.pax || null,
+            hasCustomerContact: Boolean(details.email || details.phone)
+        });
         return {
             referenceCode: 'MOCK-' + Math.floor(Math.random() * 10000),
             status: 'CONFIRMED',

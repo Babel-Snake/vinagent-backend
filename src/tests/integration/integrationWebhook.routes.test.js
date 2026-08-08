@@ -15,6 +15,7 @@ const {
 } = require('../../models');
 
 describe('Generic Integration Webhook Routes', () => {
+  const originalDeploymentWineryId = process.env.DEPLOYMENT_WINERY_ID;
   const authToken = 'Bearer mock-token';
   const webhookSecret = 'generic-webhook-secret-123';
   const areaWebhookSecret = 'area-webhook-secret-123';
@@ -42,6 +43,8 @@ describe('Generic Integration Webhook Routes', () => {
   });
 
   afterAll(async () => {
+    if (originalDeploymentWineryId === undefined) delete process.env.DEPLOYMENT_WINERY_ID;
+    else process.env.DEPLOYMENT_WINERY_ID = originalDeploymentWineryId;
     await sequelize.close();
   });
 
@@ -51,9 +54,15 @@ describe('Generic Integration Webhook Routes', () => {
     await WineryIntegrationConfig.destroy({ where: {} });
   });
 
-  function signBody(secret, body) {
+  function currentTimestamp() {
+    return String(Math.floor(Date.now() / 1000));
+  }
+
+  function signBody(secret, timestamp, body) {
     return crypto
       .createHmac('sha256', secret)
+      .update(timestamp)
+      .update('.')
       .update(body)
       .digest('hex');
   }
@@ -128,6 +137,21 @@ describe('Generic Integration Webhook Routes', () => {
     expect(await IntegrationEvent.count()).toBe(0);
   });
 
+  it('rejects a webhook path outside the operator-configured deployment winery', async () => {
+    process.env.DEPLOYMENT_WINERY_ID = '1';
+    try {
+      await request(app)
+        .post('/api/webhooks/integration/2/crm')
+        .send({ externalEventId: 'wrong-deployment-winery-1' })
+        .expect(404);
+
+      expect(await IntegrationEvent.count()).toBe(0);
+    } finally {
+      if (originalDeploymentWineryId === undefined) delete process.env.DEPLOYMENT_WINERY_ID;
+      else process.env.DEPLOYMENT_WINERY_ID = originalDeploymentWineryId;
+    }
+  });
+
   it('rejects generic webhooks with an invalid HMAC signature', async () => {
     await configureWebhookSecret();
 
@@ -140,16 +164,85 @@ describe('Generic Integration Webhook Routes', () => {
         body: 'This payload should not be stored.'
       }
     });
+    const timestamp = currentTimestamp();
 
     const res = await request(app)
       .post('/api/webhooks/integration/1/crm')
       .set('content-type', 'application/json')
       .set('x-vinagent-webhook-secret', webhookSecret)
+      .set('x-vinagent-webhook-timestamp', timestamp)
       .set('x-vinagent-webhook-signature', 'sha256=bad')
       .send(body)
       .expect(403);
 
     expect(res.body.error).toBe('Invalid signature');
+    expect(await IntegrationEvent.count()).toBe(0);
+  });
+
+  it('rejects the legacy body-only signature when the timestamp is missing', async () => {
+    await configureWebhookSecret();
+    const body = JSON.stringify({
+      provider: 'zapier',
+      eventType: 'notice.imported',
+      externalEventId: 'missing-timestamp-1'
+    });
+    const legacySignature = crypto.createHmac('sha256', webhookSecret).update(body).digest('hex');
+
+    const res = await request(app)
+      .post('/api/webhooks/integration/1/crm')
+      .set('content-type', 'application/json')
+      .set('x-vinagent-webhook-secret', webhookSecret)
+      .set('x-vinagent-webhook-signature', `sha256=${legacySignature}`)
+      .send(body)
+      .expect(403);
+
+    expect(res.body.error).toBe('Missing timestamp');
+    expect(await IntegrationEvent.count()).toBe(0);
+  });
+
+  it('rejects correctly signed webhooks outside the five-minute window', async () => {
+    await configureWebhookSecret();
+    const body = JSON.stringify({
+      provider: 'zapier',
+      eventType: 'notice.imported',
+      externalEventId: 'expired-timestamp-1'
+    });
+    const timestamp = String(Math.floor(Date.now() / 1000) - 301);
+    const signature = signBody(webhookSecret, timestamp, body);
+
+    const res = await request(app)
+      .post('/api/webhooks/integration/1/crm')
+      .set('content-type', 'application/json')
+      .set('x-vinagent-webhook-secret', webhookSecret)
+      .set('x-vinagent-webhook-timestamp', timestamp)
+      .set('x-vinagent-webhook-signature', `sha256=${signature}`)
+      .send(body)
+      .expect(403);
+
+    expect(res.body.error).toBe('Invalid or expired timestamp');
+    expect(await IntegrationEvent.count()).toBe(0);
+  });
+
+  it('requires a stable external event ID for durable replay deduplication', async () => {
+    await configureWebhookSecret();
+    const body = JSON.stringify({
+      provider: 'zapier',
+      eventType: 'notice.imported',
+      rawPayload: { title: 'Missing durable ID' }
+    });
+    const timestamp = currentTimestamp();
+    const signature = signBody(webhookSecret, timestamp, body);
+
+    const res = await request(app)
+      .post('/api/webhooks/integration/1/crm')
+      .set('content-type', 'application/json')
+      .set('x-vinagent-webhook-secret', webhookSecret)
+      .set('x-vinagent-webhook-timestamp', timestamp)
+      .set('x-vinagent-webhook-signature', `sha256=${signature}`)
+      .send(body)
+      .expect(400);
+
+    expect(res.body.error.code).toBe('EXTERNAL_EVENT_ID_REQUIRED');
     expect(await IntegrationEvent.count()).toBe(0);
   });
 
@@ -167,12 +260,14 @@ describe('Generic Integration Webhook Routes', () => {
         posted_by: 'Ops automation'
       }
     });
-    const signature = signBody(webhookSecret, body);
+    const timestamp = currentTimestamp();
+    const signature = signBody(webhookSecret, timestamp, body);
 
     const createRes = await request(app)
       .post('/api/webhooks/integration/1/crm')
       .set('content-type', 'application/json')
       .set('x-vinagent-webhook-secret', webhookSecret)
+      .set('x-vinagent-webhook-timestamp', timestamp)
       .set('x-vinagent-webhook-signature', `sha256=${signature}`)
       .send(body)
       .expect(201);
@@ -194,6 +289,7 @@ describe('Generic Integration Webhook Routes', () => {
       .post('/api/webhooks/integration/1/crm')
       .set('content-type', 'application/json')
       .set('x-vinagent-webhook-secret', webhookSecret)
+      .set('x-vinagent-webhook-timestamp', timestamp)
       .set('x-vinagent-webhook-signature', `sha256=${signature}`)
       .send(body)
       .expect(200);
@@ -210,12 +306,14 @@ describe('Generic Integration Webhook Routes', () => {
       externalEventId: 'restaurant-booking-change-1',
       rawPayload: { summary: 'Guest requested a booking time change.' }
     });
-    const signature = signBody(areaWebhookSecret, body);
+    const timestamp = currentTimestamp();
+    const signature = signBody(areaWebhookSecret, timestamp, body);
 
     const response = await request(app)
       .post(`/api/webhooks/integration/1/booking/${area.id}`)
       .set('content-type', 'application/json')
       .set('x-vinagent-webhook-secret', areaWebhookSecret)
+      .set('x-vinagent-webhook-timestamp', timestamp)
       .set('x-vinagent-webhook-signature', `sha256=${signature}`)
       .send(body)
       .expect(201);
@@ -239,12 +337,14 @@ describe('Generic Integration Webhook Routes', () => {
       eventType: 'task.suggested',
       externalEventId: 'invalid-area-path-1'
     });
-    const signature = signBody(webhookSecret, body);
+    const timestamp = currentTimestamp();
+    const signature = signBody(webhookSecret, timestamp, body);
 
     await request(app)
       .post('/api/webhooks/integration/1/crm/0')
       .set('content-type', 'application/json')
       .set('x-vinagent-webhook-secret', webhookSecret)
+      .set('x-vinagent-webhook-timestamp', timestamp)
       .set('x-vinagent-webhook-signature', `sha256=${signature}`)
       .send(body)
       .expect(404);

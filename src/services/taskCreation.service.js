@@ -17,6 +17,9 @@ const {
   STAFF_ASSIGNMENT_TARGET_ROLE
 } = require('./taskWorkflowPolicy.service');
 const { createTaskSteps, syncTaskWorkflow } = require('./taskWorkflow.service');
+const { assertTaskRelationshipsBelongToWinery } = require('./taskTenantScope.service');
+const { safeRecordUsageEvent } = require('./usageTracking.service');
+const { METRICS } = require('./usageMetricCatalog');
 
 async function determineAutoAssignee(wineryId, data) {
   if (data.sentiment === 'NEGATIVE') {
@@ -105,6 +108,14 @@ async function createTask({
     } = data;
     const requestedAssigneeId = assigneeId || null;
     const requestedSteps = Array.isArray(steps) ? steps : [];
+    await assertTaskRelationshipsBelongToWinery({
+      wineryId,
+      memberId: data.identityResolution?.memberId || memberId || null,
+      assigneeId: requestedAssigneeId,
+      parentTaskId,
+      steps: requestedSteps,
+      transaction: activeTransaction
+    });
     const areaPlacement = await operationalAreaService.validateAreaPlacement({
       wineryId,
       userId,
@@ -278,6 +289,23 @@ async function createTask({
       parentTaskId: parentTaskId || null,
       areaScope: areaPlacement.areaScope
     }, { transaction: activeTransaction });
+
+    await safeRecordUsageEvent({
+      wineryId,
+      actorUserId: persistedCreatorId,
+      metricKey: METRICS.TASK_CREATED,
+      quantity: 1,
+      occurredAt: task.createdAt || new Date(),
+      sourceType: 'task',
+      sourceId: task.id,
+      idempotencyKey: `task:${task.id}:created`,
+      dimensions: {
+        source,
+        category: task.category,
+        automation: 'false'
+      },
+      transaction: activeTransaction
+    });
 
     await replaceTaskAreas({
       taskId: task.id,

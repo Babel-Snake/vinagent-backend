@@ -125,23 +125,33 @@ describe('TaskService Unit Tests', () => {
             expect(task.save).toHaveBeenCalled();
         });
 
-        it('should keep the status change when execution fails after actioning', async () => {
+        it('should roll back the status change when execution fails after actioning', async () => {
             const invalidTask = {
                 ...mockTask,
                 payload: {},
                 save: jest.fn().mockResolvedValue(true),
                 changed: jest.fn().mockReturnValue(['status'])
             };
+            const transaction = {
+                commit: jest.fn(),
+                rollback: jest.fn(),
+                finished: false
+            };
+            Task.sequelize.transaction.mockResolvedValueOnce(transaction);
             Task.findOne.mockResolvedValue(invalidTask);
             executionService.executeTask.mockRejectedValue(new Error('execution failed'));
 
-            const result = await taskService.updateTask({
+            await expect(taskService.updateTask({
                 ...defaultParams,
                 updates: { status: 'ACTIONED' }
+            })).rejects.toMatchObject({
+                statusCode: 502,
+                code: 'EXECUTION_FAILED'
             });
 
             expect(invalidTask.save).toHaveBeenCalled();
-            expect(result.status).toBe('ACTIONED');
+            expect(transaction.rollback).toHaveBeenCalled();
+            expect(transaction.commit).not.toHaveBeenCalled();
         });
 
         it('should allow transition to ACTIONED if payload is valid', async () => {

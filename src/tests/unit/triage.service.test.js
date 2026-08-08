@@ -8,7 +8,7 @@ jest.mock('../../models', () => ({
         findOne: jest.fn()
     },
     Member: {
-        findByPk: jest.fn()
+        findOne: jest.fn()
     }
 }));
 
@@ -81,7 +81,7 @@ describe('Triage Service (with AI)', () => {
 
         // Mock Member lookup
         const { Member } = require('../../models');
-        Member.findByPk.mockResolvedValue({ id: 99, wineryId: 1 });
+        Member.findOne.mockResolvedValue({ id: 99, wineryId: 1 });
 
         const result = await classifyStaffNote({
             text: 'Printer is broken',
@@ -91,6 +91,23 @@ describe('Triage Service (with AI)', () => {
 
         expect(result.category).toBe('OPERATIONS');
         expect(result.suggestedTitle).toBe('OPERATIONS - OPERATIONS MAINTENANCE REQUEST');
+    });
+
+    test('rejects a selected member outside the authenticated winery before AI sees their data', async () => {
+        const { Member } = require('../../models');
+        Member.findOne.mockResolvedValue(null);
+
+        await expect(classifyStaffNote({
+            text: 'Please review this customer request',
+            memberId: 99,
+            wineryId: 1,
+            userId: 5
+        })).rejects.toMatchObject({ statusCode: 404, code: 'NOT_FOUND' });
+
+        expect(Member.findOne).toHaveBeenCalledWith(expect.objectContaining({
+            where: { id: 99, wineryId: 1 }
+        }));
+        expect(aiService.classify).not.toHaveBeenCalled();
     });
 
     it('should detect MEMBER customer type if context provided', async () => {

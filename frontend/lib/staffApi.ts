@@ -59,7 +59,7 @@ export async function createStaff(data: { username: string; password: string; pi
     return (await res.json()).staff;
 }
 
-export async function updateStaff(id: number, data: { displayName?: string; email?: string; role?: string; isActive?: boolean; responsibilities?: string }): Promise<Staff> {
+export async function updateStaff(id: number, data: { displayName?: string; role?: string; isActive?: boolean; responsibilities?: string }): Promise<Staff> {
     const res = await fetch(`${API_BASE}/staff/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'Authorization': await getAuthToken() },
@@ -97,7 +97,6 @@ export async function deleteStaff(id: number): Promise<void> {
 export async function resolveStaff(username: string): Promise<{ email: string; wineryId: number }> {
     const res = await fetch(`${API_BASE}/public/resolve-staff?username=${encodeURIComponent(username)}`, { cache: 'no-store' });
     if (!res.ok) {
-        if (res.status === 409) throw new Error('AMBIGUOUS');
         throw await responseError(res, 'Failed to resolve staff user');
     }
     return res.json();
@@ -109,15 +108,15 @@ export async function getMyProfile(): Promise<ProfileResponse> {
     return res.json();
 }
 
-export async function getPinConfig(wineryId: number): Promise<{
+export async function getPinConfig(): Promise<{
     wineryId: number; wineryName?: string; pinLoginEnabled: boolean; allowManagerBasicPin: boolean; pinIdleTimeoutSeconds: number;
 }> {
-    const res = await fetch(`${API_BASE}/public/pin-config?wineryId=${encodeURIComponent(String(wineryId))}`, { cache: 'no-store' });
+    const res = await fetch(`${API_BASE}/public/pin-config`, { cache: 'no-store' });
     if (!res.ok) throw await responseError(res, 'Failed to fetch PIN login settings');
     return res.json();
 }
 
-export async function pinLogin(data: { wineryId: number; pin: string }): Promise<PinSession> {
+export async function pinLogin(data: { pin: string }): Promise<PinSession> {
     const res = await fetch(`${API_BASE}/public/pin-login`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
     });

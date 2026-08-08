@@ -1,5 +1,6 @@
 const axios = require('axios');
 const EmailAdapter = require('../email.adapter');
+const { getAxiosOutboundPolicy } = require('../../../../utils/outboundHttpPolicy');
 
 function encodeUserId(userId) {
     return encodeURIComponent(userId);
@@ -54,6 +55,7 @@ class OutlookGraphEmailProvider extends EmailAdapter {
             `${this.tokenBaseUrl}/${encodeURIComponent(this.tenantId)}/oauth2/v2.0/token`,
             body.toString(),
             {
+                ...getAxiosOutboundPolicy(),
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded'
                 }
@@ -117,6 +119,7 @@ class OutlookGraphEmailProvider extends EmailAdapter {
 
         const url = `${this.graphBaseUrl}/users/${encodeUserId(this.mailboxAddress)}/mailFolders/${encodeURIComponent(folderId)}/messages?${params.toString()}`;
         const response = await axios.get(url, {
+            ...getAxiosOutboundPolicy(),
             headers: {
                 Authorization: `Bearer ${token}`,
                 Prefer: 'outlook.body-content-type="text"'
@@ -166,6 +169,7 @@ class OutlookGraphEmailProvider extends EmailAdapter {
                 saveToSentItems: true
             },
             {
+                ...getAxiosOutboundPolicy(),
                 headers: {
                     Authorization: `Bearer ${token}`,
                     'Content-Type': 'application/json'

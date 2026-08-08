@@ -21,6 +21,11 @@ describe('Attachment Routes', () => {
       timeZone: 'Australia/Adelaide',
       contactEmail: 'attachments@example.com'
     });
+    await Winery.create({
+      id: 2,
+      name: 'Other Attachment Winery',
+      timeZone: 'Australia/Adelaide'
+    });
 
     await User.create({
       id: 7,
@@ -29,6 +34,15 @@ describe('Attachment Routes', () => {
       displayName: 'Attachment User',
       role: 'manager',
       wineryId: winery.id
+    });
+
+    await User.create({
+      id: 9,
+      firebaseUid: 'attachment-foreign-user-9',
+      email: 'attachment-foreign@example.com',
+      displayName: 'Foreign Attachment User',
+      role: 'manager',
+      wineryId: 2
     });
 
     await User.create({
@@ -208,5 +222,37 @@ describe('Attachment Routes', () => {
       .set('Authorization', authToken)
       .send(uploadPayload({ entityType: 'NOTICE', entityId: notice.id, filename: 'staff-upload.txt' }))
       .expect(403);
+  });
+
+  it('does not hydrate a foreign uploader or follow a storage key into another winery', async () => {
+    const task = await Task.create({
+      wineryId: winery.id,
+      status: 'PENDING',
+      category: 'GENERAL',
+      subType: 'TENANT_STORAGE',
+      assigneeId: 7
+    });
+    const created = await request(app)
+      .post('/api/attachments')
+      .set('Authorization', authToken)
+      .send(uploadPayload({ entityId: task.id }))
+      .expect(201);
+    const attachment = await Attachment.findByPk(created.body.attachment.id);
+    await attachment.update({
+      uploadedBy: 9,
+      storageKey: require('path').join('2', 'foreign-file.txt')
+    });
+
+    const list = await request(app)
+      .get(`/api/attachments?entityType=TASK&entityId=${task.id}`)
+      .set('Authorization', authToken)
+      .expect(200);
+    expect(list.body.attachments[0].Uploader).toBeNull();
+    expect(JSON.stringify(list.body)).not.toContain('attachment-foreign@example.com');
+
+    await request(app)
+      .get(`/api/attachments/${attachment.id}/download`)
+      .set('Authorization', authToken)
+      .expect(400);
   });
 });

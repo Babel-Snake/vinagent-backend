@@ -28,11 +28,6 @@ function firstString(...values) {
   return null;
 }
 
-function positiveInt(value) {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
 function timestampToIso(value) {
   if (!value) return null;
   const numeric = Number(value);
@@ -56,26 +51,6 @@ function calculateDurationSeconds(call) {
   }
 
   return null;
-}
-
-function resolveWineryId(rawPayload = {}, context = {}) {
-  const call = objectValue(rawPayload.call);
-  const metadata = objectValue(call.metadata || rawPayload.metadata);
-  const dynamicVariables = objectValue(call.retell_llm_dynamic_variables || rawPayload.retell_llm_dynamic_variables);
-
-  return positiveInt(
-    context.wineryId
-    || rawPayload.wineryId
-    || rawPayload.winery_id
-    || metadata.wineryId
-    || metadata.winery_id
-    || metadata.vinagentWineryId
-    || metadata.vinagent_winery_id
-    || dynamicVariables.wineryId
-    || dynamicVariables.winery_id
-    || dynamicVariables.vinagentWineryId
-    || dynamicVariables.vinagent_winery_id
-  );
 }
 
 function buildRetellCallPayload(rawPayload) {
@@ -152,7 +127,7 @@ function buildRetellCallPayload(rawPayload) {
   };
 }
 
-function buildRetellIntegrationEvent(rawPayload = {}, context = {}) {
+function buildRetellIntegrationEvent(rawPayload = {}) {
   const retellEvent = firstString(rawPayload.event, rawPayload.event_type) || 'unknown';
   const callPayload = buildRetellCallPayload(rawPayload);
   const externalCallId = callPayload.externalCallId;
@@ -187,7 +162,6 @@ function buildRetellIntegrationEvent(rawPayload = {}, context = {}) {
 
   return {
     shouldStore: true,
-    wineryId: resolveWineryId(rawPayload, context),
     retellEvent,
     externalCallId,
     event: {
@@ -212,6 +186,5 @@ function buildRetellIntegrationEvent(rawPayload = {}, context = {}) {
 module.exports = {
   ACTIONABLE_EVENTS,
   STORED_PASSIVE_EVENTS,
-  buildRetellIntegrationEvent,
-  resolveWineryId
+  buildRetellIntegrationEvent
 };

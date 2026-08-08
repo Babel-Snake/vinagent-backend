@@ -3,6 +3,7 @@ require('dotenv').config();
 const crypto = require('crypto');
 const admin = require('../config/firebase');
 const db = require('../models');
+const { buildManagedStaffEmail, normalizeStaffUsername } = require('../utils/staffIdentity');
 const {
     SIDEWOOD_USER_ALIASES,
     SIDEWOOD_USERS: users,
@@ -679,7 +680,7 @@ const customers = [
 ];
 
 function internalStaffEmail(username, wineryId) {
-    return `${username.toLowerCase().replace(/[^a-z0-9]/g, '')}.w${wineryId}@vinagent.internal`;
+    return buildManagedStaffEmail(username, wineryId);
 }
 
 function readOptionalEnv(name, { minLength = 8 } = {}) {
@@ -758,6 +759,7 @@ async function migrateLegacySidewoodUsers(winery) {
             displayName: definition.displayName
         });
         await legacyUser.update({
+            username: normalizeStaffUsername(definition.username),
             email,
             displayName: definition.displayName,
             role: definition.role,
@@ -950,6 +952,7 @@ async function seedSidewoodEstate() {
 
             usersByUsername[user.username] = await upsertOne(db.User, { email }, {
                 firebaseUid,
+                username: normalizeStaffUsername(user.username),
                 displayName: user.displayName,
                 role: user.role,
                 responsibilities: user.responsibilities || null,

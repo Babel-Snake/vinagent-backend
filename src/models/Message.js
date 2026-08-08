@@ -45,7 +45,14 @@ module.exports = (sequelize, DataTypes) => {
             sequelize,
             modelName: 'Message',
             tableName: 'Messages',
-            timestamps: true
+            timestamps: true,
+            indexes: [
+                {
+                    name: 'messages_winery_source_external_id_unique',
+                    unique: true,
+                    fields: ['wineryId', 'source', 'externalId']
+                }
+            ]
         }
     );
 

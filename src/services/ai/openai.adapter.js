@@ -1,6 +1,34 @@
 const AIAdapter = require('./ai.adapter');
 const OpenAI = require('openai');
 const logger = require('../../config/logger');
+const { getOutboundHttpTimeoutMs } = require('../../utils/outboundHttpPolicy');
+const { safeRecordUsageEvent } = require('../usageTracking.service');
+const { METRICS } = require('../usageMetricCatalog');
+
+async function recordCompletionUsage(completion, { wineryId, model, operation }) {
+    if (!wineryId || !completion?.id) return;
+    const common = {
+        wineryId,
+        occurredAt: completion.created ? new Date(completion.created * 1000) : new Date(),
+        sourceType: 'openai_completion',
+        sourceId: completion.id
+    };
+    const dimensions = { provider: 'openai', model, operation };
+    const usage = completion.usage || {};
+    const records = [
+        [METRICS.AI_REQUEST, 1, { ...dimensions, result: 'success' }, 'request'],
+        [METRICS.AI_INPUT_TOKENS, Number(usage.prompt_tokens || 0), dimensions, 'input'],
+        [METRICS.AI_OUTPUT_TOKENS, Number(usage.completion_tokens || 0), dimensions, 'output'],
+        [METRICS.AI_TOTAL_TOKENS, Number(usage.total_tokens || 0), dimensions, 'total']
+    ];
+    await Promise.all(records.map(([metricKey, quantity, metricDimensions, suffix]) => safeRecordUsageEvent({
+        ...common,
+        metricKey,
+        quantity,
+        idempotencyKey: `openai:${completion.id}:${suffix}`,
+        dimensions: metricDimensions
+    })));
+}
 
 function formatResponseChannel(channel) {
     if (channel === 'email') return 'email';
@@ -57,7 +85,11 @@ function stripIrrelevantEmailWarning(action, channel, responseContact) {
 class OpenAIAdapter extends AIAdapter {
     constructor(apiKey, model = 'gpt-4o-mini') {
         super();
-        this.client = new OpenAI({ apiKey });
+        this.client = new OpenAI({
+            apiKey,
+            timeout: getOutboundHttpTimeoutMs(process.env.AI_HTTP_TIMEOUT_MS || 30_000),
+            maxRetries: 1
+        });
         this.model = model;
     }
 
@@ -188,6 +220,11 @@ Return a JSON object with the following fields:
                 ],
                 response_format: { type: 'json_object' }
             });
+            await recordCompletionUsage(strategistCompletion, {
+                wineryId: context.wineryId,
+                model: 'gpt-4o',
+                operation: 'classification_strategy'
+            });
 
             const strategistResult = JSON.parse(strategistCompletion.choices[0].message.content);
             strategistResult.suggestedAction = stripIrrelevantEmailWarning(
@@ -246,6 +283,11 @@ Return a JSON object with EXACTLY ONE field:
                 ],
                 response_format: { type: 'json_object' }
             });
+            await recordCompletionUsage(copywriterCompletion, {
+                wineryId: context.wineryId,
+                model: this.model,
+                operation: 'classification_copywriting'
+            });
 
             const copywriterResult = JSON.parse(copywriterCompletion.choices[0].message.content);
 
@@ -261,11 +303,16 @@ Return a JSON object with EXACTLY ONE field:
         }
     }
 
-    async generate(prompt) {
+    async generate(prompt, context = {}) {
         // Simple generation wrapper
         const completion = await this.client.chat.completions.create({
             model: this.model,
             messages: [{ role: 'user', content: prompt }]
+        });
+        await recordCompletionUsage(completion, {
+            wineryId: context.wineryId,
+            model: this.model,
+            operation: context.operation || 'generation'
         });
         return completion.choices[0].message.content;
     }

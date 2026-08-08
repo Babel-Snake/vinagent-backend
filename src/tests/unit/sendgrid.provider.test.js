@@ -12,11 +12,13 @@ describe('SendGrid notification provider', () => {
     }
 
     function mockLogger() {
-        jest.doMock('../../config/logger', () => ({
+        const logger = {
             info: jest.fn(),
             warn: jest.fn(),
             error: jest.fn()
-        }));
+        };
+        jest.doMock('../../config/logger', () => logger);
+        return logger;
     }
 
     afterEach(() => {
@@ -27,7 +29,7 @@ describe('SendGrid notification provider', () => {
     test('uses mock email outside production when credentials are incomplete', async () => {
         process.env.NODE_ENV = 'test';
         delete process.env.SENDGRID_API_KEY;
-        mockLogger();
+        const logger = mockLogger();
 
         const provider = require('../../services/notifications/providers/sendgrid.provider');
         const result = await provider.sendEmail({
@@ -39,6 +41,10 @@ describe('SendGrid notification provider', () => {
 
         expect(result.provider).toBe('sendgrid');
         expect(result.id).toMatch(/^mock-email-/);
+        const logOutput = JSON.stringify(logger.info.mock.calls);
+        expect(logOutput).not.toContain('guest@example.com');
+        expect(logOutput).not.toContain('winery@example.com');
+        expect(logOutput).not.toContain('Welcome');
     });
 
     test('fails closed in production when credentials are incomplete', async () => {
@@ -75,7 +81,11 @@ describe('SendGrid notification provider', () => {
         expect(post).toHaveBeenCalledWith(
             'https://api.sendgrid.com/v3/mail/send',
             expect.objectContaining({ subject: 'Hello' }),
-            expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer sendgrid-key' }) })
+            expect.objectContaining({
+                timeout: 10000,
+                maxRedirects: 0,
+                headers: expect.objectContaining({ Authorization: 'Bearer sendgrid-key' })
+            })
         );
         expect(result).toMatchObject({ id: 'SG123', status: 'queued', provider: 'sendgrid' });
     });

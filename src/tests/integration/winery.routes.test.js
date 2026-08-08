@@ -114,7 +114,15 @@ describe('Winery Routes', () => {
                 smsProvider: 'twilio',
                 emailProvider: 'sendgrid',
                 crmProvider: 'commerce7',
-                bookingProvider: 'other'
+                bookingProvider: 'other',
+                providerConnections: {
+                    crm: {
+                        externalAccountId: 'sensitive-account-reference',
+                        baseUrl: 'https://crm.example.test/private',
+                        webhookUrl: 'https://api.example.test/webhook',
+                        webhookSecret: 'a-long-webhook-secret-value'
+                    }
+                }
             })
             .expect(200);
 
@@ -127,6 +135,10 @@ describe('Winery Routes', () => {
         expect(res.body.data.status).toBe('error');
         expect(res.body.data.provider).toBe('commerce7');
         expect(res.body.data.lastError).toMatch(/not implemented/i);
+        expect(res.body.data).not.toHaveProperty('externalAccountId');
+        expect(res.body.data).not.toHaveProperty('baseUrl');
+        expect(res.body.data).not.toHaveProperty('webhookUrl');
+        expect(res.body.data).not.toHaveProperty('webhookSecretHash');
 
         const integrationConfig = await WineryIntegrationConfig.findOne({ where: { wineryId: 1 } });
         expect(integrationConfig.providerConnections.crm.status).toBe('error');
@@ -236,5 +248,32 @@ describe('Winery Routes', () => {
         const settings = await WinerySettings.findOne({ where: { wineryId: 1 } });
         expect(settings.identityMatchingConfig.autoLinkThreshold).toBe(210);
         expect(settings.identityMatchingConfig.allowPhoneSuffixNameAutoLink).toBe(false);
+    });
+
+    it('should let a winery manager disable unsupported pilot modules', async () => {
+        const response = await request(app)
+            .put('/api/winery/settings')
+            .set('Authorization', authToken)
+            .send({
+                enableBookingModule: false,
+                enableWineClubModule: false,
+                enableOrdersModule: false
+            })
+            .expect(200);
+
+        expect(response.body).toMatchObject({
+            success: true,
+            data: {
+                wineryId: 1,
+                enableBookingModule: false,
+                enableWineClubModule: false,
+                enableOrdersModule: false
+            }
+        });
+
+        const settings = await WinerySettings.findOne({ where: { wineryId: 1 } });
+        expect(settings.enableBookingModule).toBe(false);
+        expect(settings.enableWineClubModule).toBe(false);
+        expect(settings.enableOrdersModule).toBe(false);
     });
 });

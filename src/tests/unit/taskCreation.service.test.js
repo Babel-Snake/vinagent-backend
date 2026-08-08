@@ -49,6 +49,10 @@ jest.mock('../../services/taskWorkflow.service', () => ({
   syncTaskWorkflow: jest.fn()
 }));
 
+jest.mock('../../services/taskTenantScope.service', () => ({
+  assertTaskRelationshipsBelongToWinery: jest.fn().mockResolvedValue({})
+}));
+
 const { Notification, Task, User, WinerySettings } = require('../../models');
 const auditService = require('../../services/audit.service');
 const customerIdentityService = require('../../services/customerIdentity.service');
@@ -57,6 +61,7 @@ const { replaceTaskAreas } = require('../../services/taskArea.service');
 const { createTask } = require('../../services/taskCreation.service');
 const { processMentions } = require('../../services/taskMention.service');
 const { syncTaskWorkflow } = require('../../services/taskWorkflow.service');
+const { assertTaskRelationshipsBelongToWinery } = require('../../services/taskTenantScope.service');
 
 function createTransaction() {
   return {
@@ -117,6 +122,11 @@ describe('task creation service', () => {
         })
       })
     }), { transaction });
+    expect(assertTaskRelationshipsBelongToWinery).toHaveBeenCalledWith(expect.objectContaining({
+      wineryId: 1,
+      assigneeId: 7,
+      transaction
+    }));
     expect(replaceTaskAreas).toHaveBeenCalledWith(expect.objectContaining({ transaction }));
     expect(auditService.logTaskAction).toHaveBeenCalledWith(expect.objectContaining({
       actionType: 'MANUAL_CREATED',

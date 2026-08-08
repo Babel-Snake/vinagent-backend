@@ -6,7 +6,12 @@ const taskRoutes = require('./task.routes');
 const { authMiddleware } = require('../middleware/authMiddleware');
 
 router.get('/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date() });
+    res.set('Cache-Control', 'no-store');
+    res.json({
+        status: 'ok',
+        type: 'liveness',
+        readiness: '/health/ready'
+    });
 });
 
 // Webhooks (no Firebase auth; secured by provider secret/signature)
@@ -34,6 +39,7 @@ router.use('/winery', authMiddleware, require('./winery.routes')); // Phase 12
 router.use('/notifications', authMiddleware, require('./notification.routes'));
 router.use('/calendar', authMiddleware, require('./calendar.routes'));
 router.use('/analytics', authMiddleware, require('./analytics.routes'));
+router.use('/usage', authMiddleware, require('./usage.routes'));
 
 
 module.exports = router;

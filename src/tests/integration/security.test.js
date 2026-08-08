@@ -16,6 +16,16 @@ describe('Security & Logging', () => {
         expect(res.headers['ratelimit-remaining']).toBeDefined();
     });
 
+    it('rejects oversized webhook bodies before signature processing', async () => {
+        const res = await request(app)
+            .post('/api/webhooks/email')
+            .set('Content-Type', 'application/json')
+            .send(JSON.stringify({ padding: 'x'.repeat(1024 * 1024) }));
+
+        expect(res.status).toBe(413);
+        expect(res.body.error.code).toBe('PAYLOAD_TOO_LARGE');
+    });
+
     // Logging verification is hard in integration tests without spying on stdout, 
     // but the presence of middleware suggests it's active.
 });

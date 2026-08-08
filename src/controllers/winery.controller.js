@@ -86,12 +86,14 @@ const CONTACT_FIELDS = [
     'reportsToId', 'responsibilities', 'isActive'
 ];
 
-function getContactAreaInclude() {
+function getContactAreaInclude(wineryId) {
     return {
         model: OperationalArea,
         as: 'OperationalAreas',
+        where: { wineryId },
         attributes: ['id', 'name', 'isActive'],
-        through: { attributes: ['relationshipType'] }
+        through: { attributes: ['relationshipType'], where: { wineryId } },
+        required: false
     };
 }
 
@@ -248,7 +250,7 @@ exports.getWinery = async (req, res, next) => {
                 { model: WineryFAQItem, as: 'faqs', separate: true },
                 { model: WinerySop, as: 'sops', separate: true },
                 { model: WineryIntegrationConfig, as: 'integrationConfig' },
-                { model: WineryContact, as: 'contacts', separate: true, include: [getContactAreaInclude()] },
+                { model: WineryContact, as: 'contacts', separate: true, include: [getContactAreaInclude(wineryId)] },
                 { model: WinerySettings, as: 'settings' },
                 {
                     model: OperationalArea,
@@ -257,11 +259,11 @@ exports.getWinery = async (req, res, next) => {
                     required: false,
                     separate: true,
                     include: [
-                        { model: OperationalAreaProfile, as: 'Profile', required: false },
-                        { model: OperationalAreaBookingsConfig, as: 'BookingsConfig', required: false },
-                        { model: WineryBookingType, as: 'BookingTypes', required: false, separate: true },
-                        { model: AreaProductListing, as: 'ProductListings', required: false, separate: true },
-                        { model: OperationalAreaIntegrationConfig, as: 'IntegrationConfig', required: false }
+                        { model: OperationalAreaProfile, as: 'Profile', where: { wineryId }, required: false },
+                        { model: OperationalAreaBookingsConfig, as: 'BookingsConfig', where: { wineryId }, required: false },
+                        { model: WineryBookingType, as: 'BookingTypes', where: { wineryId }, required: false, separate: true },
+                        { model: AreaProductListing, as: 'ProductListings', where: { wineryId }, required: false, separate: true },
+                        { model: OperationalAreaIntegrationConfig, as: 'IntegrationConfig', where: { wineryId }, required: false }
                     ]
                 }
             ]
@@ -502,7 +504,7 @@ exports.testAreaIntegrationConnection = async (req, res, next) => {
             areaId,
             domain: payload.domain
         });
-        res.json({ success: true, data: integrationConnectionService.sanitizeProviderConnection(result) });
+        res.json({ success: true, data: integrationConnectionService.serializeConnectionTestResult(result) });
     } catch (err) { next(err); }
 };
 
@@ -515,7 +517,7 @@ exports.testIntegrationConnection = async (req, res, next) => {
             domain: payload.domain
         });
 
-        res.json({ success: true, data: result });
+        res.json({ success: true, data: integrationConnectionService.serializeConnectionTestResult(result) });
     } catch (err) { next(err); }
 };
 
@@ -706,7 +708,10 @@ exports.createContact = async (req, res, next) => {
         }, { transaction });
         await replaceContactAreas({ contact, wineryId: req.user.wineryId, placement, transaction });
         await transaction.commit();
-        const result = await WineryContact.findByPk(contact.id, { include: [getContactAreaInclude()] });
+        const result = await WineryContact.findOne({
+            where: { id: contact.id, wineryId: req.user.wineryId },
+            include: [getContactAreaInclude(req.user.wineryId)]
+        });
         res.status(201).json({ success: true, data: result });
     } catch (err) {
         if (!transaction.finished) await transaction.rollback();
@@ -757,7 +762,10 @@ exports.updateContact = async (req, res, next) => {
             });
         }
         await transaction.commit();
-        const result = await WineryContact.findByPk(contact.id, { include: [getContactAreaInclude()] });
+        const result = await WineryContact.findOne({
+            where: { id: contact.id, wineryId: req.user.wineryId },
+            include: [getContactAreaInclude(req.user.wineryId)]
+        });
         res.json({ success: true, data: result });
     } catch (err) {
         if (!transaction.finished) await transaction.rollback();

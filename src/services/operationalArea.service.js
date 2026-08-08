@@ -51,7 +51,14 @@ async function listAreas({ wineryId, userId, userRole, includeInactive = false }
   const include = includeMemberships ? [{
     model: UserAreaMembership,
     as: 'Memberships',
-    include: [{ model: User, as: 'User', attributes: ['id', 'displayName', 'email', 'role', 'isActive'] }],
+    where: { wineryId },
+    include: [{
+      model: User,
+      as: 'User',
+      where: { wineryId },
+      attributes: ['id', 'displayName', 'email', 'role', 'isActive'],
+      required: false
+    }],
     required: false
   }] : [];
 
@@ -163,7 +170,13 @@ async function replaceUserMemberships({ targetUserId, wineryId, userRole, member
 async function getUserMemberships({ userId, wineryId, transaction = null }) {
   return UserAreaMembership.findAll({
     where: { userId, wineryId },
-    include: [{ model: OperationalArea, as: 'Area', attributes: ['id', 'name', 'isActive', 'sortOrder'] }],
+    include: [{
+      model: OperationalArea,
+      as: 'Area',
+      where: { wineryId },
+      attributes: ['id', 'name', 'isActive', 'sortOrder'],
+      required: true
+    }],
     order: [['isPrimary', 'DESC'], ['areaId', 'ASC']],
     transaction
   }).then(rows => rows.map(serializeMembership));
@@ -173,6 +186,13 @@ async function getUserAreaAccess({ userId, wineryId, transaction = null }) {
   const memberships = await UserAreaMembership.findAll({
     where: { userId, wineryId },
     attributes: ['areaId', 'membershipRole'],
+    include: [{
+      model: OperationalArea,
+      as: 'Area',
+      where: { wineryId },
+      attributes: [],
+      required: true
+    }],
     transaction
   });
   return {

@@ -6,12 +6,55 @@ const logger = require('../config/logger');
 const { MemberActionToken, Member, Task } = require('../models');
 
 const TOKEN_EXPIRY_DAYS = 7;
+const TOKEN_PATTERN = /^[a-f0-9]{64}$/i;
+const TOKEN_TYPES = new Set(['ADDRESS_CHANGE', 'PAYMENT_METHOD_UPDATE', 'PREFERENCE_UPDATE']);
+
+function serviceError(message, statusCode, code) {
+  const err = new Error(message);
+  err.statusCode = statusCode;
+  err.code = code;
+  return err;
+}
+
+function sameId(left, right) {
+  if (left === null || left === undefined || right === null || right === undefined) return false;
+  return Number.isInteger(Number(left)) && Number(left) > 0 && Number(left) === Number(right);
+}
+
+function transactionOptions(transaction) {
+  if (!transaction) return {};
+
+  return {
+    transaction,
+    // MySQL honours SELECT ... FOR UPDATE; SQLite safely ignores this option.
+    lock: transaction.LOCK?.UPDATE || true
+  };
+}
+
+function assertTokenShape(token) {
+  if (typeof token !== 'string' || !TOKEN_PATTERN.test(token)) {
+    throw serviceError('Invalid token', 400, 'INVALID_TOKEN');
+  }
+}
+
+function invalidTokenContext(tokenRecord, reason) {
+  logger.warn('MemberActionToken relationship validation failed', {
+    tokenId: tokenRecord?.id,
+    reason
+  });
+  return serviceError('Token is not valid for this action', 400, 'INVALID_TOKEN_CONTEXT');
+}
 
 /**
  * Generate a cryptographically secure random token
  */
 function generateToken() {
   return crypto.randomBytes(32).toString('hex');
+}
+
+function hashToken(token) {
+  assertTokenShape(token);
+  return crypto.createHash('sha256').update(token, 'utf8').digest('hex');
 }
 
 /**
@@ -27,6 +70,37 @@ function generateToken() {
  * @param {Object} [params.transaction] - Sequelize transaction
  */
 async function createToken({ memberId, wineryId, taskId, type, channel = 'sms', target, payload, transaction }) {
+  if (!Number.isInteger(Number(memberId)) || !Number.isInteger(Number(wineryId)) || !TOKEN_TYPES.has(type)) {
+    throw serviceError('Invalid token context', 400, 'INVALID_TOKEN_CONTEXT');
+  }
+
+  const relationshipQuery = transactionOptions(transaction);
+  const member = await Member.findOne({
+    where: { id: memberId, wineryId },
+    attributes: ['id', 'wineryId'],
+    ...relationshipQuery
+  });
+
+  if (!member) {
+    throw serviceError('Member is not available in this winery', 400, 'INVALID_TOKEN_CONTEXT');
+  }
+
+  if (taskId !== undefined && taskId !== null) {
+    if (!Number.isInteger(Number(taskId))) {
+      throw serviceError('Invalid task context', 400, 'INVALID_TOKEN_CONTEXT');
+    }
+
+    const task = await Task.findOne({
+      where: { id: taskId, wineryId, memberId },
+      attributes: ['id', 'memberId', 'wineryId'],
+      ...relationshipQuery
+    });
+
+    if (!task) {
+      throw serviceError('Task is not available for this member and winery', 400, 'INVALID_TOKEN_CONTEXT');
+    }
+  }
+
   const token = generateToken();
   const expiresAt = new Date(Date.now() + TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
 
@@ -36,7 +110,8 @@ async function createToken({ memberId, wineryId, taskId, type, channel = 'sms', 
     taskId,
     type,
     channel,
-    token,
+    token: null,
+    tokenHash: hashToken(token),
     target,
     payload,
     expiresAt
@@ -50,6 +125,15 @@ async function createToken({ memberId, wineryId, taskId, type, channel = 'sms', 
     channel
   });
 
+  // Keep the bearer value ephemeral. It is intentionally never persisted and
+  // is exposed only to the immediate caller that builds the outbound link.
+  Object.defineProperty(tokenRecord, 'rawToken', {
+    value: token,
+    enumerable: false,
+    configurable: false,
+    writable: false
+  });
+
   return tokenRecord;
 }
 
@@ -58,49 +142,67 @@ async function createToken({ memberId, wineryId, taskId, type, channel = 'sms', 
  * @param {string} token - The token string to validate
  * @returns {Object} { tokenRecord, member, task } or throws error
  */
-async function validateToken(token) {
-  if (!token) {
-    const err = new Error('Token is required');
-    err.statusCode = 400;
-    err.code = 'INVALID_TOKEN';
-    throw err;
+async function validateToken(token, { expectedType, transaction, lock = false } = {}) {
+  assertTokenShape(token);
+
+  const queryOptions = transaction ? { transaction } : {};
+  if (transaction && lock) {
+    queryOptions.lock = transaction.LOCK?.UPDATE || true;
   }
 
   const tokenRecord = await MemberActionToken.findOne({
-    where: { token },
+    where: { tokenHash: hashToken(token) },
     include: [
       { model: Member },
       { model: Task }
-    ]
+    ],
+    ...queryOptions
   });
 
   if (!tokenRecord) {
-    const err = new Error('Token not found');
-    err.statusCode = 404;
-    err.code = 'TOKEN_NOT_FOUND';
-    throw err;
+    throw serviceError('Token not found', 404, 'TOKEN_NOT_FOUND');
   }
 
   // Check if already used
   if (tokenRecord.usedAt) {
-    const err = new Error('Token has already been used');
-    err.statusCode = 400;
-    err.code = 'TOKEN_ALREADY_USED';
-    throw err;
+    throw serviceError('Token has already been used', 400, 'TOKEN_ALREADY_USED');
   }
 
   // Check expiry
   if (new Date() > new Date(tokenRecord.expiresAt)) {
-    const err = new Error('Token has expired');
-    err.statusCode = 400;
-    err.code = 'TOKEN_EXPIRED';
-    throw err;
+    throw serviceError('Token has expired', 400, 'TOKEN_EXPIRED');
+  }
+
+  if (expectedType && tokenRecord.type !== expectedType) {
+    throw invalidTokenContext(tokenRecord, 'unexpected token type');
+  }
+
+  const member = tokenRecord.Member;
+  const task = tokenRecord.Task;
+
+  if (
+    !member ||
+    !sameId(member.id, tokenRecord.memberId) ||
+    !sameId(member.wineryId, tokenRecord.wineryId)
+  ) {
+    throw invalidTokenContext(tokenRecord, 'member and token belong to different wineries');
+  }
+
+  if (tokenRecord.taskId !== null && tokenRecord.taskId !== undefined) {
+    if (
+      !task ||
+      !sameId(task.id, tokenRecord.taskId) ||
+      !sameId(task.memberId, tokenRecord.memberId) ||
+      !sameId(task.wineryId, tokenRecord.wineryId)
+    ) {
+      throw invalidTokenContext(tokenRecord, 'task, member and token relationship is inconsistent');
+    }
   }
 
   return {
     tokenRecord,
-    member: tokenRecord.Member,
-    task: tokenRecord.Task
+    member,
+    task
   };
 }
 
@@ -110,10 +212,15 @@ async function validateToken(token) {
  * @param {Object} [transaction] - Sequelize transaction
  */
 async function markTokenUsed(tokenId, transaction) {
-  await MemberActionToken.update(
+  const result = await MemberActionToken.update(
     { usedAt: new Date() },
-    { where: { id: tokenId }, transaction }
+    { where: { id: tokenId, usedAt: null }, transaction }
   );
+
+  const affectedRows = Array.isArray(result) ? result[0] : result;
+  if (affectedRows !== 1) {
+    throw serviceError('Token has already been used', 400, 'TOKEN_ALREADY_USED');
+  }
 
   logger.info('MemberActionToken marked as used', { tokenId });
 }
@@ -124,9 +231,13 @@ async function markTokenUsed(tokenId, transaction) {
  * @returns {string} The full URL
  */
 function getConfirmationUrl(token) {
-  // In production, this would be configured via env
-  const baseUrl = process.env.PUBLIC_URL || 'https://app.vinagent.app';
-  return `${baseUrl}/confirm-address?token=${token}`;
+  assertTokenShape(token);
+  const baseUrl = process.env.PUBLIC_APP_URL || process.env.PUBLIC_URL || 'https://app.vinagent.app';
+  const confirmationUrl = new URL('/confirm-address', baseUrl);
+  // Fragments are not sent to the frontend server, reverse proxy, or as the
+  // HTTP referrer. The browser page removes it from history before validation.
+  confirmationUrl.hash = new URLSearchParams({ token }).toString();
+  return confirmationUrl.toString();
 }
 
 module.exports = {
@@ -134,5 +245,6 @@ module.exports = {
   validateToken,
   markTokenUsed,
   getConfirmationUrl,
-  generateToken
+  generateToken,
+  hashToken
 };

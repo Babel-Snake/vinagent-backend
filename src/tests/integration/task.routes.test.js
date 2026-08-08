@@ -997,7 +997,7 @@ describe('Task Routes', () => {
                 userId: 7,
                 type: 'SYSTEM',
                 message: 'Dismiss me',
-                data: { taskId: 123 }
+                data: { wineryId: 1 }
             });
 
             await request(app)

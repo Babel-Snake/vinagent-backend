@@ -16,19 +16,19 @@ function linkedAreaIds(project) {
   return [];
 }
 
-async function getProjectAreaIds(projectId, transaction = null) {
+async function getProjectAreaIds(projectId, wineryId, transaction = null) {
   const rows = await ProjectArea.findAll({
-    where: { projectId },
+    where: { projectId, wineryId },
     attributes: ['areaId'],
     transaction
   });
   return rows.map(row => Number(row.areaId));
 }
 
-async function isParticipant(projectId, userId, transaction = null) {
+async function isParticipant(projectId, userId, wineryId, transaction = null) {
   if (!userId) return false;
   return Boolean(await ProjectParticipant.findOne({
-    where: { projectId, userId },
+    where: { projectId, userId, wineryId },
     attributes: ['projectId'],
     transaction
   }));
@@ -42,14 +42,14 @@ async function canViewProject(project, { wineryId, userId, userRole, transaction
     Number(value.ownerUserId) === Number(userId)
     || Number(value.leadUserId) === Number(userId)
     || Number(value.createdBy) === Number(userId)
-    || await isParticipant(value.id, userId, transaction)
+    || await isParticipant(value.id, userId, wineryId, transaction)
   ) return true;
   if (value.areaScope !== 'AREAS') return true;
 
   const projectAreaIds = linkedAreaIds(value);
   const resolvedAreaIds = projectAreaIds.length > 0
     ? projectAreaIds
-    : await getProjectAreaIds(value.id, transaction);
+    : await getProjectAreaIds(value.id, wineryId, transaction);
   if (resolvedAreaIds.length === 0) return false;
   const { areaIds } = await operationalAreaService.getUserAreaAccess({ userId, wineryId, transaction });
   return resolvedAreaIds.some(areaId => areaIds.includes(areaId));
@@ -64,7 +64,7 @@ async function canGovernProject(project, { wineryId, userId, userRole, transacti
   const projectAreaIds = linkedAreaIds(value);
   const resolvedAreaIds = projectAreaIds.length > 0
     ? projectAreaIds
-    : await getProjectAreaIds(value.id, transaction);
+    : await getProjectAreaIds(value.id, wineryId, transaction);
   const { managedAreaIds } = await operationalAreaService.getUserAreaAccess({ userId, wineryId, transaction });
   return resolvedAreaIds.length > 0 && resolvedAreaIds.every(areaId => managedAreaIds.includes(areaId));
 }

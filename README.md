@@ -140,6 +140,7 @@ Start here if you need the current backend contract:
 * `docs/GOLDEN_PATH.md`
 * `docs/TEST_PLAN.md`
 * `docs/PRODUCTION_READINESS.md`
+* `docs/COOLIFY_DEPLOYMENT.md`
 * `docs/MYSQL_MIGRATION_REHEARSAL.md`
 * `docs/FUTURE_PRODUCT_PASSES.md`
 
