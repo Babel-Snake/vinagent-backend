@@ -8,6 +8,7 @@ const {
     Winery,
     User,
     Member,
+    CustomerMergeRedirect,
     Task,
     Message,
     MemberActionToken
@@ -150,11 +151,15 @@ describe('Member Routes', () => {
         const token = await MemberActionToken.findOne({ where: { memberId: target.id } });
         const deletedSource = await Member.findByPk(source.id);
         const updatedTarget = await Member.findByPk(target.id);
+        const redirect = await CustomerMergeRedirect.findOne({
+            where: { wineryId: 1, sourceMemberId: source.id }
+        });
 
         expect(task).toBeTruthy();
         expect(message).toBeTruthy();
         expect(token).toBeTruthy();
         expect(deletedSource).toBeNull();
+        expect(redirect.targetMemberId).toBe(target.id);
         expect(updatedTarget.tags).toEqual(expect.arrayContaining(['vip', 'order_customer']));
         expect(updatedTarget.notes).toMatch(/Merged customer Jane Smith/);
     });

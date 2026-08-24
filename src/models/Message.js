@@ -6,7 +6,12 @@ module.exports = (sequelize, DataTypes) => {
             Message.belongsTo(models.Winery, { foreignKey: 'wineryId' });
             Message.belongsTo(models.Member, { foreignKey: 'memberId' });
             Message.belongsTo(models.Task, { foreignKey: 'taskId' });
+            Message.belongsTo(models.ExternalResourceReference, {
+                foreignKey: 'primarySourceReferenceId',
+                as: 'PrimarySourceReference'
+            });
             Message.hasMany(models.Task, { foreignKey: 'messageId' });
+            Message.hasMany(models.MessageDeliveryEvent, { foreignKey: 'messageId', as: 'DeliveryEvents' });
         }
     }
 
@@ -25,6 +30,18 @@ module.exports = (sequelize, DataTypes) => {
             rawPayload: { type: DataTypes.JSON, allowNull: true },
             externalId: { type: DataTypes.STRING, allowNull: true },
             receivedAt: { type: DataTypes.DATE, allowNull: true },
+            primarySourceReferenceId: { type: DataTypes.INTEGER, allowNull: true },
+            canonicalDeliveryStatus: {
+                type: DataTypes.STRING(40),
+                allowNull: false,
+                defaultValue: 'UNKNOWN'
+            },
+            deliveryStatusOccurredAt: { type: DataTypes.DATE, allowNull: true },
+            deliveryFailureCategory: {
+                type: DataTypes.STRING(40),
+                allowNull: false,
+                defaultValue: 'NONE'
+            },
             wineryId: {
                 type: DataTypes.INTEGER,
                 allowNull: false,
@@ -51,6 +68,15 @@ module.exports = (sequelize, DataTypes) => {
                     name: 'messages_winery_source_external_id_unique',
                     unique: true,
                     fields: ['wineryId', 'source', 'externalId']
+                },
+                {
+                    name: 'messages_unique_primary_source',
+                    unique: true,
+                    fields: ['primarySourceReferenceId']
+                },
+                {
+                    name: 'messages_delivery_attention',
+                    fields: ['wineryId', 'canonicalDeliveryStatus', 'deliveryStatusOccurredAt']
                 }
             ]
         }

@@ -81,4 +81,65 @@ describe('production environment validation', () => {
       expect(result.issues).toContainEqual({ code, variable });
     }
   });
+
+  test('validates the active credential key and retained rotation keys when the store is enabled', () => {
+    const activeKey = Buffer.alloc(32, 1).toString('base64');
+    const previousKey = Buffer.alloc(32, 2).toString('base64');
+    const enabled = validEnvironment({
+      INTEGRATION_CREDENTIALS_ENABLED: 'true',
+      INTEGRATION_CREDENTIAL_ACTIVE_KEY_ID: 'production-v2',
+      INTEGRATION_CREDENTIAL_ENCRYPTION_KEY: activeKey,
+      INTEGRATION_CREDENTIAL_PREVIOUS_KEYS_JSON: JSON.stringify({ 'production-v1': previousKey }),
+      INTEGRATION_BOOKING_FEED_ALLOWED_HOSTS: 'bookings.example.com,bookings.example.com:8443'
+    });
+    expect(validateProductionEnvironment(enabled).ready).toBe(true);
+
+    for (const previousKeys of [
+      '{not-json',
+      '[]',
+      JSON.stringify({ 'production-v2': previousKey }),
+      JSON.stringify({ 'production-v1': Buffer.alloc(16).toString('base64') })
+    ]) {
+      const result = validateProductionEnvironment({
+        ...enabled,
+        INTEGRATION_CREDENTIAL_PREVIOUS_KEYS_JSON: previousKeys
+      });
+      expect(result.issues).toContainEqual({
+        code: 'INTEGRATION_CREDENTIAL_PREVIOUS_KEYS_INVALID',
+        variable: 'INTEGRATION_CREDENTIAL_PREVIOUS_KEYS_JSON'
+      });
+    }
+  });
+
+  test('requires worker, credential storage, and valid bounded policy when automatic booking sync is enabled', () => {
+    const incomplete = validateProductionEnvironment(validEnvironment({
+      INTEGRATION_BOOKING_SCHEDULER_ENABLED: 'true'
+    }));
+    expect(incomplete.issues).toEqual(expect.arrayContaining([
+      { code: 'BOOKING_SCHEDULER_WORKER_REQUIRED', variable: 'INTEGRATION_WORKER_ENABLED' },
+      { code: 'BOOKING_SCHEDULER_CREDENTIALS_REQUIRED', variable: 'INTEGRATION_CREDENTIALS_ENABLED' }
+    ]));
+
+    const configured = validEnvironment({
+      INTEGRATION_BOOKING_SCHEDULER_ENABLED: 'true',
+      INTEGRATION_WORKER_ENABLED: 'true',
+      INTEGRATION_CREDENTIALS_ENABLED: 'true',
+      INTEGRATION_CREDENTIAL_ACTIVE_KEY_ID: 'production-v1',
+      INTEGRATION_CREDENTIAL_ENCRYPTION_KEY: Buffer.alloc(32, 3).toString('base64'),
+      INTEGRATION_BOOKING_FEED_ALLOWED_HOSTS: 'bookings.example.com',
+      INTEGRATION_BOOKING_SCHEDULER_PROVIDER_POLICIES_JSON: JSON.stringify({
+        opentable: { minimumSpacingSeconds: 15 }
+      })
+    });
+    expect(validateProductionEnvironment(configured).ready).toBe(true);
+    const invalid = validateProductionEnvironment({
+      ...configured,
+      INTEGRATION_BOOKING_WINDOW_LOOKBACK_HOURS: '168',
+      INTEGRATION_BOOKING_WINDOW_HORIZON_HOURS: '744'
+    });
+    expect(invalid.issues).toContainEqual({
+      code: 'BOOKING_SCHEDULER_CONFIG_INVALID',
+      variable: 'INTEGRATION_BOOKING_SCHEDULER_*'
+    });
+  });
 });

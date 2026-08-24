@@ -302,7 +302,7 @@ async function createTask({
       dimensions: {
         source,
         category: task.category,
-        automation: 'false'
+        automation: source === 'automation_rule' || source === 'follow_up_automation' ? 'true' : 'false'
       },
       transaction: activeTransaction
     });

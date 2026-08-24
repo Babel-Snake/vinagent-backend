@@ -17,6 +17,7 @@ const REQUIRED_PRODUCTION_ENVIRONMENT = [
   'TWILIO_PHONE_NUMBER',
   'ATTACHMENT_STORAGE_ROOT'
 ];
+const { getBookingSyncSchedulerConfig } = require('./bookingSyncSchedulerConfig.service');
 
 function hasValue(value) {
   return typeof value === 'string' ? value.trim().length > 0 : Boolean(value);
@@ -33,6 +34,41 @@ function isExactHttpsOrigin(value) {
       && !parsed.search
       && !parsed.hash
       && normalized === parsed.origin;
+  } catch {
+    return false;
+  }
+}
+
+function isValidCredentialEncryptionKey(value) {
+  const encoded = String(value || '').trim();
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) return false;
+  return Buffer.from(encoded, 'base64').length === 32;
+}
+
+function isValidAllowedHost(value) {
+  try {
+    const host = String(value || '').trim().toLowerCase();
+    if (!host || host.includes('/') || host.includes('@')) return false;
+    const parsed = new URL(`https://${host}`);
+    return parsed.host.toLowerCase() === host && parsed.pathname === '/';
+  } catch {
+    return false;
+  }
+}
+
+function isValidPreviousCredentialKeys(value, activeKeyId) {
+  const encodedKeyring = String(value || '').trim();
+  if (!encodedKeyring) return true;
+  try {
+    const keyring = JSON.parse(encodedKeyring);
+    if (!keyring || typeof keyring !== 'object' || Array.isArray(keyring)) return false;
+    const entries = Object.entries(keyring);
+    if (entries.length > 10) return false;
+    return entries.every(([keyId, key]) => (
+      /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(keyId)
+      && keyId !== activeKeyId
+      && isValidCredentialEncryptionKey(key)
+    ));
   } catch {
     return false;
   }
@@ -91,6 +127,40 @@ function validateProductionEnvironment(env = process.env) {
     addIssue('PRODUCTION_FLAG_FORBIDDEN', 'ALLOW_MOCK_INTEGRATIONS');
   }
 
+  if (env.INTEGRATION_BOOKING_SCHEDULER_ENABLED === 'true') {
+    if (env.INTEGRATION_WORKER_ENABLED !== 'true') {
+      addIssue('BOOKING_SCHEDULER_WORKER_REQUIRED', 'INTEGRATION_WORKER_ENABLED');
+    }
+    if (env.INTEGRATION_CREDENTIALS_ENABLED !== 'true') {
+      addIssue('BOOKING_SCHEDULER_CREDENTIALS_REQUIRED', 'INTEGRATION_CREDENTIALS_ENABLED');
+    }
+    try {
+      getBookingSyncSchedulerConfig(env);
+    } catch {
+      addIssue('BOOKING_SCHEDULER_CONFIG_INVALID', 'INTEGRATION_BOOKING_SCHEDULER_*');
+    }
+  }
+
+  if (env.INTEGRATION_CREDENTIALS_ENABLED === 'true') {
+    const activeKeyId = String(env.INTEGRATION_CREDENTIAL_ACTIVE_KEY_ID || '');
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(activeKeyId)) {
+      addIssue('INTEGRATION_CREDENTIAL_KEY_ID_INVALID', 'INTEGRATION_CREDENTIAL_ACTIVE_KEY_ID');
+    }
+    if (!isValidCredentialEncryptionKey(env.INTEGRATION_CREDENTIAL_ENCRYPTION_KEY)) {
+      addIssue('INTEGRATION_CREDENTIAL_KEY_INVALID', 'INTEGRATION_CREDENTIAL_ENCRYPTION_KEY');
+    }
+    if (!isValidPreviousCredentialKeys(env.INTEGRATION_CREDENTIAL_PREVIOUS_KEYS_JSON, activeKeyId)) {
+      addIssue('INTEGRATION_CREDENTIAL_PREVIOUS_KEYS_INVALID', 'INTEGRATION_CREDENTIAL_PREVIOUS_KEYS_JSON');
+    }
+    const bookingHosts = String(env.INTEGRATION_BOOKING_FEED_ALLOWED_HOSTS || '')
+      .split(',')
+      .map(value => value.trim())
+      .filter(Boolean);
+    if (bookingHosts.length === 0 || bookingHosts.some(host => !isValidAllowedHost(host))) {
+      addIssue('BOOKING_FEED_ALLOWED_HOSTS_INVALID', 'INTEGRATION_BOOKING_FEED_ALLOWED_HOSTS');
+    }
+  }
+
   return { ready: issues.length === 0, issues };
 }
 
@@ -101,6 +171,9 @@ function formatProductionEnvironmentIssues(issues) {
 module.exports = {
   REQUIRED_PRODUCTION_ENVIRONMENT,
   formatProductionEnvironmentIssues,
+  isValidCredentialEncryptionKey,
+  isValidPreviousCredentialKeys,
+  isValidAllowedHost,
   isExactHttpsOrigin,
   validateProductionEnvironment
 };

@@ -18,6 +18,7 @@ const operationalAreaService = require('./operationalArea.service');
 const { redact } = require('../utils/sanitizer');
 const { ForbiddenError, NotFoundError, ValidationError } = require('../utils/errors');
 const { normalizeInboundEvent, compactString } = require('./integrations/inbound/normalizers');
+const logger = require('../config/logger');
 
 const MANAGER_ROLES = new Set(['manager', 'admin']);
 const TERMINAL_STATUSES = new Set(['PROCESSED', 'IGNORED', 'ARCHIVED']);
@@ -196,6 +197,29 @@ async function createIntegrationEvent({ wineryId, userId = null, data }) {
     where: { id: event.id, wineryId },
     include: getEventInclude()
   });
+
+  try {
+    const automationRuleService = require('./automationRule.service');
+    const results = await automationRuleService.executeMatchingRulesForEvent({
+      wineryId,
+      eventId: fresh.id
+    });
+    if (results.length > 0) {
+      logger.info('Evaluated integration event automation rules', {
+        wineryId,
+        eventId: fresh.id,
+        evaluated: results.length,
+        actioned: results.filter(result => result.run?.status === 'ACTIONED').length,
+        failed: results.filter(result => result.error || result.run?.status === 'FAILED').length
+      });
+    }
+  } catch (err) {
+    logger.error('Integration event automation evaluation failed', {
+      wineryId,
+      eventId: fresh.id,
+      error: err.message
+    });
+  }
 
   return {
     event: serializeIntegrationEvent(fresh),

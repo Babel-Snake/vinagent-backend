@@ -770,7 +770,7 @@ async function deleteNoticeComment({ noticeId, commentId, wineryId, userId, user
   return { deleted: true };
 }
 
-async function createNotice({ wineryId, userId, userRole, data }) {
+async function createNotice({ wineryId, userId, userRole, data, transaction = null }) {
   const audience = normalizeNoticeAudiencePayload(data);
   const {
     calendarEventIds = [],
@@ -778,7 +778,8 @@ async function createNotice({ wineryId, userId, userRole, data }) {
     linkedAreaIds = [],
     ...noticeData
   } = data;
-  const transaction = await Notice.sequelize.transaction();
+  const ownTransaction = !transaction;
+  const activeTransaction = transaction || await Notice.sequelize.transaction();
   let notice;
   try {
     const areaPlacement = await operationalAreaService.validateAreaPlacement({
@@ -789,9 +790,9 @@ async function createNotice({ wineryId, userId, userRole, data }) {
       primaryAreaId,
       linkedAreaIds,
       requireManage: true,
-      transaction
+      transaction: activeTransaction
     });
-    await validateNoticeAudienceUsers(audience, wineryId, transaction);
+    await validateNoticeAudienceUsers(audience, wineryId, activeTransaction);
     notice = await Notice.create({
       ...noticeData,
       ...audience,
@@ -799,25 +800,27 @@ async function createNotice({ wineryId, userId, userRole, data }) {
       wineryId,
       createdBy: userId,
       updatedBy: userId
-    }, { transaction });
+    }, { transaction: activeTransaction });
 
-    await replaceNoticeAreas({ noticeId: notice.id, wineryId, placement: areaPlacement, transaction });
+    await replaceNoticeAreas({ noticeId: notice.id, wineryId, placement: areaPlacement, transaction: activeTransaction });
 
     await linkNoticeToCalendarEvents({
       noticeId: notice.id,
       calendarEventIds,
       wineryId,
       userId,
-      transaction
+      transaction: activeTransaction
     });
 
-    await transaction.commit();
+    if (ownTransaction) await activeTransaction.commit();
   } catch (err) {
-    if (!transaction.finished) await transaction.rollback();
+    if (ownTransaction && !activeTransaction.finished) await activeTransaction.rollback();
     throw err;
   }
 
-  return getNoticeById({ noticeId: notice.id, wineryId, userId, userRole });
+  return ownTransaction
+    ? getNoticeById({ noticeId: notice.id, wineryId, userId, userRole })
+    : notice;
 }
 
 async function updateNotice({ noticeId, wineryId, userId, userRole, updates }) {

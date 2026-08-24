@@ -29,6 +29,8 @@ router.use('/operational-areas', authMiddleware, require('./operationalArea.rout
 router.use('/requests', authMiddleware, require('./operationalRequest.routes'));
 router.use('/operational-records', authMiddleware, require('./operationalRecord.routes'));
 router.use('/operations', authMiddleware, require('./operations.routes'));
+router.use('/automations', authMiddleware, require('./automation.routes'));
+router.use('/integration-management', authMiddleware, require('./integrationManagement.routes'));
 router.use('/projects', authMiddleware, require('./project.routes'));
 router.use('/attachments', authMiddleware, require('./attachment.routes'));
 router.use('/staff', authMiddleware, require('./staff.routes'));

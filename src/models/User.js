@@ -12,6 +12,11 @@ module.exports = (sequelize, DataTypes) => {
             User.hasMany(models.NoticeComment, { foreignKey: 'userId', as: 'NoticeComments' });
       User.hasMany(models.NoticeAcknowledgement, { foreignKey: 'userId', as: 'NoticeAcknowledgements' });
       User.hasMany(models.OperationalIntelligenceSignal, { foreignKey: 'reviewOwnerUserId', as: 'AssignedIntelligenceSignals' });
+            User.hasMany(models.IntelligenceFact, { foreignKey: 'createdBy', as: 'CreatedIntelligenceFacts' });
+            User.hasMany(models.IntelligenceFactMaterializationRun, {
+                foreignKey: 'requestedBy',
+                as: 'RequestedIntelligenceFactRuns'
+            });
             User.hasMany(models.UserAreaMembership, { foreignKey: 'userId', as: 'AreaMemberships' });
             User.hasMany(models.OperationalRequest, { foreignKey: 'createdBy', as: 'CreatedOperationalRequests' });
             User.hasMany(models.OperationalRecord, { foreignKey: 'createdBy', as: 'CreatedOperationalRecords' });
@@ -26,6 +31,9 @@ module.exports = (sequelize, DataTypes) => {
             User.hasMany(models.ProjectParticipant, { foreignKey: 'userId', as: 'ProjectParticipations' });
             User.hasMany(models.ProjectAuditEvent, { foreignKey: 'actorUserId', as: 'ProjectAuditEvents' });
             User.hasMany(models.UsageEvent, { foreignKey: 'actorUserId', as: 'UsageEvents' });
+            User.hasMany(models.CustomerRollupRun, { foreignKey: 'initiatedBy', as: 'InitiatedCustomerRollupRuns' });
+            User.hasOne(models.StaffIdentity, { foreignKey: 'userId', as: 'StaffIdentity' });
+            User.hasMany(models.StaffRoleSkill, { foreignKey: 'confirmedBy', as: 'ConfirmedStaffRoleSkills' });
             User.hasMany(models.UserActivityDaily, { foreignKey: 'userId', as: 'ActivityDays' });
             User.belongsToMany(models.OperationalArea, {
                 through: models.UserAreaMembership,

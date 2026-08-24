@@ -112,6 +112,14 @@ const genericPayloadSchema = Joi.object({
     note: Joi.string().max(2000)
 }).unknown(true); // Allow extra fields for flexibility
 
+const automationTemplateInstallSchema = Joi.object({
+    name: Joi.string().trim().min(1).max(160),
+    assigneeId: Joi.number().integer().positive().required(),
+    areaId: Joi.number().integer().positive().required(),
+    leadTimeMinutes: Joi.number().integer().min(60).max(43200).default(2880),
+    responseMinutes: Joi.number().integer().min(15).max(10080)
+}).unknown(false);
+
 const taskStepCreateSchema = Joi.object({
     title: Joi.string().required().max(200),
     description: Joi.string().max(4000).allow('', null),
@@ -491,6 +499,7 @@ const INTEGRATION_EVENT_TYPES = [
     'file.imported',
     'unknown.received'
 ];
+const CANONICAL_INTEGRATION_EVENT_TYPE_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/;
 const INTEGRATION_EVENT_STATUSES = [
     'RECEIVED',
     'NORMALIZED',
@@ -565,7 +574,7 @@ const emailSyncSchema = Joi.object({
 const integrationEventCreateSchema = Joi.object({
     provider: Joi.string().trim().min(1).max(100).required(),
     intakeMethod: Joi.string().valid(...INTEGRATION_INTAKE_METHODS).default('manual'),
-    eventType: Joi.string().valid(...INTEGRATION_EVENT_TYPES).required(),
+    eventType: Joi.string().lowercase().max(120).pattern(CANONICAL_INTEGRATION_EVENT_TYPE_PATTERN).required(),
     externalEventId: Joi.string().trim().max(255).allow('', null),
     rawPayload: Joi.object().unknown(true).default({}),
     normalizedPayload: Joi.object().unknown(true).optional(),
@@ -578,7 +587,10 @@ const integrationEventCreateSchema = Joi.object({
 
 const integrationEventListSchema = Joi.object({
     status: Joi.string().valid(...INTEGRATION_EVENT_STATUSES, 'all').default('all'),
-    eventType: Joi.string().valid(...INTEGRATION_EVENT_TYPES, 'all').default('all'),
+    eventType: Joi.alternatives().try(
+        Joi.string().valid('all'),
+        Joi.string().lowercase().max(120).pattern(CANONICAL_INTEGRATION_EVENT_TYPE_PATTERN)
+    ).default('all'),
     provider: Joi.string().trim().max(100).allow('all').default('all'),
     areaId: Joi.alternatives().try(Joi.number().integer().positive(), Joi.string().valid('all')).default('all'),
     search: Joi.string().trim().max(200).allow('', null),
@@ -643,6 +655,70 @@ const integrationEventReviewSchema = Joi.object({
     }
     return value;
 }, 'integration event review validation');
+
+const automationDefinitionSchema = Joi.object().unknown(true).required();
+
+const automationRuleCreateSchema = Joi.object({
+    name: Joi.string().trim().min(1).max(160).required(),
+    description: Joi.string().trim().max(4000).allow('', null),
+    areaId: Joi.number().integer().positive().allow(null),
+    definition: automationDefinitionSchema
+}).unknown(false);
+
+const automationRuleUpdateSchema = Joi.object({
+    name: Joi.string().trim().min(1).max(160),
+    description: Joi.string().trim().max(4000).allow('', null),
+    areaId: Joi.number().integer().positive().allow(null),
+    definition: automationDefinitionSchema
+}).min(1).unknown(false);
+
+const automationRuleStatusSchema = Joi.object({
+    status: Joi.string().uppercase().valid('DRAFT', 'ACTIVE', 'PAUSED').required()
+}).unknown(false);
+
+const automationSampleEventSchema = Joi.object({
+    provider: Joi.string().trim().max(100).default('manual'),
+    intakeMethod: Joi.string().trim().max(50).default('automation'),
+    eventType: Joi.string().lowercase().max(120).pattern(CANONICAL_INTEGRATION_EVENT_TYPE_PATTERN).required(),
+    externalEventId: Joi.string().trim().max(255).allow('', null),
+    normalizedPayload: Joi.object().unknown(true).default({}),
+    metadata: Joi.object().unknown(true).default({}),
+    suggestedAreaId: Joi.number().integer().positive().allow(null),
+    confirmedAreaId: Joi.number().integer().positive().allow(null),
+    receivedAt: Joi.date().iso().default(() => new Date())
+}).unknown(false);
+
+const automationRuleEvaluateSchema = Joi.object({
+    sourceEventId: Joi.number().integer().positive(),
+    sampleEvent: automationSampleEventSchema,
+    sourceKey: Joi.string().trim().max(255)
+}).xor('sourceEventId', 'sampleEvent').unknown(false);
+
+const automationRuleListSchema = Joi.object({
+    status: Joi.string().valid('all', 'DRAFT', 'ACTIVE', 'PAUSED').default('all'),
+    page: Joi.number().integer().min(1).optional(),
+    pageSize: Joi.number().integer().min(1).max(100).optional()
+}).unknown(false);
+
+const automationRunListSchema = Joi.object({
+    ruleId: Joi.number().integer().positive(),
+    status: Joi.string().valid('all', 'RUNNING', 'NOT_MATCHED', 'ACTIONED', 'SKIPPED', 'FAILED').default('all'),
+    page: Joi.number().integer().min(1).optional(),
+    pageSize: Joi.number().integer().min(1).max(100).optional()
+}).unknown(false);
+
+const automationBindingListSchema = Joi.object({
+    ruleId: Joi.number().integer().positive(),
+    resourceType: Joi.string().trim().uppercase().max(120),
+    resourceId: Joi.number().integer().positive(),
+    lifecycleState: Joi.string().trim().uppercase().valid('ACTIVE', 'HUMAN_OWNED', 'CANCELLED', 'ORPHANED'),
+    page: Joi.number().integer().min(1).optional(),
+    pageSize: Joi.number().integer().min(1).max(100).optional()
+}).unknown(false);
+
+const automationCapabilityListSchema = Joi.object({
+    areaId: Joi.number().integer().positive().allow(null)
+}).unknown(false);
 
 const operationalIntelligenceConfigSchema = Joi.object({
     preset: Joi.string().valid('default', 'sensitive', 'conservative').optional(),
@@ -1141,6 +1217,15 @@ module.exports = {
     integrationEventCreateSchema,
     integrationEventListSchema,
     integrationEventReviewSchema,
+    automationRuleCreateSchema,
+    automationRuleUpdateSchema,
+    automationRuleStatusSchema,
+    automationRuleEvaluateSchema,
+    automationRuleListSchema,
+    automationRunListSchema,
+    automationBindingListSchema,
+    automationCapabilityListSchema,
+    automationTemplateInstallSchema,
     winerySettingsSchema,
     wineryContactSchema,
     operationalAreaCreateSchema,
@@ -1191,6 +1276,7 @@ module.exports = {
     INTEGRATION_STATUSES,
     INTEGRATION_AUTH_METHODS,
     INTEGRATION_EVENT_TYPES,
+    CANONICAL_INTEGRATION_EVENT_TYPE_PATTERN,
     INTEGRATION_EVENT_STATUSES,
     INTEGRATION_INTAKE_METHODS,
     WAITING_ON,

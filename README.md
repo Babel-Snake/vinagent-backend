@@ -108,6 +108,110 @@ npm test
 npm run dev
 ```
 
+The integration worker is a separate, disabled-by-default process. It should only be deployed after its
+environment gate is enabled and its reviewed connector handlers, credentials, and outbound allowlists are
+configured. The Booking connector boundary is read-only, and its initial hydration stores non-actioning shadow
+observations:
+
+```bash
+npm run start:worker
+```
+
+Hydration remains non-actioning. After explicit Booking authority activation, the separately gated durable
+scheduler can queue incremental and reconciliation reads whose material canonical changes may reach active
+manager-approved automations. See `docs/BOOKING_SYNC_SCHEDULER.md` before enabling that cadence.
+
+Managers/admins also have provider-neutral operational controls for pausing and resuming individual sync
+streams, cancelling queued jobs, replaying terminal jobs with immutable lineage, and requeuing failed canonical
+event deliveries. These controls and their append-only audit trail can be deployed and tested before live
+provider credentials are available. See `docs/INTEGRATION_OPERATIONAL_CONTROLS.md`.
+
+The worker's scheduling phase is now domain-registered. Booking is the first configured scheduler, while
+future Wine Club, commerce, inventory, fulfilment/postage, and workforce schedulers can use the same aggregate
+worker lifecycle and transactional provider-rate permits. See `docs/INTEGRATION_SCHEDULER_REGISTRY.md`.
+
+Canonical provider webhook intake is also available without live provider credentials. Managers can create an
+opaque connection-scoped endpoint whose verification material is separately encrypted, use the strict signed
+change-hint bridge for fixture testing, and rotate, disable, enable, or revoke it. Receipts are idempotent and
+raw provider bodies are not retained; the worker dispatches them through a domain recovery registry so only a
+normal provider read can create canonical facts. Booking is the first recovery registration. See
+`docs/PROVIDER_NEUTRAL_WEBHOOK_INTAKE.md`.
+
+Legacy winery/area integration JSON can now be inventoried without credentials through a manager-reviewed
+dry-run/apply flow. The mapper uses explicit domain mappings, creates only `PENDING` credential-less canonical
+connections, preserves weak identities as separate candidates, and records ambiguity or key collisions for
+review. It does not switch runtime authority or alter legacy settings. See
+`docs/LEGACY_INTEGRATION_BACKFILL.md`.
+
+Projection issues now have a tenant-safe manager review lifecycle. Managers can acknowledge ownership,
+record only registry-approved typed decisions, or explicitly ignore an issue; each transition is idempotent
+and append-only audited. Legacy connection mapping decisions are the first registered resolvers and do not
+silently mutate connections or authority. See `docs/PROJECTION_ISSUE_REVIEW.md`.
+
+Per-winery/domain configuration authority is now explicit. Booking can be safely prepared without live
+credentials, while activation remains gated on verified canonical readiness and a separate disabled-by-default
+deployment flag. Canonical authority projects a sanitized legacy compatibility view, rejects a second writer,
+and supports an audited rollback to the captured metadata baseline. See
+`docs/INTEGRATION_CONFIGURATION_CUTOVER.md`.
+
+The first canonical Customer slice keeps `Member` as the root and writer while adding normalized contact
+points, address projections, append-only consent history, and lifecycle milestones. A stale-protected,
+idempotent manager backfill never infers affirmative consent from the old boolean, a relationship endpoint
+surfaces projection drift, and customer merges now transfer/deduplicate the new history. See
+`docs/CANONICAL_CUSTOMER_PROFILE.md`.
+
+The canonical Wine Club foundation now stores provider-neutral programs, memberships, immutable membership
+events, allocation cycles, and complete allocation lines. Its strict fixture-ready projector requires explicit
+customer/program mappings, records stale or competing-source issues, remains non-actioning, and preserves
+memberships safely through customer merges. See `docs/CANONICAL_WINE_CLUB.md`.
+
+The canonical Commerce foundation now stores provider-neutral Sales Orders, complete lines, immutable
+payment-summary events, and ordered refund summaries. It accepts explicit unresolved identities, rejects
+financial secrets and guessed links, remains non-actioning, and leaves legacy customer rollups unchanged. See
+`docs/CANONICAL_COMMERCE.md`.
+
+Optional cross-system relationships now use bounded Business Entity Links with append-only evidence and an
+audited manager confirmation/rejection/invalidation lifecycle. Symmetric identity/order candidates converge
+without merging records, and customer merges preserve or invalidate links safely. Links remain non-actioning.
+See `docs/BUSINESS_ENTITY_RELATIONSHIPS.md`.
+
+Canonical Customer Rollups can now be previewed and rebuilt from club, booking, commerce, and duplicate-order
+facts with run-scoped contribution lineage. Monetary values remain separated by currency, ambiguity is
+surfaced, merge invalidates stale current values, and legacy Member totals are never written. See
+`docs/CANONICAL_CUSTOMER_ROLLUPS.md`.
+
+The canonical Catalogue and Inventory foundation now adds exact Product Variants, Stock Locations,
+freshness-bounded current positions, immutable snapshots, and typed demand commitments. Audited source-code
+mappings can turn Booking requirements such as `truffle-pairing` into deterministic demand, while
+available-to-promise fails closed for missing, stale, conflicting, future-dated, or unit-mismatched stock.
+Legacy merchandising stock remains untouched and inventory is not live-actioning. See
+`docs/CANONICAL_INVENTORY.md`.
+
+The canonical Fulfilment foundation now stores one current Shipment graph with complete Packages/Items and
+immutable Tracking Events. Full tracking values and restricted addresses are excluded from automation
+context, future/stale observations fail closed, and a manager-installable draft rule defines reconciled
+delivery-exception work without enabling live fulfilment. See `docs/CANONICAL_FULFILMENT.md`.
+
+The canonical Workforce foundation now separates external staff identity from User authority, stores exact
+roles/skills, shifts and bounded leave, and requires fresh complete roster-window evidence before reporting a
+real Booking coverage gap. Manager mappings, a bounded coverage context, and draft managed-work template are
+available without enabling live workforce action. See `docs/CANONICAL_WORKFORCE.md`.
+
+Existing SMS, email, and voice-linked Message rows now support connection-scoped external references and an
+immutable provider-neutral delivery timeline. Replays are idempotent, late history cannot regress current
+status, mapping/event conflicts are surfaced, and manager delivery reads omit message content and contact
+data. Communication projection remains non-actioning. See `docs/CANONICAL_COMMUNICATIONS.md`.
+
+The registered Intelligence Fact layer now stores append-only, temporal, source-explainable conclusions for
+Booking readiness, Shipment exceptions, and Message delivery. Privacy-bounded Customer relationship, Club
+fulfilment, and Area capacity contexts combine the canonical domains without enabling action directly. See
+`docs/INTELLIGENCE_FACTS_AND_CONTEXTS.md`.
+
+Managers now have one aggregated integration-health view across all canonical domains. A default-off common
+activation workflow proves scope, capability, credential, projection, authority, watermark, and issue
+readiness for non-Booking domains; fixture conformance can run before real credentials exist. See
+`docs/INTEGRATION_HEALTH_AND_ACTIVATION.md` and `docs/DOMAIN_CONNECTOR_CONFORMANCE.md`.
+
 Health endpoints:
 
 * `GET /`
@@ -122,6 +226,7 @@ npm run test:unit
 npm run test:int
 npm run lint
 npm run format
+npm run start:worker
 npm run seed:sidewood:projects
 ```
 
@@ -133,6 +238,29 @@ Start here if you need the current backend contract:
 * `docs/DOMAIN_MODEL.md`
 * `docs/OPERATIONAL_AREAS.md`
 * `docs/OPERATIONAL_INTELLIGENCE_IMPLEMENTATION.md`
+* `docs/AUTOMATION_ENGINE.md`
+* `docs/WINERY_INTELLIGENCE_DATA_ARCHITECTURE.md`
+* `docs/BOOKING_SHADOW_CONNECTOR.md`
+* `docs/CANONICAL_BOOKING_PROJECTION.md`
+* `docs/BOOKING_LIVE_READINESS.md`
+* `docs/BOOKING_ADAPTER_CONFORMANCE.md`
+* `docs/OPENTABLE_BOOKING_SYNC.md`
+* `docs/BOOKING_SYNC_SCHEDULER.md`
+* `docs/PROJECTION_ISSUE_REVIEW.md`
+* `docs/INTEGRATION_CONFIGURATION_CUTOVER.md`
+* `docs/CANONICAL_CUSTOMER_PROFILE.md`
+* `docs/CANONICAL_WINE_CLUB.md`
+* `docs/CANONICAL_COMMERCE.md`
+* `docs/BUSINESS_ENTITY_RELATIONSHIPS.md`
+* `docs/CANONICAL_CUSTOMER_ROLLUPS.md`
+* `docs/CANONICAL_INVENTORY.md`
+* `docs/CANONICAL_FULFILMENT.md`
+* `docs/CANONICAL_WORKFORCE.md`
+* `docs/CANONICAL_COMMUNICATIONS.md`
+* `docs/INTELLIGENCE_FACTS_AND_CONTEXTS.md`
+* `docs/INTEGRATION_HEALTH_AND_ACTIVATION.md`
+* `docs/DOMAIN_CONNECTOR_CONFORMANCE.md`
+* `docs/AUTOMATION_RESOURCE_BINDINGS.md`
 * `docs/PROJECTS_IMPLEMENTATION_PLAN.md`
 * `docs/FRONTEND_UX_BUILD_PLAN.md`
 * `docs/API_SPEC.md`

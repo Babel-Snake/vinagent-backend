@@ -6,6 +6,17 @@ module.exports = (sequelize, DataTypes) => {
             Member.belongsTo(models.Winery, { foreignKey: 'wineryId' });
             Member.hasMany(models.Message, { foreignKey: 'memberId' });
             Member.hasMany(models.Task, { foreignKey: 'memberId' });
+            Member.hasMany(models.CustomerMergeRedirect, { foreignKey: 'targetMemberId', as: 'MergeRedirects' });
+            Member.hasMany(models.Booking, { foreignKey: 'memberId', as: 'CanonicalBookings' });
+            Member.hasMany(models.CustomerContactPoint, { foreignKey: 'memberId', as: 'ContactPoints' });
+            Member.hasMany(models.CustomerAddress, { foreignKey: 'memberId', as: 'Addresses' });
+            Member.hasMany(models.CustomerConsent, { foreignKey: 'memberId', as: 'ConsentHistory' });
+            Member.hasMany(models.CustomerLifecycleMilestone, { foreignKey: 'memberId', as: 'LifecycleMilestones' });
+            Member.hasMany(models.WineClubMembership, { foreignKey: 'memberId', as: 'WineClubMemberships' });
+            Member.hasMany(models.SalesOrder, { foreignKey: 'memberId', as: 'SalesOrders' });
+            Member.hasMany(models.Shipment, { foreignKey: 'memberId', as: 'Shipments' });
+            Member.hasOne(models.CustomerRelationshipRollup, { foreignKey: 'memberId', as: 'RelationshipRollup' });
+            Member.hasMany(models.CustomerMonetaryRollup, { foreignKey: 'memberId', as: 'MonetaryRollups' });
         }
     }
 

@@ -5,6 +5,7 @@ const {
   OperationalAreaIntegrationConfig
 } = require('../models');
 const { ValidationError } = require('../utils/errors');
+const integrationConfigurationAuthorityService = require('./integrationConfigurationAuthority.service');
 
 const DOMAINS = ['sms', 'email', 'pos', 'crm', 'booking', 'delivery'];
 const AREA_DOMAINS = ['pos', 'crm', 'booking', 'delivery'];
@@ -280,12 +281,20 @@ async function syncExecutionSettings({ wineryId, integrationConfig, transaction 
   const crmProvider = integrationConfig.crmProvider || 'other';
   const bookingProvider = integrationConfig.bookingProvider || 'other';
 
-  await settings.update({
-    crmProvider: mapCrmProviderToExecution(crmProvider),
-    crmConfig: buildProviderConfig(crmConnection, crmProvider),
-    bookingProvider: mapBookingProviderToExecution(bookingProvider),
-    bookingConfig: buildProviderConfig(bookingConnection, bookingProvider)
-  }, { transaction });
+  const canonicalDomains = await integrationConfigurationAuthorityService.getCanonicalConfigurationDomains({
+    wineryId,
+    transaction
+  });
+  const updates = {};
+  if (!canonicalDomains.includes('CUSTOMER')) {
+    updates.crmProvider = mapCrmProviderToExecution(crmProvider);
+    updates.crmConfig = buildProviderConfig(crmConnection, crmProvider);
+  }
+  if (!canonicalDomains.includes('BOOKING')) {
+    updates.bookingProvider = mapBookingProviderToExecution(bookingProvider);
+    updates.bookingConfig = buildProviderConfig(bookingConnection, bookingProvider);
+  }
+  if (Object.keys(updates).length > 0) await settings.update(updates, { transaction });
 
   return settings;
 }
@@ -361,6 +370,15 @@ function assessConnection(config, domain) {
 }
 
 async function testConnection({ wineryId, domain }) {
+  const canonicalDomains = domain === 'booking' ? ['BOOKING']
+    : domain === 'crm' ? ['CUSTOMER']
+      : domain === 'pos' ? ['COMMERCE', 'CATALOG']
+        : domain === 'delivery' ? ['FULFILMENT']
+          : ['COMMUNICATION'];
+  await integrationConfigurationAuthorityService.assertLegacyConfigurationWritable({
+    wineryId,
+    domains: canonicalDomains
+  });
   const config = await WineryIntegrationConfig.findOne({ where: { wineryId } });
   if (!config) {
     const err = new Error('Integration config not found');
@@ -380,6 +398,14 @@ async function testConnection({ wineryId, domain }) {
 }
 
 async function testAreaConnection({ wineryId, areaId, domain }) {
+  const canonicalDomains = domain === 'booking' ? ['BOOKING']
+    : domain === 'crm' ? ['CUSTOMER']
+      : domain === 'pos' ? ['COMMERCE', 'CATALOG']
+        : ['FULFILMENT'];
+  await integrationConfigurationAuthorityService.assertLegacyConfigurationWritable({
+    wineryId,
+    domains: canonicalDomains
+  });
   const config = await OperationalAreaIntegrationConfig.findOne({ where: { wineryId, areaId } });
   if (!config) {
     const err = new Error('Area integration config not found');
@@ -410,6 +436,14 @@ async function resolveExecutionConfig({ wineryId, areaId = null, domain, transac
   if (!['booking', 'crm'].includes(domain)) {
     throw new ValidationError(`Execution configuration is not supported for '${domain}'.`);
   }
+
+  const canonical = await integrationConfigurationAuthorityService.resolveCanonicalRuntimeConfiguration({
+    wineryId,
+    areaId,
+    domain: domain === 'booking' ? 'BOOKING' : 'CUSTOMER',
+    transaction
+  });
+  if (canonical) return canonical;
 
   if (areaId) {
     const areaConfig = await OperationalAreaIntegrationConfig.findOne({

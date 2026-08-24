@@ -3,6 +3,7 @@ const triageService = require('../services/triage.service');
 const taskService = require('../services/taskService');
 const customerIdentityService = require('../services/customerIdentity.service');
 const integrationEventService = require('../services/integrationEvent.service');
+const integrationWebhookIntakeService = require('../services/integrationWebhookIntake.service');
 const retellAdapter = require('../services/integrations/inbound/providers/retell');
 const retellWebhookContextService = require('../services/retellWebhookContext.service');
 const logger = require('../config/logger');
@@ -21,6 +22,7 @@ const INTEGRATION_EVENT_TYPES = new Set([
     'file.imported',
     'unknown.received'
 ]);
+const CANONICAL_INTEGRATION_EVENT_TYPE_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/;
 
 async function resolveWineryByContact(contact, transaction) {
     const deploymentWineryId = configuredWineryId();
@@ -88,7 +90,7 @@ function normalizeIntegrationWebhookPayload(body, context) {
         context.domain
     ) || context.domain;
     const requestedEventType = pickString(payload.eventType, payload.type, payload.event_type);
-    const eventType = INTEGRATION_EVENT_TYPES.has(requestedEventType)
+    const eventType = INTEGRATION_EVENT_TYPES.has(requestedEventType) || CANONICAL_INTEGRATION_EVENT_TYPE_PATTERN.test(requestedEventType || '')
         ? requestedEventType
         : 'unknown.received';
     const rawPayload = pickObject(payload.rawPayload) || pickObject(payload.payload) || payload;
@@ -504,6 +506,35 @@ async function handleIntegrationEvent(req, res, next) {
     }
 }
 
+async function handleProviderWebhook(req, res, next) {
+    const start = Date.now();
+    try {
+        const result = await integrationWebhookIntakeService.acceptProviderWebhook({
+            endpointKey: req.params.endpointKey,
+            rawBody: req.rawBody,
+            headers: req.headers
+        });
+        telemetry.recordIngestion(
+            'provider_webhook',
+            result.duplicate ? telemetry.STATUS.DUPLICATE : telemetry.STATUS.SUCCESS,
+            Date.now() - start,
+            { domain: result.receipt.domain, duplicate: result.duplicate }
+        );
+        logger.info('Accepted provider webhook change hint', {
+            eventId: result.receipt.eventId,
+            domain: result.receipt.domain,
+            duplicate: result.duplicate,
+            dispatchJobId: result.receipt.dispatchJobId
+        });
+        return res.status(result.duplicate ? 200 : 202).json(result);
+    } catch (error) {
+        telemetry.recordIngestion('provider_webhook', telemetry.STATUS.FAILURE, Date.now() - start, {
+            errorCode: error.code || null
+        });
+        return next(error);
+    }
+}
+
 async function handleRetell(req, res, next) {
     const start = Date.now();
     try {
@@ -560,5 +591,6 @@ module.exports = {
     handleEmail,
     handleVoice,
     handleIntegrationEvent,
+    handleProviderWebhook,
     handleRetell
 };

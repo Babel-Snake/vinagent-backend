@@ -1,6 +1,7 @@
 /**
  * Base Booking Adapter Interface.
- * All providers (Tock, SevenRooms, Mock) must extend this.
+ * Read-only projection providers implement verifyReadAccess/fetchBookingsPage.
+ * Transactional providers may separately implement availability and reservation writes.
  */
 class BookingAdapter {
     constructor(config = {}) {
@@ -13,6 +14,20 @@ class BookingAdapter {
      */
     isAuthenticated() {
         return false;
+    }
+
+    /**
+     * Verifies read-only access without performing a booking mutation.
+     */
+    async verifyReadAccess() {
+        throw new Error('verifyReadAccess() not implemented');
+    }
+
+    /**
+     * Fetches one bounded page for shadow projection/hydration.
+     */
+    async fetchBookingsPage(_request) {
+        throw new Error('fetchBookingsPage() not implemented');
     }
 
     /**

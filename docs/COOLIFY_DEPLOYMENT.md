@@ -124,6 +124,8 @@ ATTACHMENT_STORAGE_ROOT=/app/data/attachments
 TASK_DEADLINE_REMINDERS_ENABLED=true
 EMAIL_SYNC_ENABLED=false
 OPERATIONAL_INTELLIGENCE_SCHEDULER_ENABLED=false
+INTEGRATION_WORKER_ENABLED=false
+INTEGRATION_BOOKING_SCHEDULER_ENABLED=false
 USAGE_SNAPSHOT_INTERVAL_MS=3600000
 ```
 
@@ -137,7 +139,11 @@ Keep the API at one replica. For the initial pilot, leave mailbox sync and opera
 
 ### Disable unsupported live-execution modules for the pilot
 
-The current booking and CRM factories have no production-ready live adapters. Consequently, `npm run preflight:deployment` deliberately reports `BOOKING_LIVE_ADAPTER_UNAVAILABLE` while Bookings is enabled, and `CRM_LIVE_ADAPTER_UNAVAILABLE` while Wine Club or Orders is enabled.
+The current booking **write/execution** and CRM factories have no production-ready live adapters. The registered
+OpenTable Sync connector is read-only and remains unverified against the pilot partner account, so it does not
+change this gate. Consequently, `npm run preflight:deployment` deliberately reports
+`BOOKING_LIVE_ADAPTER_UNAVAILABLE` while Bookings is enabled, and `CRM_LIVE_ADAPTER_UNAVAILABLE` while Wine Club
+or Orders is enabled.
 
 After the deployment winery and its `WinerySettings` row have been provisioned or imported, run this deliberate one-off command from the API image before the first final preflight and API start:
 
@@ -162,6 +168,36 @@ Content-Type: application/json
 ```
 
 The endpoint returns HTTP 200 with the persisted settings. Rerun `npm run preflight:deployment` after either method. Do not re-enable these modules for the pilot: doing so correctly makes provider preflight fail until live adapters are available.
+
+### Deploy the integration worker and Booking scheduler
+
+Booking reads run in a separate service using the same image and database as the API, with start command:
+
+```sh
+npm run start:worker
+```
+
+Start with one worker replica and `INTEGRATION_WORKER_ENABLED=true`. Keep
+`INTEGRATION_BOOKING_SCHEDULER_ENABLED=false` until the pilot connection has passed credential verification,
+bounded hydration, authority-policy review, manager activation, and manual incremental/reconciliation tests.
+The worker still processes explicitly queued jobs while the automatic scheduler is off.
+
+Before enabling automatic polling, configure the cadence, rolling Booking window, retry budget, and confirmed
+provider limits from [BOOKING_SYNC_SCHEDULER.md](BOOKING_SYNC_SCHEDULER.md). Production validation requires the
+worker and protected credential store whenever the Booking scheduler is enabled. Apply
+`20260818500000-create-integration-sync-scheduler.js` and
+`20260818600000-create-integration-operational-controls.js` first; then monitor the protected runtime, job, sync-run,
+and outbox views. Provider permit rows are database-coordinated, but one worker remains the simplest pilot
+operating model.
+
+The worker runtime now reports registered and enabled scheduler domains. Booking remains the only configured
+domain in this release, but its gate appears under the generic `schedulerConfigs` worker configuration and the
+runtime `schedulers` status. The existing Booking environment variable names remain unchanged.
+
+The operational-control routes do not require a live provider credential. Before enabling unattended polling,
+use them with test or mock jobs to verify manager authorization, stream pause/resume, dead-letter replay,
+idempotent request IDs, and the operations audit view. See
+[INTEGRATION_OPERATIONAL_CONTROLS.md](INTEGRATION_OPERATIONAL_CONTROLS.md).
 
 ## 3. Configure the web resource
 

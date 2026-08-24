@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
+    "start:worker": "node src/integrationWorker.js",
     "test": "jest",
     "test:unit": "jest --runInBand src/tests/unit",
     "test:int": "jest --runInBand src/tests/integration",

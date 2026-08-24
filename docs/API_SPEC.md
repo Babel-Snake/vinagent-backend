@@ -1739,3 +1739,34 @@ Manager/admin only. Idempotently captures the current winery-local daily active-
 ### `POST /api/usage/reconcile`
 
 Admin only. Optional `start`/`end` body fields follow the summary window rules. The effective start cannot precede the winery's `meteringStartedAt`. The response compares Task/Message source totals with ledger totals, refreshes gauges, and returns `409` when a discrepancy exists.
+
+## Canonical integration intelligence
+
+Mounted under `/api/integration-management`; all routes require manager/admin authority and derive the
+winery from authentication.
+
+Fact and bounded-context routes:
+
+- `GET /intelligence-fact-definitions`
+- `GET /intelligence-facts`
+- `POST /intelligence-facts/materialize`
+- `GET /intelligence-fact-runs`
+- `GET /customers/:memberId/relationship-context`
+- `GET /wine-club-allocations/:allocationId/fulfilment-context`
+- `GET /areas/:areaId/capacity-context`
+
+`POST /intelligence-facts/materialize` accepts a registered `materializerKey`, canonical `subjectId`,
+`maxAgeSeconds`, UUID `requestId`, and manager reason. Area capacity additionally requires ISO `from`
+and `to`, with bounded `maxBookings`.
+
+Health and activation routes:
+
+- `GET /integration-health`
+- `GET /connections/:id/domain-activations/:domain/preview`
+- `POST /connections/:id/domain-activations/:domain`
+- `POST /connections/:id/domain-activations/:domain/disable`
+
+Health filters are `domain`, `connectionId`, `maxAgeSeconds`, and `recentRunHours`. Activation accepts
+`scopeKey`, UUID `requestId`, fresh `previewToken`, reason, and
+`acknowledgeNonRetroactive: true`. Disable accepts `scopeKey` and reason. Booking continues to use its
+specialised `booking-activation-preview` and `booking-activation` endpoints.

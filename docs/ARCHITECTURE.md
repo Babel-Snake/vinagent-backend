@@ -18,6 +18,8 @@ The main subsystems are:
 * Public token-based self-service flows
 * Operational analytics over workflow, response, identity, and follow-up data
 * Billing-ready usage metering over immutable events, counters, gauges, and engagement aggregates
+* Provider-neutral integration projections for canonical Booking, Customer profile, Wine Club, Commerce,
+  Inventory, Fulfilment, Workforce, and Communication facts
 * Dashboard frontend (`frontend/`)
 * MySQL persistence via `Sequelize`
 
@@ -63,6 +65,7 @@ Current route groups:
 * `/api/calendar/*`
 * `/api/analytics/*`
 * `/api/usage/*` - aggregate usage reporting, activity heartbeat, snapshots, and reconciliation
+* `/api/integration-management/*` - manager-scoped canonical integration configuration, review, and shadow data
 
 Global middleware currently handles:
 
@@ -246,6 +249,137 @@ Execution gating is now feature-specific:
 * secure-link flows depend on `enableSecureLinks`
 * booking execution depends on `enableBookingModule`
 * order writeback depends on `enableOrdersModule`
+
+### 6.4 Tool-Agnostic Automation
+
+Manager-approved automation rules sit above provider adapters and normalized `IntegrationEvent` records. Rules bind to canonical event and capability names rather than vendors. The engine may call schema-validated read capabilities, evaluates an allowlisted deterministic condition tree, and creates an authoritative Task or Notice through the existing domain services.
+
+`AutomationRuleVersion` preserves every executable definition. `AutomationRun` provides rule/source idempotency and records the trigger, context, decision, and generated item. `AutomationRunStep` records each capability invocation. New integration events automatically evaluate matching active rules; previews perform the same enrichment and decision work without creating an action.
+
+The provider-neutral data foundation now adds first-class connections/scopes, sync and external-reference
+ledgers, versioned data-authority policies, lease-based integration jobs, and a transactional canonical-event
+outbox. Its worker runs as a separate process, is disabled by default, never overlaps poll cycles, and only
+executes explicitly registered job kinds. Manager/admin configuration and bounded queue visibility are exposed
+under `/api/integration-management`.
+
+The first registered connector slice adds protected per-connection credentials and the read-only
+`vinagent-booking-feed` contract. A manager can verify access, request bounded booking hydration, approve an
+authority/activation watermark, and then queue guarded incremental or completeness-checked reconciliation
+runs. The worker schema-validates and data-minimizes each page, stores connection-scoped source evidence, and
+projects typed Bookings, Items, Requirements, Area Links, and Status Events. Hydration remains non-actioning;
+only material post-activation changes can become eligible canonical events. A versioned native read-adapter
+boundary now validates every adapter page again at the worker, and a shared corpus proves equivalent facts
+through cursor/named-status and offset/numeric-status reference translators. The credential-gated OpenTable
+Sync implementation passes the corpus and is registered for reviewed onboarding, but real partner/pilot
+verification, a native OpenTable webhook adapter, and compatibility cutover remain pending. A conservative
+legacy compatibility inventory/backfill now creates only credential-less `PENDING` connection candidates,
+uses exact identity evidence for merges, and records ambiguity without changing runtime authority. A separate
+provider-neutral webhook boundary now accepts strict signed change hints through opaque, connection-scoped
+endpoints, stores no raw provider body, and durably dispatches Booking recovery through the normal incremental
+read path. The disabled-by-default Booking sync
+scheduler now discovers only connected, hydrated, polling-capable, manager-activated streams; transactionally
+queues incremental or reconciliation jobs; advances durable stream cadence; and uses a global provider permit
+row with minimum-spacing and fixed-window policy to bound provider traffic. See
+`docs/BOOKING_SYNC_SCHEDULER.md`.
+
+Worker scheduling is now domain-registered rather than Booking-wired. `IntegrationSchedulerRegistry` loads
+strict per-domain configuration, invokes schedulers in deterministic order, aggregates results, and isolates a
+runtime failure in one domain so other schedulers and the durable job/outbox paths still run. The shared
+provider schedule service owns transactional `(domain, providerKey)` spacing and fixed-window permits. Booking
+is the first registration; later canonical domains use the same orchestration contract. See
+`docs/INTEGRATION_SCHEDULER_REGISTRY.md`.
+
+Webhook verification is adapter-owned and verification material is encrypted separately from outbound
+connection credentials. `IntegrationWebhookEndpoint` provides rotation and lifecycle state;
+`IntegrationWebhookAdapterRegistry` normalizes provider notifications; and
+`IntegrationWebhookRecoveryRegistry` converts verified hints into canonical-domain recovery jobs. The hint
+itself is never automation-eligible. See `docs/PROVIDER_NEUTRAL_WEBHOOK_INTAKE.md`.
+
+The compatibility inventory is exposed as a manager dry-run/apply operation. Deterministic candidate keys and
+scopes make it idempotent; append-only operation history records apply commands; and `ProjectionIssue` rows
+surface weak identity or key collisions. Legacy JSON and derived `WinerySettings` remain the active
+compatibility source until the later per-winery/domain one-writer cutover. See
+`docs/LEGACY_INTEGRATION_BACKFILL.md`.
+
+Projection issues now expose a tenant-scoped manager review lifecycle with `OPEN`, `ACKNOWLEDGED`, `RESOLVED`,
+and `IGNORED` states. Resolution fails closed unless an issue-type handler is registered. The first handlers
+validate legacy connection mapping decisions and candidate ownership, record the decision transactionally,
+and deliberately leave connection/authority mutation to a later explicit operation. Every transition is
+request-idempotent and append-only audited without copying source evidence into audit snapshots. See
+`docs/PROJECTION_ISSUE_REVIEW.md`.
+
+Configuration writer ownership is now explicit in `IntegrationConfigurationAuthority`. A manager can prepare
+a sanitized rollback baseline before credentials exist, but canonical activation uses a fresh hashed preview
+and fails closed unless the domain's registered readiness contract passes. Booking is first: it requires live
+canonical activation, connected authority sources, no blocking issues, a winery default, a deployment gate,
+and the old reservation-write path disabled. Activation projects one-way compatibility metadata; legacy edits
+and canonical mutations that would invalidate the selected source are rejected until audited rollback. See
+`docs/INTEGRATION_CONFIGURATION_CUTOVER.md`.
+
+The Customer graph now starts from the existing canonical `Member` rather than a parallel customer table.
+Additive `CustomerContactPoint`, `CustomerAddress`, append-only `CustomerConsent`, and
+`CustomerLifecycleMilestone` rows support normalized identity and explainable history. A preview-hashed,
+idempotent manager backfill keeps Member authoritative, maps legacy contact/address fields, records marketing
+consent only as `UNKNOWN`, and emits a PII-free audit. Relationship reads expose drift and customer merge
+transfers/deduplicates the children transactionally. See `docs/CANONICAL_CUSTOMER_PROFILE.md`.
+
+The generic integration control plane now persists stream-level `ACTIVE`/`PAUSED` state, explicit terminal
+dead-letter timestamps, immutable job replay lineage, and append-only operator audit events. Manager/admin
+routes can pause or resume one stream, cancel queued work, create a new replay job from a terminal job, or
+requeue a failed canonical outbox delivery. Paused streams are excluded by scheduler queries and by the final
+transactional scheduling check; provider cursors, credentials, raw events, and copied job payloads are omitted
+from operational responses and audit snapshots. See `docs/INTEGRATION_OPERATIONAL_CONTROLS.md`.
+
+`booking.readiness.v1` is the first bounded context pack. It combines canonical booking preparation facts,
+privacy-safe requirement counts, primary operational scope, freshness, linked open work, exact
+freshness-safe canonical inventory commitments, and freshness-safe workforce coverage. Inventory and
+workforce return `UNKNOWN` unless their explicit mappings and complete current evidence exist. A manager-installable truffle template
+creates a draft rule that must be activated before it can create one designated human stock-check Task.
+An `AutomationResourceBinding` then owns the longer lifecycle: later Booking changes update declared fields on
+untouched work, cancellation cancels untouched work, and staff-edited/progressed Tasks are preserved and
+annotated. The binding is generic; the truffle Booking Task is the first registered lifecycle handler.
+
+See `docs/AUTOMATION_ENGINE.md` for the rule contract, APIs, safety model, and connector rollout plan.
+
+See `docs/WINERY_INTELLIGENCE_DATA_ARCHITECTURE.md` for the target connection control plane, canonical winery projections, cross-domain facts, synchronization rules, and phased provider-agnostic data build.
+
+See `docs/BOOKING_SHADOW_CONNECTOR.md` for the feed contract, credential controls, manager flow, persisted
+shadow state, and deployment gates.
+
+See `docs/CANONICAL_BOOKING_PROJECTION.md` for the typed projection, authority rules, sensitive-requirement
+handling, activation prerequisites, and non-retroactive eligibility contract.
+
+See `docs/BOOKING_LIVE_READINESS.md` for guarded polling, the readiness context contract, and the first
+manager-installed canonical booking rule.
+
+See `docs/AUTOMATION_RESOURCE_BINDINGS.md` for managed generated-work snapshots, human-override detection,
+and update/cancel/annotate policy.
+
+See `docs/CANONICAL_INVENTORY.md` for Product Variant and Stock Location mappings, strict shadow inventory
+projection, immutable snapshots, typed commitments, conservative available-to-promise, and the Booking demand
+bridge.
+
+See `docs/CANONICAL_FULFILMENT.md` for the privacy-safe Shipment/Package/Item graph, immutable Tracking
+Events, delivery-exception context, managed Task lifecycle, and deliberate shadow/activation boundary.
+
+See `docs/CANONICAL_WORKFORCE.md` for safe Staff Identity/User reconciliation, manager-owned role/skill
+mappings, strict roster/availability projection, complete-window coverage evidence, and managed Booking gap
+work.
+
+See `docs/CANONICAL_COMMUNICATIONS.md` for connection-scoped Message lineage, immutable delivery events,
+privacy-bounded manager history, deterministic current status, and the deliberate non-actioning boundary.
+
+The semantic layer now has registered append-only `IntelligenceFact` versions and audited materialization
+runs. Bounded Customer relationship, Club fulfilment, and Area capacity context packs join canonical domains
+without copying provider payloads or becoming actions. Temporal regression, expired consent, truncation,
+missing mappings, and stale evidence fail closed. See `docs/INTELLIGENCE_FACTS_AND_CONTEXTS.md`.
+
+Manager integration health aggregates mapping, freshness, issue, stream, activation, and fact quality by
+canonical domain. Non-Booking domains share a default-off activation contract; real providers require
+verified protected credentials while fixtures can exercise the same readiness and non-retroactive lifecycle
+in tests. A reusable connector conformance contract keeps provider pagination and payload differences behind
+the adapter boundary. See `docs/INTEGRATION_HEALTH_AND_ACTIVATION.md` and
+`docs/DOMAIN_CONNECTOR_CONFORMANCE.md`.
 
 ## 7. Project Coordination Layer
 

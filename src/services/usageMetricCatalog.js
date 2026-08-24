@@ -42,7 +42,7 @@ const METRIC_DEFINITIONS = Object.freeze({
 });
 
 const ROUTE_GROUPS = new Set([
-  'analytics', 'attachments', 'calendar', 'integration-events', 'members', 'notifications',
+  'analytics', 'attachments', 'automations', 'calendar', 'integration-events', 'members', 'notifications',
   'operational-areas', 'operations', 'projects', 'requests', 'staff', 'tasks', 'usage', 'users',
   'winery', 'other'
 ]);

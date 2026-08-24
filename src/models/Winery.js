@@ -11,6 +11,12 @@ module.exports = (sequelize, DataTypes) => {
             Winery.hasMany(models.User, { foreignKey: 'wineryId' });
             Winery.hasMany(models.Member, { foreignKey: 'wineryId' });
             Winery.hasMany(models.Message, { foreignKey: 'wineryId' });
+            Winery.hasMany(models.MessageDeliveryEvent, { foreignKey: 'wineryId', as: 'messageDeliveryEvents' });
+            Winery.hasMany(models.IntelligenceFact, { foreignKey: 'wineryId', as: 'intelligenceFacts' });
+            Winery.hasMany(models.IntelligenceFactMaterializationRun, {
+                foreignKey: 'wineryId',
+                as: 'intelligenceFactMaterializationRuns'
+            });
             Winery.hasMany(models.Task, { foreignKey: 'wineryId' });
             Winery.hasMany(models.Notice, { foreignKey: 'wineryId' });
             Winery.hasMany(models.NoticeTask, { foreignKey: 'wineryId' });
@@ -41,6 +47,76 @@ module.exports = (sequelize, DataTypes) => {
             Winery.hasMany(models.ProjectTaskDependency, { foreignKey: 'wineryId' });
             Winery.hasMany(models.ProjectAuditEvent, { foreignKey: 'wineryId' });
             Winery.hasMany(models.EmailSyncState, { foreignKey: 'wineryId' });
+            Winery.hasMany(models.WineryLocation, { foreignKey: 'wineryId', as: 'locations' });
+            Winery.hasMany(models.IntegrationConnection, { foreignKey: 'wineryId', as: 'integrationConnections' });
+            Winery.hasMany(models.IntegrationConnectionScope, { foreignKey: 'wineryId', as: 'integrationConnectionScopes' });
+            Winery.hasMany(models.IntegrationConnectionCapability, { foreignKey: 'wineryId', as: 'integrationConnectionCapabilities' });
+            Winery.hasMany(models.IntegrationSyncState, { foreignKey: 'wineryId', as: 'integrationSyncStates' });
+            Winery.hasMany(models.IntegrationSyncRun, { foreignKey: 'wineryId', as: 'integrationSyncRuns' });
+            Winery.hasMany(models.ExternalResourceReference, { foreignKey: 'wineryId', as: 'externalResourceReferences' });
+            Winery.hasMany(models.ExternalResourceObservation, { foreignKey: 'wineryId', as: 'externalResourceObservations' });
+            Winery.hasMany(models.ProjectionIssue, { foreignKey: 'wineryId', as: 'projectionIssues' });
+            Winery.hasMany(models.IntegrationConfigurationAuthority, {
+                foreignKey: 'wineryId',
+                as: 'integrationConfigurationAuthorities'
+            });
+            Winery.hasMany(models.DataAuthorityPolicySet, { foreignKey: 'wineryId', as: 'dataAuthorityPolicySets' });
+            Winery.hasMany(models.DataAuthorityPolicy, { foreignKey: 'wineryId', as: 'dataAuthorityPolicies' });
+            Winery.hasMany(models.DataAuthorityPolicySource, { foreignKey: 'wineryId', as: 'dataAuthorityPolicySources' });
+            Winery.hasMany(models.IntegrationJob, { foreignKey: 'wineryId', as: 'integrationJobs' });
+            Winery.hasMany(models.IntegrationCredential, { foreignKey: 'wineryId', as: 'integrationCredentials' });
+            Winery.hasMany(models.IntegrationDomainActivation, { foreignKey: 'wineryId', as: 'integrationDomainActivations' });
+            Winery.hasMany(models.Booking, { foreignKey: 'wineryId', as: 'canonicalBookings' });
+            Winery.hasMany(models.BookingAreaLink, { foreignKey: 'wineryId', as: 'bookingAreaLinks' });
+            Winery.hasMany(models.BookingItem, { foreignKey: 'wineryId', as: 'bookingItems' });
+            Winery.hasMany(models.BookingRequirement, { foreignKey: 'wineryId', as: 'bookingRequirements' });
+            Winery.hasMany(models.BookingStatusEvent, { foreignKey: 'wineryId', as: 'bookingStatusEvents' });
+            Winery.hasMany(models.CanonicalEventOutbox, { foreignKey: 'wineryId', as: 'canonicalEventOutbox' });
+            Winery.hasMany(models.CustomerMergeRedirect, { foreignKey: 'wineryId', as: 'customerMergeRedirects' });
+            Winery.hasMany(models.CustomerContactPoint, { foreignKey: 'wineryId', as: 'customerContactPoints' });
+            Winery.hasMany(models.CustomerAddress, { foreignKey: 'wineryId', as: 'customerAddresses' });
+            Winery.hasMany(models.CustomerConsent, { foreignKey: 'wineryId', as: 'customerConsents' });
+            Winery.hasMany(models.CustomerLifecycleMilestone, {
+                foreignKey: 'wineryId',
+                as: 'customerLifecycleMilestones'
+            });
+            Winery.hasMany(models.WineClubProgram, { foreignKey: 'wineryId', as: 'wineClubPrograms' });
+            Winery.hasMany(models.WineClubMembership, { foreignKey: 'wineryId', as: 'wineClubMemberships' });
+            Winery.hasMany(models.WineClubMembershipEvent, {
+                foreignKey: 'wineryId',
+                as: 'wineClubMembershipEvents'
+            });
+            Winery.hasMany(models.WineClubAllocation, { foreignKey: 'wineryId', as: 'wineClubAllocations' });
+            Winery.hasMany(models.WineClubAllocationItem, { foreignKey: 'wineryId', as: 'wineClubAllocationItems' });
+            Winery.hasMany(models.SalesOrder, { foreignKey: 'wineryId', as: 'salesOrders' });
+            Winery.hasMany(models.SalesOrderLine, { foreignKey: 'wineryId', as: 'salesOrderLines' });
+            Winery.hasMany(models.PaymentSummaryEvent, { foreignKey: 'wineryId', as: 'paymentSummaryEvents' });
+            Winery.hasMany(models.RefundSummary, { foreignKey: 'wineryId', as: 'refundSummaries' });
+            Winery.hasMany(models.BusinessEntityLink, { foreignKey: 'wineryId', as: 'businessEntityLinks' });
+            Winery.hasMany(models.BusinessEntityLinkEvidence, { foreignKey: 'wineryId', as: 'businessEntityLinkEvidence' });
+            Winery.hasMany(models.CustomerRollupRun, { foreignKey: 'wineryId', as: 'customerRollupRuns' });
+            Winery.hasMany(models.CustomerRelationshipRollup, { foreignKey: 'wineryId', as: 'customerRelationshipRollups' });
+            Winery.hasMany(models.CustomerMonetaryRollup, { foreignKey: 'wineryId', as: 'customerMonetaryRollups' });
+            Winery.hasMany(models.CustomerRollupContribution, { foreignKey: 'wineryId', as: 'customerRollupContributions' });
+            Winery.hasMany(models.LocationAreaLink, { foreignKey: 'wineryId', as: 'locationAreaLinks' });
+            Winery.hasMany(models.OperationalResourceLink, { foreignKey: 'wineryId', as: 'operationalResourceLinks' });
+            Winery.hasMany(models.StaffIdentity, { foreignKey: 'wineryId', as: 'staffIdentities' });
+            Winery.hasMany(models.RoleSkillDefinition, { foreignKey: 'wineryId', as: 'roleSkillDefinitions' });
+            Winery.hasMany(models.StaffRoleSkill, { foreignKey: 'wineryId', as: 'staffRoleSkills' });
+            Winery.hasMany(models.RosterShift, { foreignKey: 'wineryId', as: 'rosterShifts' });
+            Winery.hasMany(models.RosterShiftSkill, { foreignKey: 'wineryId', as: 'rosterShiftSkills' });
+            Winery.hasMany(models.StaffAvailabilityEvent, {
+                foreignKey: 'wineryId',
+                as: 'staffAvailabilityEvents'
+            });
+            Winery.hasMany(models.WorkforceCoverageObservation, {
+                foreignKey: 'wineryId',
+                as: 'workforceCoverageObservations'
+            });
+            Winery.hasMany(models.WorkforceDemandMapping, {
+                foreignKey: 'wineryId',
+                as: 'workforceDemandMappings'
+            });
             Winery.hasOne(models.WinerySettings, { foreignKey: 'wineryId', as: 'settings' });
             Winery.hasMany(models.WineryProduct, { foreignKey: 'wineryId', as: 'products' });
             Winery.hasMany(models.WineryContact, { foreignKey: 'wineryId', as: 'contacts' });

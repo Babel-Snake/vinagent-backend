@@ -2,6 +2,8 @@ const { Member, Task, Message, MemberActionToken, sequelize } = require('../mode
 const { Op } = require('sequelize');
 const { validate, createMemberSchema, updateMemberSchema, mergeMemberSchema } = require('../utils/validation');
 const AppError = require('../utils/AppError');
+const customerMergeRedirectService = require('../services/customerMergeRedirect.service');
+const customerProfileService = require('../services/customerProfile.service');
 
 const LOYALTY_RANK = { none: 0, bronze: 1, silver: 2, gold: 3, platinum: 4 };
 
@@ -231,6 +233,21 @@ async function deleteMember(req, res, next) {
     }
 }
 
+async function getRelationshipProfile(req, res, next) {
+    try {
+        const memberId = Number(req.params.id);
+        if (!Number.isSafeInteger(memberId) || memberId <= 0) {
+            throw new AppError('Customer ID must be a positive integer', 400, 'VALIDATION_ERROR');
+        }
+        res.json(await customerProfileService.getCustomerRelationshipProfile({
+            wineryId: req.user.wineryId,
+            memberId
+        }));
+    } catch (err) {
+        next(err);
+    }
+}
+
 async function mergeMember(req, res, next) {
     const transaction = await sequelize.transaction();
     try {
@@ -301,6 +318,23 @@ async function mergeMember(req, res, next) {
             MemberActionToken.update({ memberId: targetMemberId }, { where: { memberId: sourceMemberId, wineryId }, transaction })
         ]);
 
+        const profileTransfer = await customerProfileService.transferCustomerProfileForMerge({
+            wineryId,
+            sourceMemberId,
+            targetMemberId,
+            transaction
+        });
+
+        const redirectResult = await customerMergeRedirectService.recordCustomerMerge({
+            wineryId,
+            sourceMemberId,
+            targetMemberId,
+            mergedBy: req.user.id,
+            reason: 'manager_merge',
+            metadata: { fieldOverrides: Object.keys(overrides) },
+            transaction
+        });
+
         const mergeNote = `Merged customer ${sourceMember.firstName} ${sourceMember.lastName} (#${sourceMember.id}) into this record on ${new Date().toISOString()}.`;
         targetMember.notes = targetMember.notes ? `${targetMember.notes}\n\n${mergeNote}` : mergeNote;
         await targetMember.save({ transaction });
@@ -316,7 +350,10 @@ async function mergeMember(req, res, next) {
                 sourceMemberId,
                 reassignedTasks: taskCount,
                 reassignedMessages: messageCount,
-                reassignedTokens: tokenCount
+                reassignedTokens: tokenCount,
+                retargetedExternalReferences: redirectResult.retargetedExternalReferences,
+                collapsedRedirects: redirectResult.collapsedRedirects,
+                canonicalProfileTransfer: profileTransfer
             }
         });
     } catch (err) {
@@ -328,6 +365,7 @@ async function mergeMember(req, res, next) {
 module.exports = {
     listMembers,
     getMember,
+    getRelationshipProfile,
     searchMembers,
     createMember,
     updateMember,

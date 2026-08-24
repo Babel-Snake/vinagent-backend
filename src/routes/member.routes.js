@@ -10,6 +10,7 @@ router.get('/search', memberController.searchMembers);
 
 // Full CRUD (manager/admin only)
 router.get('/', requireRole(['manager', 'admin']), memberController.listMembers);
+router.get('/:id/relationship-profile', requireRole(['manager', 'admin']), memberController.getRelationshipProfile);
 router.get('/:id', requireRole(['manager', 'admin']), memberController.getMember);
 router.post('/', requireRole(['manager', 'admin']), memberController.createMember);
 router.post('/:id/merge', requireRole(['manager', 'admin']), memberController.mergeMember);

@@ -1,5 +1,28 @@
 # MySQL migration rehearsal
 
+## 20 August 2026 canonical intelligence result
+
+The existing development MySQL database was checked before migration: all migrations through
+`20260808000000-create-usage-metering.js` were applied and the 20 additive automation/integration
+migrations from `20260817000000` through `20260821800000` were pending.
+
+`npm run db:migrate` then applied all 20 in order with no retry, partial ledger entry, or schema error.
+This covered the automation engine, common integration/safety/credential/control planes, Booking, Customer,
+Wine Club, Commerce, Business Entity Links, Customer rollups, Catalogue/Inventory, Fulfilment, Workforce,
+Communication lineage, and Intelligence Facts. The run completed in 175 seconds.
+
+Verification after the migration:
+
+- the complete backend gate passed 137 suites and 596 tests;
+- ESLint and JavaScript syntax checks passed;
+- `git diff --check` passed (line-ending notices only);
+- migration status reported every migration as `up`;
+- model-level read smoke checks could query the new foundation/domain/fact tables.
+
+This was an additive forward rehearsal against the persistent development database. It did not run
+`db:migrate:undo:all` because that is destructive to the development data. A disposable-database full
+rollback/remigrate rehearsal remains part of the production procedure below.
+
 ## 11 July 2026 result
 
 The complete migration chain was exercised against disposable local MySQL 8 databases. Scratch databases and temporary dumps were removed after verification.

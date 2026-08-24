@@ -18,7 +18,33 @@ const {
 } = require('../utils/validation');
 const emailSyncService = require('../services/emailSync.service');
 const integrationConnectionService = require('../services/integrationConnection.service');
+const integrationConfigurationAuthorityService = require('../services/integrationConfigurationAuthority.service');
 const wineryConfigurationAccess = require('../services/wineryConfigurationAccess.service');
+
+const LEGACY_CONFIGURATION_DOMAINS = Object.freeze({
+    sms: ['COMMUNICATION'],
+    email: ['COMMUNICATION'],
+    pos: ['COMMERCE', 'CATALOG'],
+    crm: ['CUSTOMER'],
+    booking: ['BOOKING'],
+    delivery: ['FULFILMENT']
+});
+const LEGACY_CONFIGURATION_PROVIDER_FIELDS = Object.freeze({
+    sms: 'smsProvider',
+    email: 'emailProvider',
+    pos: 'posProvider',
+    crm: 'crmProvider',
+    booking: 'bookingProvider',
+    delivery: 'deliveryProvider'
+});
+
+function requestedLegacyDomains(body = {}) {
+    const keys = new Set(Object.keys(body.providerConnections || {}));
+    for (const key of Object.keys(LEGACY_CONFIGURATION_DOMAINS)) {
+        if (Object.prototype.hasOwnProperty.call(body, `${key}Provider`)) keys.add(key);
+    }
+    return [...keys].flatMap(key => LEGACY_CONFIGURATION_DOMAINS[key] || []);
+}
 
 const OVERVIEW_FIELDS = [
     'name',
@@ -334,8 +360,24 @@ exports.updatePolicyProfile = async (req, res, next) => {
 exports.updateIntegrationConfig = async (req, res, next) => {
     try {
         const wineryId = req.user.wineryId;
+        await integrationConfigurationAuthorityService.assertLegacyConfigurationWritable({
+            wineryId,
+            domains: requestedLegacyDomains(req.body)
+        });
         const payload = validate(wineryIntegrationSchema, req.body);
         const [config] = await WineryIntegrationConfig.findOrCreate({ where: { wineryId } });
+        const canonicalDomains = await integrationConfigurationAuthorityService.getCanonicalConfigurationDomains({
+            wineryId
+        });
+        const currentConnections = integrationConnectionService.parseJsonObject(config.providerConnections);
+        for (const [legacyDomain, mappedDomains] of Object.entries(LEGACY_CONFIGURATION_DOMAINS)) {
+            if (!mappedDomains.some(domain => canonicalDomains.includes(domain))) continue;
+            payload[LEGACY_CONFIGURATION_PROVIDER_FIELDS[legacyDomain]] =
+                config[LEGACY_CONFIGURATION_PROVIDER_FIELDS[legacyDomain]];
+            if (Object.prototype.hasOwnProperty.call(currentConnections, legacyDomain)) {
+                payload.providerConnections[legacyDomain] = currentConnections[legacyDomain];
+            }
+        }
         const providerConnections = integrationConnectionService.normalizeProviderConnections(payload, config);
 
         await config.update({
@@ -434,6 +476,10 @@ exports.updateAreaIntegrationConfig = async (req, res, next) => {
         const wineryId = req.user.wineryId;
         const areaId = Number(req.params.areaId);
         const payload = validate(areaIntegrationConfigSchema, req.body);
+        await integrationConfigurationAuthorityService.assertLegacyConfigurationWritable({
+            wineryId,
+            domains: requestedLegacyDomains(payload)
+        });
         await wineryConfigurationAccess.assertCanManageArea({
             areaId,
             wineryId,
@@ -467,6 +513,10 @@ exports.deleteAreaIntegrationDomain = async (req, res, next) => {
         if (!integrationConnectionService.AREA_DOMAINS.includes(domain)) {
             throw new AppError('Unsupported area integration domain', 400, 'VALIDATION_ERROR');
         }
+        await integrationConfigurationAuthorityService.assertLegacyConfigurationWritable({
+            wineryId,
+            domains: LEGACY_CONFIGURATION_DOMAINS[domain] || []
+        });
         await wineryConfigurationAccess.assertCanManageArea({
             areaId,
             wineryId,
@@ -538,6 +588,12 @@ exports.updateSettings = async (req, res, next) => {
     try {
         const wineryId = req.user.wineryId;
         const payload = validate(winerySettingsSchema, req.body);
+        if (payload.enableBookingModule === true) {
+            await integrationConfigurationAuthorityService.assertLegacyConfigurationWritable({
+                wineryId,
+                domains: ['BOOKING']
+            });
+        }
         const [settings] = await WinerySettings.findOrCreate({ where: { wineryId } });
         await settings.update(payload);
         res.json({ success: true, data: settings });
